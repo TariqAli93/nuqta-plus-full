@@ -1,0 +1,1244 @@
+<template>
+  <div class="page-shell">
+    <PageHeader
+      :title="isEdit ? 'تعديل منتج' : 'منتج جديد'"
+      :subtitle="isEdit ? 'تحديث معلومات المنتج' : 'إضافة منتج جديد إلى الكتالوج'"
+      :icon="isEdit ? 'mdi-package-variant' : 'mdi-package-variant-plus'"
+    >
+      <v-btn variant="text" prepend-icon="mdi-arrow-right" @click="router.back()"> رجوع </v-btn>
+    </PageHeader>
+
+    <v-card class="page-section">
+      <v-card-text>
+        <v-form ref="form" @submit.prevent="handleSubmit">
+          <v-row>
+            <!-- ─── Product type (inventory vs service) ─────────────────── -->
+            <v-col cols="12">
+              <div class="text-subtitle-2 mb-2">نوع المنتج</div>
+              <v-btn-toggle
+                v-model="formData.productType"
+                mandatory
+                divided
+                color="primary"
+                density="comfortable"
+              >
+                <v-btn value="inventory" prepend-icon="mdi-package-variant">منتج مخزني</v-btn>
+                <v-btn value="service" prepend-icon="mdi-room-service-outline">خدمة</v-btn>
+              </v-btn-toggle>
+              <v-alert
+                v-if="isService"
+                type="info"
+                variant="tonal"
+                density="comfortable"
+                class="mt-3 mb-0"
+              >
+                الخدمة لا تتطلب كمية ولا تؤثر على المخزون. يكفي إدخال الاسم وسعر البيع.
+              </v-alert>
+              <v-alert
+                v-if="isEdit && originalProductType === 'inventory' && isService"
+                type="warning"
+                variant="tonal"
+                density="comfortable"
+                class="mt-3 mb-0"
+              >
+                تنبيه: بعد تحويل هذا المنتج إلى خدمة، لن يُستخدم المخزون الحالي ولن يُخصم أي كمية
+                عند البيع.
+              </v-alert>
+            </v-col>
+
+            <v-col cols="12" md="6">
+              <v-text-field
+                data-testid="product-name"
+                v-model="formData.name"
+                label="اسم المنتج"
+                :rules="[rules.required]"
+              ></v-text-field>
+            </v-col>
+            <v-col cols="12" md="6">
+              <v-text-field
+                data-testid="product-sku"
+                v-model="formData.sku"
+                label="رمز المنتج"
+                :append-inner-icon="'mdi-refresh'"
+                @click:append-inner="regenerateSKU"
+              ></v-text-field>
+            </v-col>
+            <v-col cols="12" md="6">
+              <v-autocomplete
+                data-testid="product-category"
+                v-model="formData.categoryId"
+                v-model:search="categorySearch"
+                :items="categories"
+                item-title="name"
+                item-value="id"
+                label="التصنيف"
+                :custom-filter="customCategoryFilter"
+                clearable
+                variant="outlined"
+                autocomplete="off"
+                @keydown="handleCategoryKeydown"
+                @update:model-value="handleCategorySelect"
+              >
+                <template #no-data>
+                  <v-list-item
+                    v-if="
+                      categorySearch &&
+                      categorySearch.trim() &&
+                      !creatingCategory &&
+                      !isSearchValueInList
+                    "
+                    class="cursor-pointer"
+                    :class="{ 'bg-primary-lighten-5': true }"
+                    @click="handleCategoryEnter"
+                  >
+                    <template #prepend>
+                      <v-icon color="primary">mdi-plus-circle</v-icon>
+                    </template>
+                    <v-list-item-title class="text-primary font-weight-medium">
+                      اضغط Enter للإنشاء: "{{ categorySearch }}"
+                    </v-list-item-title>
+                  </v-list-item>
+                  <v-list-item v-else-if="creatingCategory">
+                    <template #prepend>
+                      <v-progress-circular
+                        indeterminate
+                        color="primary"
+                        size="20"
+                        width="2"
+                      ></v-progress-circular>
+                    </template>
+                    <v-list-item-title>
+                      جاري إنشاء التصنيف "{{ categorySearch }}"...
+                    </v-list-item-title>
+                  </v-list-item>
+                  <v-list-item v-else>
+                    <v-list-item-title class="text-grey">
+                      ابدأ بالكتابة للبحث أو إنشاء تصنيف جديد
+                    </v-list-item-title>
+                  </v-list-item>
+                </template>
+              </v-autocomplete>
+            </v-col>
+            <v-col cols="12" md="6">
+              <v-text-field
+                v-model="formData.barcode"
+                label="قراءة الباركود"
+                prepend-inner-icon="mdi-barcode-scan"
+                autofocus
+                clearable
+                class="mb-4"
+                @keyup.enter="handleBarcodeScan"
+              />
+            </v-col>
+            <v-col cols="12" md="6">
+              <v-text-field
+                data-testid="product-cost-price"
+                v-if="!isEdit || isAdmin || costPriceUnlocked"
+                :model-value="formatNumber(formData.costPrice)"
+                :suffix="formData.currency"
+                :label="isService ? 'تكلفة الخدمة (اختياري)' : 'سعر التكلفة'"
+                :rules="isService ? [] : [rules.required]"
+                :hint="
+                  isService
+                    ? 'اتركه فارغاً إن لم يكن للخدمة تكلفة — يُحسب الربح حينها من سعر البيع'
+                    : ''
+                "
+                :persistent-hint="isService"
+                @update:model-value="handleCostPriceInput"
+              ></v-text-field>
+              <v-text-field
+                v-else
+                :model-value="'*******'"
+                label="سعر التكلفة"
+                readonly
+                append-inner-icon="mdi-lock"
+                hint="يتطلب صلاحيات الأدمن للعرض"
+                persistent-hint
+                @click:append-inner="showAdminVerifyDialog = true"
+              ></v-text-field>
+            </v-col>
+            <v-col cols="12" md="6">
+              <v-text-field
+                data-testid="product-selling-price"
+                :model-value="formatNumber(formData.sellingPrice)"
+                label="سعر البيع"
+                :suffix="formData.currency"
+                :rules="[rules.required]"
+                @update:model-value="handleSellingPriceInput"
+              ></v-text-field>
+            </v-col>
+            <template v-if="agentPricingOn">
+              <v-col cols="12" md="6">
+                <v-text-field
+                  v-model.number="formData.wholesalePrice"
+                  type="number"
+                  label="سعر الجملة"
+                  :suffix="formData.currency"
+                  prepend-inner-icon="mdi-account-multiple"
+                  hint="السعر المطبّق تلقائياً لعملاء الجملة. اتركه فارغاً = سعر البيع العادي"
+                  persistent-hint
+                  clearable
+                ></v-text-field>
+              </v-col>
+              <v-col cols="12" md="6">
+                <v-text-field
+                  v-model.number="formData.agentPrice"
+                  type="number"
+                  label="سعر الوكيل"
+                  :suffix="formData.currency"
+                  prepend-inner-icon="mdi-account-star"
+                  hint="السعر المطبّق تلقائياً للوكلاء. اتركه فارغاً = سعر البيع العادي"
+                  persistent-hint
+                  clearable
+                ></v-text-field>
+              </v-col>
+            </template>
+            <v-col cols="12" md="3">
+              <v-select
+                data-testid="product-currency"
+                v-model="formData.currency"
+                :items="availableCurrencies"
+                label="العملة"
+                :rules="[rules.required]"
+                density="comfortable"
+              >
+                <template #prepend-inner>
+                  <v-icon>mdi-currency-usd</v-icon>
+                </template>
+              </v-select>
+            </v-col>
+            <v-col cols="12" md="3">
+              <v-text-field
+                data-testid="product-unit"
+                v-model="formData.unit"
+                label="الوحدة"
+                placeholder="piece"
+              ></v-text-field>
+            </v-col>
+            <v-col v-if="!isService" cols="12" md="3">
+              <v-text-field
+                v-model.number="formData.minStock"
+                label="الحد الأدنى للمخزون"
+                type="number"
+                hint="حد للتنبيه فقط — لا يغيّر الكمية"
+                persistent-hint
+              ></v-text-field>
+            </v-col>
+            <v-col v-if="!isService" cols="12" md="3">
+              <v-text-field
+                v-model.number="formData.lowStockThreshold"
+                label="عتبة التنبيه (منخفض المخزون)"
+                type="number"
+                hint="يُستخدم للتنبيه عن المخزون المنخفض في كل مخزن"
+                persistent-hint
+              ></v-text-field>
+            </v-col>
+            <v-col cols="12" md="3">
+              <v-select
+                data-testid="product-status"
+                v-model="formData.status"
+                :items="statusOptions"
+                label="الحالة"
+                :rules="[rules.required]"
+              ></v-select>
+            </v-col>
+            <v-col cols="12" md="3">
+              <v-switch
+                v-model="formData.isActive"
+                color="success"
+                density="comfortable"
+                hide-details
+                inset
+                :label="formData.isActive ? 'نشط' : 'غير نشط'"
+              ></v-switch>
+            </v-col>
+            <v-col v-if="!isService" cols="12" md="6">
+              <v-switch
+                v-model="formData.tracksExpiry"
+                color="primary"
+                density="comfortable"
+                hide-details
+                inset
+                label="هذا المنتج له تاريخ انتهاء"
+              ></v-switch>
+            </v-col>
+            <v-col cols="12">
+              <v-textarea
+                v-model="formData.description"
+                variant="outlined"
+                label="الوصف"
+                rows="3"
+              ></v-textarea>
+              <v-textarea
+                v-if="isService"
+                class="mt-2"
+                label="ملاحظات حول الخدمة (اختياري)"
+                hint="يمكنك استخدام هذا الحقل لتوضيح تفاصيل الخدمة، شروطها، أو أي تعليمات خاصة بالعملاء أو الموظفين."
+                persistent-hint
+              ></v-textarea>
+            </v-col>
+
+            <!-- ─── Product units (inventory only — services have no units) ─ -->
+            <v-col v-if="!isService" cols="12">
+              <v-expansion-panels class="mb-4">
+                <v-expansion-panel value="units">
+                  <v-expansion-panel-title>
+                    <div class="d-flex align-center gap-2">
+                      <v-icon>mdi-scale-balance</v-icon>
+                      <span>وحدات المنتج</span>
+                    </div>
+                  </v-expansion-panel-title>
+                  <v-expansion-panel-text class="pt-0">
+                    <v-card variant="outlined" class="pa-3">
+                      <div class="d-flex align-center mb-2">
+                        <v-icon class="me-2">mdi-scale-balance</v-icon>
+                        <span class="text-subtitle-1 font-weight-medium">وحدات المنتج</span>
+                      </div>
+                      <div class="text-caption text-medium-emphasis mb-3">
+                        يتم حفظ المخزون داخلياً حسب الوحدة الأساسية. أضف وحدات إضافية مثل
+                        <strong>درزن</strong> أو <strong>كارتون</strong> لتسهيل البيع والاستلام.
+                      </div>
+
+                      <v-row dense>
+                        <v-col cols="12" md="4">
+                          <v-text-field
+                            v-model="baseUnit.name"
+                            label="الوحدة الأساسية"
+                            placeholder="قطعة"
+                            variant="outlined"
+                            density="comfortable"
+                            hint="مثال: قطعة، علبة، متر، كيلو، لتر"
+                            persistent-hint
+                            :rules="[rules.required]"
+                          />
+                        </v-col>
+                        <v-col cols="12" md="8" class="d-flex align-center">
+                          <div class="text-caption text-medium-emphasis">
+                            الوحدة الأساسية هي الوحدة التي يُحسب بها المخزون. السعر الافتراضي للوحدة
+                            الأساسية هو
+                            <strong
+                              >{{ formatNumber(formData.sellingPrice) }}
+                              {{ formData.currency }}</strong
+                            >.
+                          </div>
+                        </v-col>
+                      </v-row>
+
+                      <v-divider class="my-3" />
+
+                      <div class="d-flex align-center justify-space-between mb-2">
+                        <div class="text-subtitle-2">وحدات إضافية</div>
+                        <v-btn
+                          prepend-icon="mdi-plus"
+                          variant="tonal"
+                          color="primary"
+                          size="small"
+                          @click="addUnit"
+                        >
+                          إضافة وحدة
+                        </v-btn>
+                      </div>
+
+                      <div
+                        v-if="extraUnits.length === 0"
+                        class="text-caption text-medium-emphasis mb-3"
+                      >
+                        لا توجد وحدات إضافية. اضغط "إضافة وحدة" لتعريف درزن أو كارتون.
+                      </div>
+
+                      <v-card
+                        v-for="(u, idx) in extraUnits"
+                        :key="`u-${idx}`"
+                        variant="tonal"
+                        color="surface"
+                        class="mb-3 pa-3"
+                      >
+                        <v-row dense align="center">
+                          <v-col cols="12" md="3">
+                            <v-text-field
+                              v-model="u.name"
+                              label="اسم الوحدة"
+                              placeholder="درزن"
+                              variant="outlined"
+                              density="comfortable"
+                              :error-messages="unitNameError(idx)"
+                            />
+                          </v-col>
+                          <v-col cols="6" md="2">
+                            <v-text-field
+                              v-model.number="u.conversionFactor"
+                              :label="`يعادل كم ${baseUnit.name || 'قطعة'}؟`"
+                              :suffix="baseUnit.name || 'قطعة'"
+                              type="number"
+                              min="1"
+                              variant="outlined"
+                              density="comfortable"
+                              :error-messages="unitFactorError(u)"
+                            />
+                          </v-col>
+                          <v-col cols="6" md="2">
+                            <v-text-field
+                              v-model.number="u.salePrice"
+                              label="سعر البيع لهذه الوحدة"
+                              type="number"
+                              min="0"
+                              variant="outlined"
+                              density="comfortable"
+                              :hint="suggestedSalePrice(u)"
+                              persistent-hint
+                            />
+                          </v-col>
+                          <v-col cols="6" md="2">
+                            <v-text-field
+                              v-model.number="u.costPrice"
+                              label="سعر الكلفة لهذه الوحدة"
+                              type="number"
+                              min="0"
+                              variant="outlined"
+                              density="comfortable"
+                              hint="اختياري"
+                              persistent-hint
+                            />
+                          </v-col>
+                          <v-col cols="6" md="2">
+                            <v-text-field
+                              v-model="u.barcode"
+                              label="الباركود"
+                              variant="outlined"
+                              density="comfortable"
+                              hint="اختياري"
+                              persistent-hint
+                            />
+                          </v-col>
+                          <v-col cols="12" md="1" class="d-flex justify-end">
+                            <v-btn
+                              icon="mdi-delete-outline"
+                              variant="text"
+                              color="error"
+                              size="small"
+                              title="حذف الوحدة"
+                              @click="removeUnit(idx)"
+                            />
+                          </v-col>
+                        </v-row>
+                        <v-row dense class="mt-1">
+                          <v-col cols="12" sm="4">
+                            <v-checkbox
+                              v-model="u.isDefaultSale"
+                              density="compact"
+                              hide-details
+                              color="primary"
+                              label="افتراضي للبيع"
+                              @update:model-value="(v) => onDefaultSaleToggle(idx, v)"
+                            />
+                          </v-col>
+                          <v-col cols="12" sm="4">
+                            <v-checkbox
+                              v-model="u.isDefaultPurchase"
+                              density="compact"
+                              hide-details
+                              color="primary"
+                              label="افتراضي للشراء"
+                              @update:model-value="(v) => onDefaultPurchaseToggle(idx, v)"
+                            />
+                          </v-col>
+                          <v-col cols="12" sm="4">
+                            <v-switch
+                              v-model="u.isActive"
+                              density="compact"
+                              hide-details
+                              inset
+                              color="success"
+                              :label="u.isActive ? 'نشط' : 'غير نشط'"
+                            />
+                          </v-col>
+                        </v-row>
+                      </v-card>
+                    </v-card>
+                  </v-expansion-panel-text>
+                </v-expansion-panel>
+              </v-expansion-panels>
+            </v-col>
+            <v-col v-if="!isEdit && !isService" cols="12">
+              <v-alert type="info" variant="tonal" density="comfortable" class="mb-0">
+                <div class="font-weight-medium">
+                  لإدخال كمية افتتاحية، استخدم صفحة إدارة المخزون بعد إنشاء المنتج.
+                </div>
+                <div class="text-caption">
+                  جميع تغييرات الكمية تتم عبر حركات المخزون (إضافة، خصم، نقل، تعديل) لضمان سجل تدقيق
+                  كامل.
+                </div>
+              </v-alert>
+            </v-col>
+          </v-row>
+
+          <v-divider class="my-4"></v-divider>
+
+          <div class="d-flex justify-end gap-2 flex-wrap">
+            <v-btn data-testid="product-cancel" variant="text" @click="$router.back()">إلغاء</v-btn>
+            <v-btn data-testid="product-save" type="submit" color="primary" prepend-icon="mdi-content-save" :loading="loading">
+              حفظ
+            </v-btn>
+          </div>
+        </v-form>
+      </v-card-text>
+    </v-card>
+
+    <!-- Add Opening Stock CTA (only after a successful create) -->
+    <v-dialog v-model="openingStockDialog" max-width="480" persistent>
+      <v-card>
+        <v-card-title class="d-flex align-center gap-2">
+          <v-icon color="primary">mdi-package-variant-plus</v-icon>
+          <span>إضافة مخزون افتتاحي</span>
+        </v-card-title>
+        <v-divider />
+        <v-card-text class="pt-4">
+          <p class="mb-2">
+            تم إنشاء المنتج بنجاح. هل تود إضافة كمية افتتاحية الآن من خلال حركة مخزون؟
+          </p>
+          <p class="text-caption text-medium-emphasis mb-0">
+            تسجيل الكمية كحركة مخزون يضمن وجود سجل تدقيق ويسمح بتحديد المخزن المستهدف.
+          </p>
+        </v-card-text>
+        <v-divider />
+        <v-card-actions class="pa-3">
+          <v-spacer />
+          <v-btn data-testid="product-opening-stock-skip" variant="text" @click="skipOpeningStock">لاحقاً</v-btn>
+          <v-btn data-testid="product-opening-stock-add" color="primary" prepend-icon="mdi-arrow-left" @click="goToAddOpeningStock">
+            إضافة مخزون
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Admin Verification Dialog -->
+    <v-dialog v-model="showAdminVerifyDialog" max-width="500" persistent>
+      <v-card>
+        <v-card-title class="d-flex align-center gap-2">
+          <v-icon color="primary">mdi-shield-lock</v-icon>
+          <span>تحقق من صلاحيات الأدمن</span>
+        </v-card-title>
+        <v-divider />
+        <v-card-text class="pt-4">
+          <v-alert type="info" variant="tonal" class="mb-4">
+            لعرض سعر التكلفة، يجب إدخال بيانات مستخدم أدمن
+          </v-alert>
+
+          <v-form ref="adminForm" @submit.prevent="verifyAdmin">
+            <v-text-field
+              v-model="adminCredentials.username"
+              label="اسم المستخدم"
+              variant="outlined"
+              density="comfortable"
+              prepend-inner-icon="mdi-account"
+              :rules="[rules.required]"
+              :error="adminVerifyError"
+              class="mb-2"
+            ></v-text-field>
+
+            <v-text-field
+              v-model="adminCredentials.password"
+              label="كلمة المرور"
+              type="password"
+              variant="outlined"
+              density="comfortable"
+              prepend-inner-icon="mdi-lock"
+              :rules="[rules.required]"
+              :error="adminVerifyError"
+              :error-messages="adminVerifyError ? adminVerifyErrorMessage : ''"
+            ></v-text-field>
+          </v-form>
+        </v-card-text>
+        <v-divider />
+        <v-card-actions class="pa-3">
+          <v-spacer />
+          <v-btn variant="text" :disabled="adminVerifyLoading" @click="closeAdminDialog">
+            إلغاء
+          </v-btn>
+          <v-btn
+            color="primary"
+            :loading="adminVerifyLoading"
+            prepend-icon="mdi-check"
+            @click="verifyAdmin"
+          >
+            تحقق
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted, computed, watch, nextTick } from 'vue';
+import { useRouter, useRoute } from 'vue-router';
+import { useProductStore } from '@/stores/product';
+import { useCategoryStore } from '@/stores/category';
+import { useAuthStore } from '@/stores/auth';
+import { useNotificationStore } from '@/stores/notification';
+import { useSettingsStore } from '@/stores/settings';
+import api from '@/plugins/axios';
+import PageHeader from '@/components/PageHeader.vue';
+
+const router = useRouter();
+const route = useRoute();
+const productStore = useProductStore();
+const categoryStore = useCategoryStore();
+const authStore = useAuthStore();
+const notification = useNotificationStore();
+const settingsStore = useSettingsStore();
+
+const form = ref(null);
+const adminForm = ref(null);
+const loading = ref(false);
+const categories = ref([]);
+const categorySearch = ref('');
+const creatingCategory = ref(false);
+
+// NOTE: stock quantity is intentionally NOT part of this form. It is managed
+// only via inventory movements (see Inventory.vue + /inventory/adjust). The
+// user is redirected to add opening stock immediately after creation.
+const formData = ref({
+  name: '',
+  sku: '',
+  barcode: '',
+  categoryId: null,
+  description: '',
+  // 'inventory' = stocked good (default, legacy behaviour); 'service' = a
+  // non-stocked offering (e.g. تصليح شاشة) with no quantity and no stock impact.
+  productType: 'inventory',
+  costPrice: settingsStore.settings?.defaultCostPrice || 0,
+  sellingPrice: settingsStore.settings?.defaultSellingPrice || 0,
+  // Wholesale/agent tier prices (تسعير الوكلاء). NULL = fall back to sellingPrice.
+  wholesalePrice: null,
+  agentPrice: null,
+  currency: settingsStore.settings?.defaultCurrency || 'IQD',
+  minStock: settingsStore.settings?.defaultMinStock || 0,
+  lowStockThreshold: settingsStore.settings?.defaultMinStock || 0,
+  unit: 'piece',
+  isActive: true,
+  status: settingsStore.settings?.defaultStatus || 'available',
+  tracksExpiry: false,
+});
+
+// True when the user is creating/editing a service. Drives which stock-related
+// fields are shown and whether quantity/stock validation applies.
+const isService = computed(() => formData.value.productType === 'service');
+// The product's type when the edit form first loaded — used to warn the user
+// that converting inventory → service abandons the existing stock.
+const originalProductType = ref('inventory');
+
+// ── Product units (base + extras) ────────────────────────────────────────
+// `baseUnit` is the unit stock is stored in (e.g. قطعة). `extraUnits` are
+// derived units (درزن, كارتون …) — each maps back to baseUnit via
+// conversionFactor. The form keeps them as separate refs so the UI stays
+// simple; on submit we merge them into a single `units` array on the
+// payload.
+const baseUnit = ref({
+  id: null,
+  name: 'قطعة',
+  isDefaultSale: true,
+  isDefaultPurchase: true,
+});
+const extraUnits = ref([]);
+
+const addUnit = () => {
+  extraUnits.value.push({
+    id: null,
+    name: '',
+    conversionFactor: null,
+    salePrice: null,
+    costPrice: null,
+    barcode: '',
+    isDefaultSale: false,
+    isDefaultPurchase: false,
+    isActive: true,
+  });
+};
+
+const removeUnit = (idx) => {
+  extraUnits.value.splice(idx, 1);
+};
+
+// Mark exactly one unit as default sale. Toggling another row off-and-on
+// transfers the flag (mirrors the UX users expect from radio-style defaults
+// without giving up the convenience of a checkbox per row).
+const onDefaultSaleToggle = (idx, value) => {
+  if (!value) return;
+  baseUnit.value.isDefaultSale = false;
+  extraUnits.value.forEach((u, i) => {
+    if (i !== idx) u.isDefaultSale = false;
+  });
+};
+const onDefaultPurchaseToggle = (idx, value) => {
+  if (!value) return;
+  baseUnit.value.isDefaultPurchase = false;
+  extraUnits.value.forEach((u, i) => {
+    if (i !== idx) u.isDefaultPurchase = false;
+  });
+};
+
+// Per-row validation surfaced inline so the user sees the error next to
+// the field — keeps the form's submit button enabled but blocks save when
+// the form is invalid.
+const unitNameError = (idx) => {
+  const u = extraUnits.value[idx];
+  if (!u) return [];
+  const name = String(u.name || '').trim();
+  if (!name) return [];
+  if (name === String(baseUnit.value.name || '').trim()) {
+    return ['اسم الوحدة لا يجوز أن يساوي الوحدة الأساسية'];
+  }
+  const dup = extraUnits.value.some(
+    (other, i) => i !== idx && String(other.name || '').trim() === name
+  );
+  if (dup) return ['اسم الوحدة مكرر'];
+  return [];
+};
+
+const unitFactorError = (u) => {
+  if (
+    u?.conversionFactor === null ||
+    u?.conversionFactor === undefined ||
+    u?.conversionFactor === ''
+  ) {
+    return [];
+  }
+  const factor = Number(u.conversionFactor);
+  if (!Number.isFinite(factor) || factor <= 0) return ['يجب أن يكون أكبر من صفر'];
+  if (factor === 1) return ['عامل التحويل = 1 محجوز للوحدة الأساسية'];
+  return [];
+};
+
+// Hint shown under the salePrice field — the price the user would get if
+// they let the system fall back to base * factor.
+const suggestedSalePrice = (u) => {
+  const factor = Number(u?.conversionFactor) || 0;
+  const base = Number(formData.value.sellingPrice) || 0;
+  if (!factor || !base) return '';
+  if (u?.salePrice != null && u?.salePrice !== '') return '';
+  return `الافتراضي: ${formatNumber(base * factor)} ${formData.value.currency}`;
+};
+
+const buildUnitsPayload = () => {
+  const list = [];
+  const baseName = String(baseUnit.value.name || '').trim() || 'قطعة';
+  list.push({
+    id: baseUnit.value.id || undefined,
+    name: baseName,
+    conversionFactor: 1,
+    isBase: true,
+    isDefaultSale: !!baseUnit.value.isDefaultSale,
+    isDefaultPurchase: !!baseUnit.value.isDefaultPurchase,
+    isActive: true,
+  });
+  for (const u of extraUnits.value) {
+    const name = String(u.name || '').trim();
+    const factor = Number(u.conversionFactor);
+    if (!name || !factor || factor <= 0) continue;
+    list.push({
+      id: u.id || undefined,
+      name,
+      conversionFactor: factor,
+      isBase: false,
+      isDefaultSale: !!u.isDefaultSale,
+      isDefaultPurchase: !!u.isDefaultPurchase,
+      isActive: u.isActive !== false,
+      barcode: u.barcode ? String(u.barcode).trim() : null,
+      salePrice:
+        u.salePrice === '' || u.salePrice === null || u.salePrice === undefined
+          ? null
+          : Number(u.salePrice),
+      costPrice:
+        u.costPrice === '' || u.costPrice === null || u.costPrice === undefined
+          ? null
+          : Number(u.costPrice),
+    });
+  }
+  // Backstop: if the user didn't tick any "افتراضي للبيع/الشراء", make the
+  // base unit the default for both so the backend never rejects the payload.
+  if (!list.some((u) => u.isDefaultSale)) list[0].isDefaultSale = true;
+  if (!list.some((u) => u.isDefaultPurchase)) list[0].isDefaultPurchase = true;
+  return list;
+};
+
+// Admin verification state
+const showAdminVerifyDialog = ref(false);
+const adminCredentials = ref({
+  username: '',
+  password: '',
+});
+const adminVerifyLoading = ref(false);
+const adminVerifyError = ref(false);
+const adminVerifyErrorMessage = ref('');
+const costPriceUnlocked = ref(false);
+
+const statusOptions = [
+  { title: 'متاح', value: 'available' },
+  { title: 'نفذ', value: 'out_of_stock' },
+  { title: 'متوقف', value: 'discontinued' },
+];
+
+const isEdit = computed(() => !!route.params.id);
+// Cost-price field is unlocked-by-default for admins (or anyone who can
+// delete products — the closest existing capability). Backend re-validates
+// the actual save, so this only affects the UI affordance.
+const isAdmin = computed(() => authStore.hasPermission('products:delete'));
+const canAdjustInventory = computed(() => authStore.hasPermission?.('inventory:adjust') === true);
+const agentPricingOn = computed(() => authStore.hasFeature('agentPricing'));
+
+// Post-create CTA: prompt to add opening stock via the inventory flow.
+const openingStockDialog = ref(false);
+const createdProduct = ref(null);
+
+// Computed property for available currencies
+const availableCurrencies = computed(() => settingsStore.availableCurrencies);
+
+const rules = {
+  required: (v) => !!v || 'هذا الحقل مطلوب',
+};
+
+// دالة لتحويل النص العربي إلى SKU
+const generateSKU = (name) => {
+  if (!name) return '';
+
+  // خريطة تحويل الأحرف العربية إلى إنجليزية
+  const arabicToEnglish = {
+    ا: 'a',
+    أ: 'a',
+    إ: 'a',
+    آ: 'a',
+    ب: 'b',
+    ت: 't',
+    ث: 'th',
+    ج: 'j',
+    ح: 'h',
+    خ: 'kh',
+    د: 'd',
+    ذ: 'dh',
+    ر: 'r',
+    ز: 'z',
+    س: 's',
+    ش: 'sh',
+    ص: 's',
+    ض: 'd',
+    ط: 't',
+    ظ: 'z',
+    ع: 'a',
+    غ: 'gh',
+    ف: 'f',
+    ق: 'q',
+    ك: 'k',
+    ل: 'l',
+    م: 'm',
+    ن: 'n',
+    ه: 'h',
+    و: 'w',
+    ي: 'y',
+    ى: 'y',
+    ة: 'h',
+    ء: 'a',
+  };
+
+  let sku = name
+    .toLowerCase()
+    .trim()
+    // تحويل الأحرف العربية
+    .split('')
+    .map((char) => arabicToEnglish[char] || char)
+    .join('')
+    // إزالة المسافات والرموز وتحويلها إلى شرطات
+    .replace(/[^a-z0-9]/g, '-')
+    // إزالة الشرطات المتتالية
+    .replace(/-+/g, '-')
+    // إزالة الشرطات من البداية والنهاية
+    .replace(/^-|-$/g, '');
+
+  return sku.toUpperCase();
+};
+
+// دالة تجديد SKU يدوياً
+const regenerateSKU = () => {
+  if (formData.value.name) {
+    formData.value.sku = generateSKU(formData.value.name);
+  }
+};
+
+const handleSubmit = async () => {
+  const { valid } = await form.value.validate();
+  if (!valid) return;
+
+  // Inline validation for the units section — keeps the user in the form
+  // with a precise error rather than the generic "حقل مطلوب" toast.
+  for (let i = 0; i < extraUnits.value.length; i++) {
+    if (unitNameError(i).length > 0) {
+      notification.error('راجع وحدات المنتج: ' + unitNameError(i)[0]);
+      return;
+    }
+    const fe = unitFactorError(extraUnits.value[i]);
+    if (fe.length > 0) {
+      notification.error('راجع وحدات المنتج: ' + fe[0]);
+      return;
+    }
+  }
+
+  loading.value = true;
+  try {
+    const payload = { ...formData.value, units: buildUnitsPayload() };
+    if (isEdit.value) {
+      await productStore.updateProduct(route.params.id, payload);
+      router.push({ name: 'Products' });
+    } else {
+      const response = await productStore.createProduct(payload);
+      // The store returns the raw axios response; the product payload is at
+      // `response.data` (or `response` itself when an interceptor unwraps it).
+      const newProduct = response?.data?.data || response?.data || response;
+      // Services are never stocked — skip the opening-stock prompt for them.
+      if (!isService.value && canAdjustInventory.value && newProduct?.id) {
+        createdProduct.value = newProduct;
+        openingStockDialog.value = true;
+      } else {
+        router.push({ name: 'Products' });
+      }
+    }
+  } catch (error) {
+    // Error already handled by notification in store
+  } finally {
+    loading.value = false;
+  }
+};
+
+// Route the user to the inventory page with the new product preselected so
+// they can record an opening-stock movement.
+const goToAddOpeningStock = () => {
+  const id = createdProduct.value?.id;
+  openingStockDialog.value = false;
+  router.push({
+    name: 'Inventory',
+    query: id ? { productId: id, action: 'adjust' } : {},
+  });
+};
+
+const skipOpeningStock = () => {
+  openingStockDialog.value = false;
+  router.push({ name: 'Products' });
+};
+
+const handleBarcodeScan = () => {
+  const code = formData.value?.barcode?.trim();
+  if (!code) return;
+};
+
+// فلترة مخصصة للتصنيفات
+const customCategoryFilter = (item, queryText) => {
+  if (!queryText) return true;
+  if (!item) return false;
+  // Vuetify v-autocomplete يمرر item ككائن يحتوي على raw أو مباشرة ككائن
+  const category = item.raw || item;
+  if (!category || !category.name) return false;
+  const searchText = queryText.toLowerCase();
+  const itemText = category.name.toLowerCase();
+  return itemText.includes(searchText);
+};
+
+// التحقق من وجود القيمة المدخلة في القائمة
+const isSearchValueInList = computed(() => {
+  if (!categorySearch.value || !categorySearch.value.trim()) return false;
+  const searchValue = categorySearch.value.trim().toLowerCase();
+  return categories.value.some((cat) => cat.name.toLowerCase() === searchValue);
+});
+
+// معالجة اختيار التصنيف من القائمة
+const handleCategorySelect = (value) => {
+  if (value && typeof value === 'object' && value.name) {
+    // إذا كان value كائن (عند استخدام return-object)
+    formData.value.categoryId = value.id;
+    categorySearch.value = value.name;
+  } else if (value && typeof value === 'number') {
+    // إذا كان value رقم (ID)
+    const selectedCategory = categories.value.find((cat) => cat.id === value);
+    if (selectedCategory) {
+      categorySearch.value = selectedCategory.name;
+    }
+  } else if (!value) {
+    // عند مسح القيمة
+    categorySearch.value = '';
+  }
+};
+
+// معالجة الضغط على المفاتيح في حقل التصنيف
+const handleCategoryKeydown = async (event) => {
+  if (event.key !== 'Enter') return;
+
+  const searchValue = categorySearch.value?.trim();
+  if (!searchValue) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  // التحقق من أن القيمة غير موجودة في القائمة
+  const exists = categories.value.some(
+    (cat) => cat.name.toLowerCase() === searchValue.toLowerCase()
+  );
+
+  if (exists) {
+    // إذا كانت موجودة، حددها
+    const foundCategory = categories.value.find(
+      (cat) => cat.name.toLowerCase() === searchValue.toLowerCase()
+    );
+    if (foundCategory) {
+      formData.value.categoryId = foundCategory.id;
+      // عرض اسم التصنيف في حقل البحث
+      categorySearch.value = foundCategory.name;
+    }
+    return;
+  }
+
+  // إنشاء التصنيف الجديد
+  if (creatingCategory.value) return; // منع الطلبات المتعددة
+
+  creatingCategory.value = true;
+  try {
+    // إنشاء التصنيف الجديد
+    const createResponse = await categoryStore.createCategory({ name: searchValue });
+    // استخراج بيانات التصنيف من الاستجابة
+    const newCategory = createResponse.data?.data || createResponse.data;
+
+    if (!newCategory || !newCategory.id) {
+      throw new Error('فشل إنشاء التصنيف');
+    }
+
+    // إعادة تحميل قائمة التصنيفات بالكامل من الـ store
+    await categoryStore.fetchCategories();
+
+    // تحديث القائمة المحلية من الـ store
+    categories.value = Array.isArray(categoryStore.categories) ? [...categoryStore.categories] : [];
+
+    // تحديد التصنيف الجديد
+    formData.value.categoryId = newCategory.id;
+
+    // عرض اسم التصنيف في حقل البحث بدلاً من مسحه
+    categorySearch.value = newCategory.name;
+
+    // استخدام nextTick لضمان تحديث المكون بشكل صحيح
+    await nextTick();
+
+    // التأكد من أن القيمة محددة بشكل صحيح
+    if (formData.value.categoryId !== newCategory.id) {
+      formData.value.categoryId = newCategory.id;
+    }
+  } catch (err) {
+    // Error handled by notification in store
+    console.error('Error creating category:', err);
+  } finally {
+    creatingCategory.value = false;
+  }
+};
+
+// Admin verification
+const verifyAdmin = async () => {
+  const { valid } = await adminForm.value.validate();
+  if (!valid) return;
+
+  adminVerifyLoading.value = true;
+  adminVerifyError.value = false;
+  adminVerifyErrorMessage.value = '';
+
+  try {
+    const response = await api.post('/auth/login', {
+      username: adminCredentials.value.username,
+      password: adminCredentials.value.password,
+    });
+
+    // Accept any role with global access — the legacy single 'admin' role
+    // is a synonym of 'global_admin', and both unlock the cost price field.
+    const verifierRole = response.data?.user?.role;
+    if (verifierRole === 'admin' || verifierRole === 'global_admin') {
+      costPriceUnlocked.value = true;
+      notification.success('تم التحقق بنجاح');
+      closeAdminDialog();
+    } else {
+      adminVerifyError.value = true;
+      adminVerifyErrorMessage.value = 'المستخدم ليس لديه صلاحيات أدمن';
+    }
+  } catch (err) {
+    adminVerifyError.value = true;
+    adminVerifyErrorMessage.value = err.response?.data?.message || 'بيانات تسجيل الدخول غير صحيحة';
+  } finally {
+    adminVerifyLoading.value = false;
+  }
+};
+
+const closeAdminDialog = () => {
+  showAdminVerifyDialog.value = false;
+  adminCredentials.value = {
+    username: '',
+    password: '',
+  };
+  adminVerifyError.value = false;
+  adminVerifyErrorMessage.value = '';
+  adminForm.value?.resetValidation();
+};
+
+// مراقبة تغيير اسم المنتج وتوليد SKU تلقائياً
+watch(
+  () => formData.value.name,
+  (newName) => {
+    if (newName && !isEdit.value) {
+      // فقط للمنتجات الجديدة
+      formData.value.sku = generateSKU(newName);
+    }
+  }
+);
+
+// مراقبة تغيير categoryId وتحديث categorySearch تلقائياً
+watch(
+  () => formData.value.categoryId,
+  (newCategoryId) => {
+    if (newCategoryId) {
+      const selectedCategory = categories.value.find((cat) => cat.id === newCategoryId);
+      if (selectedCategory && categorySearch.value !== selectedCategory.name) {
+        categorySearch.value = selectedCategory.name;
+      }
+    } else if (!newCategoryId && categorySearch.value) {
+      // عند مسح التصنيف، امسح البحث أيضاً
+      categorySearch.value = '';
+    }
+  }
+);
+
+onMounted(async () => {
+  // تحميل إعدادات العملة
+  try {
+    await settingsStore.fetchCurrencySettings();
+    // تعيين العملة الافتراضية إذا لم تكن موجودة
+    if (!formData.value.currency || !availableCurrencies.value.includes(formData.value.currency)) {
+      const defaultCurrency = settingsStore.settings?.defaultCurrency || 'IQD';
+      formData.value.currency = availableCurrencies.value.includes(defaultCurrency)
+        ? defaultCurrency
+        : availableCurrencies.value[0] || defaultCurrency;
+    }
+  } catch {
+    // استخدام القيم الافتراضية
+  }
+
+  await categoryStore.fetchCategories();
+  // تحديث القائمة المحلية من الـ store
+  categories.value = Array.isArray(categoryStore.categories) ? [...categoryStore.categories] : [];
+
+  if (isEdit.value) {
+    loading.value = true;
+    try {
+      await productStore.fetchProduct(route.params.id);
+      // Strip stock-like derived fields from the loaded product before binding
+      // it to the form. The backend rejects these keys on update with the
+      // STOCK_UPDATE_NOT_ALLOWED_ON_PRODUCT error code.
+      const {
+        stock: _stock,
+        totalStock: _totalStock,
+        warehouseStock: _warehouseStock,
+        quantity: _qty1,
+        qty: _qty2,
+        stockQuantity: _qty3,
+        currentStock: _qty4,
+        inStock: _qty5,
+        units: loadedUnits,
+        ...metadataOnly
+      } = productStore.currentProduct || {};
+      formData.value = {
+        ...formData.value,
+        ...metadataOnly,
+        // Defaults for newly added metadata fields if absent on legacy products.
+        unit: metadataOnly.unit || formData.value.unit,
+        isActive: metadataOnly.isActive !== false,
+        // Legacy products predate the type column — treat them as inventory.
+        productType: metadataOnly.productType || 'inventory',
+      };
+      // Remember the loaded type so we can warn on an inventory → service switch.
+      originalProductType.value = formData.value.productType;
+
+      // Hydrate the units section from the loaded product. Legacy products
+      // come back with no units; we leave the default base unit in place.
+      if (Array.isArray(loadedUnits) && loadedUnits.length > 0) {
+        const base = loadedUnits.find((u) => u.isBase) || loadedUnits[0];
+        baseUnit.value = {
+          id: base.id,
+          name: base.name || 'قطعة',
+          isDefaultSale: !!base.isDefaultSale,
+          isDefaultPurchase: !!base.isDefaultPurchase,
+        };
+        extraUnits.value = loadedUnits
+          .filter((u) => !u.isBase && u.id !== base.id)
+          .map((u) => ({
+            id: u.id,
+            name: u.name || '',
+            conversionFactor: Number(u.conversionFactor) || null,
+            salePrice: u.salePrice == null ? null : Number(u.salePrice),
+            costPrice: u.costPrice == null ? null : Number(u.costPrice),
+            barcode: u.barcode || '',
+            isDefaultSale: !!u.isDefaultSale,
+            isDefaultPurchase: !!u.isDefaultPurchase,
+            isActive: u.isActive !== false,
+          }));
+      }
+
+      // التأكد من أن العملة المحددة متاحة
+      if (!availableCurrencies.value.includes(formData.value.currency)) {
+        const defaultCurrency = settingsStore.settings?.defaultCurrency || 'IQD';
+        formData.value.currency = availableCurrencies.value.includes(defaultCurrency)
+          ? defaultCurrency
+          : availableCurrencies.value[0] || defaultCurrency;
+      }
+
+      // عند التعديل، عرض اسم التصنيف في حقل البحث
+      if (formData.value.categoryId) {
+        // استخدام nextTick لضمان تحميل categories أولاً
+        await nextTick();
+        const selectedCategory = categories.value.find(
+          (cat) => cat.id === formData.value.categoryId
+        );
+        if (selectedCategory) {
+          categorySearch.value = selectedCategory.name;
+        }
+      }
+    } catch {
+      // Error handled by notification
+    } finally {
+      loading.value = false;
+    }
+  }
+});
+
+// إضافة دوال تنسيق الأرقام
+const formatNumber = (value) => {
+  if (!value && value !== 0) return '';
+  // إزالة أي فواصل موجودة
+  const numStr = String(value).replace(/,/g, '');
+  // التحقق من أن القيمة رقم (يدعم الأرقام العشرية)
+  if (!/^\d*\.?\d*$/.test(numStr)) return value;
+  // تقسيم الرقم إلى جزء صحيح وجزء عشري
+  const parts = numStr.split('.');
+  // تنسيق الجزء الصحيح مع الفواصل (بعد كل 3 أرقام)
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  // إرجاع الرقم المنسق
+  return parts.join('.');
+};
+
+const parseNumber = (value) => {
+  if (!value) return 0;
+  // إزالة الفواصل وتحويل إلى رقم
+  const numStr = String(value).replace(/,/g, '');
+  const num = parseFloat(numStr);
+  return isNaN(num) ? 0 : num;
+};
+
+const handleCostPriceInput = (value) => {
+  const num = parseNumber(value);
+  formData.value.costPrice = num;
+};
+
+const handleSellingPriceInput = (value) => {
+  const num = parseNumber(value);
+  formData.value.sellingPrice = num;
+};
+</script>

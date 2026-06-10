@@ -1,0 +1,1210 @@
+import { getDb, getPool } from '../db.js';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import {
+  productStock,
+  stockMovements,
+  products,
+  productStockEntries,
+  saleItemStockEntries,
+  warehouses,
+  branches,
+  users,
+} from '../models/index.js';
+import * as schema from '../models/index.js';
+import { NotFoundError, ValidationError } from '../utils/errors.js';
+import { eq, and, ne, desc, sql, inArray } from 'drizzle-orm';
+import alertBus from '../events/alertBus.js';
+import { resolveUnitSnapshot } from './productUnitService.js';
+import accountingPeriodService from './accountingPeriodService.js';
+
+/**
+ * Best-effort: resolve the open accounting period for a warehouse's branch so
+ * manual stock movements (adjustments/transfers) carry the period link. Never
+ * throws — stock ops are not hard-gated on a period.
+ */
+async function resolveWarehousePeriodId(warehouseId) {
+  try {
+    const db = await getDb();
+    const [wh] = await db
+      .select({ branchId: warehouses.branchId })
+      .from(warehouses)
+      .where(eq(warehouses.id, warehouseId))
+      .limit(1);
+    return await accountingPeriodService.resolvePeriodIdForWrite(null, wh?.branchId || null, {
+      require: false,
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Simple multi-branch / multi-warehouse inventory service.
+ * All stock mutations go through this module so movements are always recorded
+ * and stock rows never diverge from the movement log.
+ */
+
+/** Run a callback inside a PostgreSQL transaction. */
+async function withTransaction(callback) {
+  const pool = await getPool();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const txDb = drizzle(client, { schema });
+    const result = await callback(txDb);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Resolve which of the given sale items reference a SERVICE product. Service
+ * products are never stock-checked, deducted, or restocked, so every stock
+ * path (validate, deduct, restore) skips them. Returns a Set of productIds.
+ */
+async function fetchServiceProductIds(tx, items) {
+  const ids = [...new Set((items || []).map((i) => i.productId).filter(Boolean))];
+  if (ids.length === 0) return new Set();
+  const rows = await tx
+    .select({ id: products.id })
+    .from(products)
+    .where(and(inArray(products.id, ids), eq(products.productType, 'service')));
+  return new Set(rows.map((r) => r.id));
+}
+
+/**
+ * Lock the product_stock row for (product, warehouse), creating it if missing.
+ * Returns the current quantity. Must be called inside a transaction.
+ */
+async function lockOrCreateStockRow(tx, productId, warehouseId) {
+  const [existing] = await tx
+    .select()
+    .from(productStock)
+    .where(and(eq(productStock.productId, productId), eq(productStock.warehouseId, warehouseId)))
+    .for('update')
+    .limit(1);
+
+  if (existing) return existing;
+
+  // Insert; on conflict (another tx inserted first), select the row.
+  await tx
+    .insert(productStock)
+    .values({ productId, warehouseId, quantity: 0 })
+    .onConflictDoNothing({
+      target: [productStock.productId, productStock.warehouseId],
+    });
+
+  const [row] = await tx
+    .select()
+    .from(productStock)
+    .where(and(eq(productStock.productId, productId), eq(productStock.warehouseId, warehouseId)))
+    .for('update')
+    .limit(1);
+  return row;
+}
+
+/**
+ * Apply a stock change inside an active transaction.
+ * Centralised so every caller records a movement and keeps product_stock in sync.
+ */
+async function applyStockChangeTx(
+  tx,
+  {
+    productId,
+    warehouseId,
+    quantityChange, // positive = in, negative = out — ALWAYS in base units
+    movementType,
+    referenceType = null,
+    referenceId = null,
+    notes = null,
+    userId = null,
+    allowNegative = false,
+    // Optional unit snapshot — recorded on the movement row for display only.
+    unitId = null,
+    unitName = null,
+    unitQuantity = null,
+    // Optional accounting period link (manual adjustments/transfers stamp it).
+    accountingPeriodId = null,
+  }
+) {
+  if (!productId || !warehouseId) {
+    throw new ValidationError('productId and warehouseId are required');
+  }
+  if (!Number.isInteger(quantityChange) || quantityChange === 0) {
+    throw new ValidationError('quantityChange must be a non-zero integer');
+  }
+
+  const current = await lockOrCreateStockRow(tx, productId, warehouseId);
+  const quantityBefore = current.quantity;
+  const quantityAfter = quantityBefore + quantityChange;
+
+  if (!allowNegative && quantityAfter < 0) {
+    const [product] = await tx
+      .select({ name: products.name })
+      .from(products)
+      .where(eq(products.id, productId))
+      .limit(1);
+    throw new ValidationError(
+      `Insufficient stock for ${product?.name || 'product'}. Available: ${quantityBefore}, required: ${-quantityChange}`
+    );
+  }
+
+  await tx
+    .update(productStock)
+    .set({ quantity: quantityAfter, updatedAt: new Date() })
+    .where(eq(productStock.id, current.id));
+
+  await tx.insert(stockMovements).values({
+    productId,
+    warehouseId,
+    movementType,
+    quantityChange,
+    quantityBefore,
+    quantityAfter,
+    referenceType,
+    referenceId,
+    unitId: unitId || null,
+    unitName: unitName || null,
+    unitQuantity: unitQuantity == null ? null : String(unitQuantity),
+    accountingPeriodId: accountingPeriodId || null,
+    notes: notes || null,
+    createdBy: userId || null,
+  });
+
+  return { quantityBefore, quantityAfter };
+}
+
+export class InventoryService {
+  /** Expose transaction helper for callers (e.g. saleService). */
+  static withTransaction(cb) {
+    return withTransaction(cb);
+  }
+
+  /** Expose the low-level apply helper so saleService can reuse it in its own tx. */
+  static applyStockChangeTx(tx, payload) {
+    return applyStockChangeTx(tx, payload);
+  }
+
+  async getStock(productId, warehouseId) {
+    const db = await getDb();
+    const [row] = await db
+      .select()
+      .from(productStock)
+      .where(and(eq(productStock.productId, productId), eq(productStock.warehouseId, warehouseId)))
+      .limit(1);
+    return row ? row.quantity : 0;
+  }
+
+  /**
+   * Return stock rows for a warehouse joined with product info.
+   * `lowStockOnly` filters to rows where quantity <= low_stock_threshold (or minStock).
+   */
+  async getWarehouseStock(warehouseId, { search, lowStockOnly = false } = {}) {
+    const db = await getDb();
+
+    const rows = await db
+      .select({
+        productId: products.id,
+        name: products.name,
+        sku: products.sku,
+        barcode: products.barcode,
+        unit: products.unit,
+        sellingPrice: products.sellingPrice,
+        currency: products.currency,
+        minStock: products.minStock,
+        lowStockThreshold: products.lowStockThreshold,
+        tracksExpiry: products.tracksExpiry,
+        quantity: sql`COALESCE(${productStock.quantity}, 0)`.as('quantity'),
+        warehouseId: sql`${warehouseId}::int`.as('warehouseId'),
+      })
+      .from(products)
+      .leftJoin(
+        productStock,
+        and(eq(productStock.productId, products.id), eq(productStock.warehouseId, warehouseId))
+      )
+      // Service products are not stocked — exclude them from inventory/stock
+      // reports so they never appear as if they were goods on hand.
+      .where(and(eq(products.isActive, true), ne(products.productType, 'service')));
+
+    const threshold = (r) =>
+      r.lowStockThreshold != null && r.lowStockThreshold > 0
+        ? r.lowStockThreshold
+        : r.minStock || 0;
+
+    let filtered = rows.map((r) => ({
+      ...r,
+      quantity: Number(r.quantity) || 0,
+      isLowStock: Number(r.quantity) <= threshold(r),
+    }));
+
+    if (search && search.trim()) {
+      const q = search.trim().toLowerCase();
+      filtered = filtered.filter(
+        (r) =>
+          (r.name || '').toLowerCase().includes(q) ||
+          (r.sku || '').toLowerCase().includes(q) ||
+          (r.barcode || '').toLowerCase().includes(q)
+      );
+    }
+
+    if (lowStockOnly) filtered = filtered.filter((r) => r.isLowStock);
+
+    return filtered;
+  }
+
+  /** Total stock for a product across all active warehouses. */
+  async getProductTotals(productId) {
+    const db = await getDb();
+    const [row] = await db
+      .select({ total: sql`COALESCE(SUM(${productStock.quantity}), 0)` })
+      .from(productStock)
+      .where(eq(productStock.productId, productId));
+
+    const perWarehouse = await db
+      .select({
+        warehouseId: productStock.warehouseId,
+        warehouseName: warehouses.name,
+        branchName: branches.name,
+        branchId: warehouses.branchId,
+        branchName: branches.name,
+        quantity: productStock.quantity,
+      })
+      .from(productStock)
+      .leftJoin(warehouses, eq(productStock.warehouseId, warehouses.id))
+      .leftJoin(branches, eq(warehouses.branchId, branches.id))
+      .where(eq(productStock.productId, productId));
+
+    return {
+      total: Number(row?.total || 0),
+      perWarehouse,
+    };
+  }
+
+  /**
+   * Guard: stock operations (manual adjustment, opening balance, transfers)
+   * apply ONLY to inventory products. Services have no stock, so any attempt to
+   * adjust/transfer one is rejected here — the UI pickers already hide services
+   * (they read from the warehouse-stock list), this is the API-level backstop.
+   * `executor` is a transaction or the db handle.
+   */
+  static async assertProductIsInventory(executor, productId) {
+    const [row] = await executor
+      .select({ productType: products.productType })
+      .from(products)
+      .where(eq(products.id, productId))
+      .limit(1);
+    if (row?.productType === 'service') {
+      const err = new ValidationError('لا يمكن تنفيذ عمليات مخزون على منتج من نوع خدمة');
+      err.code = 'STOCK_OP_NOT_ALLOWED_ON_SERVICE';
+      throw err;
+    }
+  }
+
+  /**
+   * Manual adjustment — increases or decreases stock for (productId, warehouseId).
+   * @param {{productId, warehouseId, quantityChange, reason, allowNegative?, userId?}} input
+   */
+  async adjustStock(input) {
+    const {
+      productId,
+      warehouseId,
+      quantityChange,
+      unitId = null,
+      movementType,
+      reason,
+      costPrice,
+      expiryDate,
+      allowNegative = false,
+      userId = null,
+    } = input;
+
+    if (!Number.isInteger(quantityChange) || quantityChange <= 0) {
+      throw new ValidationError('الكمية يجب أن تكون أكبر من صفر');
+    }
+    const increaseTypes = new Set([
+      'opening_balance',
+      'stock_in',
+      'adjustment_in',
+      'correction_in',
+      'manual_adjustment_in',
+    ]);
+    const decreaseTypes = new Set([
+      'adjustment_out',
+      'damaged',
+      'lost',
+      'correction_out',
+      'manual_adjustment_out',
+    ]);
+    if (!increaseTypes.has(movementType) && !decreaseTypes.has(movementType)) {
+      throw new ValidationError('نوع حركة المخزون غير صالح');
+    }
+
+    const accountingPeriodId = await resolveWarehousePeriodId(warehouseId);
+
+    const result = await withTransaction(async (tx) => {
+      // Services have no stock — reject any adjustment against one.
+      await InventoryService.assertProductIsInventory(tx, productId);
+      // Resolve unit (defaults to base when unitId is null) so the user can
+      // type "5 كارتون" in the UI and we still write the correct base count.
+      const unit = await resolveUnitSnapshot(tx, productId, unitId);
+      const baseQuantity = Math.round(quantityChange * unit.conversionFactor);
+      if (!Number.isInteger(baseQuantity) || baseQuantity <= 0) {
+        throw new ValidationError('الكمية المحوّلة للوحدة الأساسية غير صالحة');
+      }
+      const signedBase = increaseTypes.has(movementType) ? baseQuantity : -baseQuantity;
+
+      const movementResult = await applyStockChangeTx(tx, {
+        productId,
+        warehouseId,
+        quantityChange: signedBase,
+        movementType,
+        referenceType: 'adjustment',
+        notes: reason.trim(),
+        userId,
+        allowNegative,
+        unitId: unit.id,
+        unitName: unit.name,
+        unitQuantity: quantityChange,
+        accountingPeriodId,
+      });
+
+      if (signedBase > 0) {
+        // The user can enter cost price either per selected unit (e.g. carton
+        // cost) or per base unit. We accept either interpretation: when a
+        // costPrice is supplied AND the conversionFactor > 1, we treat it as
+        // per-unit and divide. Per-base cost (unitId omitted, factor = 1) is
+        // unchanged.
+        const [product] = await tx
+          .select({ costPrice: products.costPrice })
+          .from(products)
+          .where(eq(products.id, productId))
+          .limit(1);
+        let perBaseCost;
+        if (costPrice != null && costPrice !== '' && Number.isFinite(Number(costPrice))) {
+          const cp = Number(costPrice);
+          perBaseCost = unit.conversionFactor > 1 ? cp / unit.conversionFactor : cp;
+        } else {
+          perBaseCost = Number(product?.costPrice || 0);
+        }
+        await tx.insert(productStockEntries).values({
+          productId,
+          warehouseId,
+          quantity: signedBase,
+          remainingQuantity: signedBase,
+          costPrice: String(perBaseCost || 0),
+          expiryDate: expiryDate || null,
+          status: 'active',
+          createdBy: userId || null,
+        });
+      }
+      return movementResult;
+    });
+
+    alertBus.emit('alerts.changed', 'inventory.adjusted');
+    return result;
+  }
+
+  /**
+   * Transfer between warehouses in the same transaction.
+   * Emits transfer_out + transfer_in movements linked by the same referenceId.
+   */
+  async transferStock({
+    fromWarehouseId,
+    toWarehouseId,
+    productId,
+    quantity,
+    unitId = null,
+    notes,
+    userId,
+  }) {
+    if (!fromWarehouseId || !toWarehouseId) {
+      throw new ValidationError('Both source and destination warehouses are required');
+    }
+    if (fromWarehouseId === toWarehouseId) {
+      throw new ValidationError('Source and destination warehouses must differ');
+    }
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      throw new ValidationError('الكمية يجب أن تكون أكبر من صفر');
+    }
+
+    const accountingPeriodId = await resolveWarehousePeriodId(fromWarehouseId);
+
+    return withTransaction(async (tx) => {
+      // Services have no stock — reject any transfer against one.
+      await InventoryService.assertProductIsInventory(tx, productId);
+      const unit = await resolveUnitSnapshot(tx, productId, unitId);
+      const baseQuantity = Math.round(quantity * unit.conversionFactor);
+      if (!Number.isInteger(baseQuantity) || baseQuantity <= 0) {
+        throw new ValidationError('الكمية المحوّلة للوحدة الأساسية غير صالحة');
+      }
+      // Deterministic lock order by warehouse id to avoid deadlocks
+      const [firstId, secondId] = [fromWarehouseId, toWarehouseId].sort((a, b) => a - b);
+      await lockOrCreateStockRow(tx, productId, firstId);
+      await lockOrCreateStockRow(tx, productId, secondId);
+
+      // Use `createdAt` timestamp + source warehouse id as the shared reference
+      // for now; good enough without introducing a dedicated transfers table.
+      const referenceId = Date.now() % 2_147_483_647;
+
+      const out = await applyStockChangeTx(tx, {
+        productId,
+        warehouseId: fromWarehouseId,
+        quantityChange: -baseQuantity,
+        movementType: 'transfer_out',
+        referenceType: 'transfer',
+        referenceId,
+        notes: notes || null,
+        userId,
+        unitId: unit.id,
+        unitName: unit.name,
+        unitQuantity: quantity,
+        accountingPeriodId,
+      });
+      const incoming = await applyStockChangeTx(tx, {
+        productId,
+        warehouseId: toWarehouseId,
+        quantityChange: baseQuantity,
+        movementType: 'transfer_in',
+        referenceType: 'transfer',
+        referenceId,
+        notes: notes || null,
+        userId,
+        unitId: unit.id,
+        unitName: unit.name,
+        unitQuantity: quantity,
+        accountingPeriodId,
+      });
+      await InventoryService.moveStockEntriesTx(tx, {
+        productId,
+        fromWarehouseId,
+        toWarehouseId,
+        quantity: baseQuantity,
+        userId,
+      });
+
+      alertBus.emit('alerts.changed', 'inventory.transferred');
+      return { referenceId, out, in: incoming };
+    });
+  }
+
+  /**
+   * Pre-flight stock validation for a sale.
+   *
+   * Reads availability from the SAME canonical source the product API / tablet
+   * uses — `product_stock` per (productId, warehouseId) — so the backend never
+   * rejects a sale the catalogue showed as sellable. Rejection happens ONLY for
+   * a real product/warehouse problem or a genuine shortage (requestedQty >
+   * availableQty). On any problem it throws a ValidationError carrying an
+   * item-level `details` payload the tablet can render.
+   *
+   * `items[].quantity` is a BASE-unit quantity (see applySaleStockMovement);
+   * `product_stock.quantity` is also in base units, so they compare directly.
+   *
+   * Detected reasons: warehouse_not_found, product_not_active,
+   * product_not_sale_enabled, inventory_record_not_found, insufficient_stock.
+   * (unit_not_found / invalid_unit_conversion are surfaced earlier, when the
+   * sale service resolves each line's unit snapshot.)
+   */
+  static async validateSaleStock(tx, { warehouseId, items }) {
+    if (!warehouseId) throw new ValidationError('Sale must have a warehouseId for stock tracking');
+
+    const [warehouse] = await tx
+      .select({ id: warehouses.id, branchId: warehouses.branchId, isActive: warehouses.isActive })
+      .from(warehouses)
+      .where(eq(warehouses.id, warehouseId))
+      .limit(1);
+    if (!warehouse) {
+      const err = new ValidationError('المخزن غير موجود');
+      err.code = 'SALE_STOCK_VALIDATION';
+      err.details = [{ warehouseId, reason: 'warehouse_not_found' }];
+      throw err;
+    }
+
+    // Aggregate base-unit demand per product — a product may span several lines
+    // (e.g. one line in pieces, another in cartons) and must be checked against
+    // the single per-warehouse available figure as a whole.
+    const demand = new Map();
+    for (const item of items || []) {
+      if (!item.productId) continue;
+      const need = Number(item.quantity) || 0;
+      if (need <= 0) continue;
+      const cur = demand.get(item.productId) || {
+        need: 0,
+        unitName: item.unitName || null,
+        unitQuantity: 0,
+      };
+      cur.need += need;
+      cur.unitQuantity += Number(item.unitQuantity) || 0;
+      demand.set(item.productId, cur);
+    }
+
+    const details = [];
+    for (const [productId, info] of demand) {
+      const [product] = await tx
+        .select({
+          id: products.id,
+          name: products.name,
+          isActive: products.isActive,
+          status: products.status,
+          productType: products.productType,
+        })
+        .from(products)
+        .where(eq(products.id, productId))
+        .limit(1);
+
+      // Service products carry no stock — they are never validated against a
+      // per-warehouse quantity (and have no product_stock row to check).
+      if (product?.productType === 'service') continue;
+
+      const base = {
+        productId,
+        productName: product?.name || null,
+        requestedQty: info.need,
+        unitName: info.unitName,
+        unitQuantity: info.unitQuantity || null,
+        branchId: warehouse.branchId,
+        warehouseId,
+      };
+
+      if (!product) {
+        details.push({
+          ...base,
+          availableQty: 0,
+          shortageQty: info.need,
+          reason: 'inventory_record_not_found',
+        });
+        continue;
+      }
+      if (product.isActive === false) {
+        details.push({ ...base, reason: 'product_not_active' });
+        continue;
+      }
+      if (product.status === 'discontinued') {
+        details.push({ ...base, reason: 'product_not_sale_enabled' });
+        continue;
+      }
+
+      const [stockRow] = await tx
+        .select({ quantity: productStock.quantity })
+        .from(productStock)
+        .where(
+          and(eq(productStock.productId, productId), eq(productStock.warehouseId, warehouseId))
+        )
+        .limit(1);
+
+      if (!stockRow) {
+        details.push({
+          ...base,
+          availableQty: 0,
+          shortageQty: info.need,
+          reason: 'inventory_record_not_found',
+        });
+        continue;
+      }
+
+      const available = Number(stockRow.quantity) || 0;
+      if (info.need > available) {
+        details.push({
+          ...base,
+          availableQty: available,
+          shortageQty: info.need - available,
+          reason: 'insufficient_stock',
+        });
+      }
+    }
+
+    if (details.length > 0) {
+      const err = new ValidationError('بعض المنتجات لا تحتوي على كمية كافية');
+      err.code = 'SALE_STOCK_VALIDATION';
+      err.details = details;
+      throw err;
+    }
+  }
+
+  /**
+   * Apply the stock movements for a completed sale inside an existing transaction.
+   * Called from saleService.create / completeDraft / restore.
+   */
+  static async applySaleStockMovement(tx, { saleId, warehouseId, items, userId }) {
+    if (!warehouseId) throw new ValidationError('Sale must have a warehouseId for stock tracking');
+
+    // Pre-flight: reject only on a genuine shortage or a real product/warehouse
+    // problem, measured against the SAME canonical source the catalogue/tablet
+    // reads (product_stock per warehouse). This must run before the FIFO
+    // deduction below so the backend never rejects a sale the tablet showed as
+    // sellable, and so the client gets item-level reasons instead of an opaque
+    // "no sellable quantity" message.
+    await InventoryService.validateSaleStock(tx, { warehouseId, items });
+
+    // Service lines have no stock — skip FIFO deduction and the stock movement
+    // entirely for them. The sale_item row is still recorded by saleService.
+    const serviceIds = await fetchServiceProductIds(tx, items);
+
+    for (const item of items) {
+      if (!item.productId) continue;
+      if (serviceIds.has(item.productId)) continue;
+      let need = Number(item.quantity) || 0;
+      const today = new Date().toISOString().slice(0, 10);
+      let entries = await tx
+        .select()
+        .from(productStockEntries)
+        .where(
+          and(
+            eq(productStockEntries.productId, item.productId),
+            eq(productStockEntries.warehouseId, warehouseId),
+            sql`${productStockEntries.remainingQuantity} > 0`
+          )
+        )
+        .orderBy(sql`${productStockEntries.expiryDate} asc nulls last`)
+        .for('update');
+      if (entries.length === 0) {
+        // Postgres rejects FOR UPDATE on the nullable side of a LEFT JOIN
+        // (errcode 0A000), so split the lock acquisition from the catalog
+        // lookup: lock the legacy aggregate row alone, then fetch the
+        // product's current base cost in a second non-locking read.
+        const [legacy] = await tx
+          .select({ quantity: productStock.quantity })
+          .from(productStock)
+          .where(
+            and(
+              eq(productStock.productId, item.productId),
+              eq(productStock.warehouseId, warehouseId)
+            )
+          )
+          .limit(1)
+          .for('update');
+        if (legacy && Number(legacy.quantity) > 0) {
+          const [productRow] = await tx
+            .select({ costPrice: products.costPrice })
+            .from(products)
+            .where(eq(products.id, item.productId))
+            .limit(1);
+          await tx.insert(productStockEntries).values({
+            productId: item.productId,
+            warehouseId,
+            quantity: Number(legacy.quantity),
+            remainingQuantity: Number(legacy.quantity),
+            costPrice: String(productRow?.costPrice || 0),
+            expiryDate: null,
+            status: 'active',
+            createdBy: userId || null,
+          });
+          entries = await tx
+            .select()
+            .from(productStockEntries)
+            .where(
+              and(
+                eq(productStockEntries.productId, item.productId),
+                eq(productStockEntries.warehouseId, warehouseId),
+                sql`${productStockEntries.remainingQuantity} > 0`
+              )
+            )
+            .orderBy(sql`${productStockEntries.expiryDate} asc nulls last`)
+            .for('update');
+        }
+      }
+      for (const e of entries) {
+        if (need <= 0) break;
+        if (e.expiryDate && e.expiryDate < today) continue;
+        const take = Math.min(need, Number(e.remainingQuantity || 0));
+        if (take <= 0) continue;
+        const updated = await tx.execute(sql`
+          UPDATE product_stock_entries
+          SET remaining_quantity = remaining_quantity - ${take},
+              status = CASE WHEN (remaining_quantity - ${take}) <= 0 THEN 'depleted' ELSE 'active' END,
+              updated_at = now()
+          WHERE id = ${e.id}
+            AND remaining_quantity >= ${take}
+          RETURNING id, remaining_quantity
+        `);
+        const updatedRows = updated.rows ?? updated;
+        if (!updatedRows || updatedRows.length === 0) {
+          throw new ValidationError('الكمية الصالحة للبيع غير كافية');
+        }
+        if (item.saleItemId) {
+          await tx.insert(saleItemStockEntries).values({
+            saleItemId: item.saleItemId,
+            productStockEntryId: e.id,
+            quantity: take,
+          });
+        }
+        need -= take;
+      }
+      if (need > 0) {
+        // The FIFO cost layers (product_stock_entries) are out of sync with the
+        // canonical per-warehouse quantity (product_stock): entries were
+        // missing, depleted, or expired even though stock is on hand.
+        // validateSaleStock already confirmed product_stock covers this sale,
+        // so draw the remainder from a backfilled layer at the product's
+        // current base cost. This keeps COGS and the sale_item → stock-entry
+        // linkage complete instead of rejecting a sale the catalogue showed as
+        // sellable. The authoritative product_stock deduction happens in
+        // applyStockChangeTx below and still guards against going negative.
+        const [productRow] = await tx
+          .select({ costPrice: products.costPrice })
+          .from(products)
+          .where(eq(products.id, item.productId))
+          .limit(1);
+        const [backfill] = await tx
+          .insert(productStockEntries)
+          .values({
+            productId: item.productId,
+            warehouseId,
+            quantity: need,
+            remainingQuantity: 0,
+            costPrice: String(productRow?.costPrice || 0),
+            expiryDate: null,
+            status: 'depleted',
+            createdBy: userId || null,
+          })
+          .returning({ id: productStockEntries.id });
+        if (item.saleItemId && backfill) {
+          await tx.insert(saleItemStockEntries).values({
+            saleItemId: item.saleItemId,
+            productStockEntryId: backfill.id,
+            quantity: need,
+          });
+        }
+        need = 0;
+      }
+      await applyStockChangeTx(tx, {
+        productId: item.productId,
+        warehouseId,
+        quantityChange: -item.quantity,
+        movementType: 'sale',
+        referenceType: 'sale',
+        referenceId: saleId,
+        notes: null,
+        userId,
+        unitId: item.unitId || null,
+        unitName: item.unitName || null,
+        unitQuantity: item.unitQuantity == null ? null : item.unitQuantity,
+      });
+    }
+  }
+
+  /**
+   * Apply the stock-in movements for a received purchase invoice inside an
+   * existing transaction. Each inventory line creates exactly ONE FIFO batch
+   * (product_stock_entries) carrying its cost + expiry, then bumps the
+   * canonical per-warehouse quantity via applyStockChangeTx.
+   *
+   * `items[].quantity` is the BASE-unit quantity; `items[].unitCost` is the
+   * cost of one PURCHASED unit (converted to base cost here). Service
+   * products are skipped (never stocked).
+   *
+   * Returns a Map of itemKey → productStockEntryId so the caller can stamp
+   * purchase_items.product_stock_entry_id (keyed by the caller's `key`).
+   */
+  static async applyPurchaseStockMovement(tx, { purchaseInvoiceId, warehouseId, items, userId, accountingPeriodId = null }) {
+    if (!warehouseId) {
+      throw new ValidationError('Purchase must have a warehouseId for stock tracking');
+    }
+    const serviceIds = await fetchServiceProductIds(tx, items);
+    const entryIds = new Map();
+
+    for (const item of items) {
+      if (!item.productId) continue;
+      if (serviceIds.has(item.productId)) continue;
+      const baseQty = Number(item.quantity) || 0;
+      if (baseQty <= 0) continue;
+
+      const factor = Number(item.unitConversionFactor) || 1;
+      const baseCost = (Number(item.unitCost) || 0) / (factor > 0 ? factor : 1);
+
+      const [entry] = await tx
+        .insert(productStockEntries)
+        .values({
+          productId: item.productId,
+          warehouseId,
+          quantity: baseQty,
+          remainingQuantity: baseQty,
+          costPrice: String(baseCost),
+          expiryDate: item.expiryDate || null,
+          status: 'active',
+          createdBy: userId || null,
+        })
+        .returning({ id: productStockEntries.id });
+      if (item.key != null) entryIds.set(item.key, entry.id);
+
+      await applyStockChangeTx(tx, {
+        productId: item.productId,
+        warehouseId,
+        quantityChange: baseQty,
+        movementType: 'purchase',
+        referenceType: 'purchase',
+        referenceId: purchaseInvoiceId,
+        notes: null,
+        userId,
+        unitId: item.unitId || null,
+        unitName: item.unitName || null,
+        unitQuantity: item.unitQuantity == null ? null : item.unitQuantity,
+        accountingPeriodId,
+      });
+    }
+    return entryIds;
+  }
+
+  /**
+   * Reverse a purchase's stock-in on cancellation. Only allowed while the
+   * created batches are UNTOUCHED (nothing sold from them) — otherwise COGS
+   * history would dangle. Throws `PURCHASE_ALREADY_CONSUMED` when any batch
+   * has been drawn down.
+   */
+  static async reversePurchaseStockMovement(tx, { purchaseInvoiceId, warehouseId, items, userId }) {
+    if (!warehouseId) return;
+    const serviceIds = await fetchServiceProductIds(tx, items);
+
+    for (const item of items) {
+      if (!item.productId) continue;
+      if (serviceIds.has(item.productId)) continue;
+      const baseQty = Number(item.quantity) || 0;
+      if (baseQty <= 0) continue;
+
+      if (item.productStockEntryId) {
+        const updated = await tx.execute(sql`
+          UPDATE product_stock_entries
+          SET remaining_quantity = remaining_quantity - ${baseQty},
+              quantity = quantity - ${baseQty},
+              status = 'cancelled',
+              updated_at = now()
+          WHERE id = ${item.productStockEntryId}
+            AND remaining_quantity >= ${baseQty}
+          RETURNING id
+        `);
+        const rows = updated.rows ?? updated;
+        if (!rows || rows.length === 0) {
+          const err = new ValidationError(
+            'لا يمكن إلغاء فاتورة الشراء — تم بيع جزء من بضاعتها بالفعل'
+          );
+          err.code = 'PURCHASE_ALREADY_CONSUMED';
+          err.statusCode = 422;
+          throw err;
+        }
+      }
+
+      await applyStockChangeTx(tx, {
+        productId: item.productId,
+        warehouseId,
+        quantityChange: -baseQty,
+        movementType: 'purchase_cancel',
+        referenceType: 'purchase',
+        referenceId: purchaseInvoiceId,
+        notes: null,
+        userId,
+        unitId: item.unitId || null,
+        unitName: item.unitName || null,
+        unitQuantity: item.unitQuantity == null ? null : item.unitQuantity,
+      });
+    }
+  }
+
+  /**
+   * Apply the stock-out movements for a purchase return. Prefers deducting
+   * from the line's OWN batch (so the same goods leave at the same cost),
+   * falling back to FIFO across the product's other batches when that batch
+   * was already partially consumed.
+   */
+  static async applyPurchaseReturnStockMovement(tx, { purchaseReturnId, warehouseId, items, userId, accountingPeriodId = null }) {
+    if (!warehouseId) {
+      throw new ValidationError('Purchase return must have a warehouseId');
+    }
+    const serviceIds = await fetchServiceProductIds(tx, items);
+
+    for (const item of items) {
+      if (!item.productId) continue;
+      if (serviceIds.has(item.productId)) continue;
+      let need = Number(item.quantity) || 0;
+      if (need <= 0) continue;
+
+      // 1) The line's own batch first.
+      if (item.productStockEntryId) {
+        const [own] = await tx
+          .select()
+          .from(productStockEntries)
+          .where(eq(productStockEntries.id, item.productStockEntryId))
+          .for('update');
+        if (own && Number(own.remainingQuantity) > 0) {
+          const take = Math.min(need, Number(own.remainingQuantity));
+          await tx.execute(sql`
+            UPDATE product_stock_entries
+            SET remaining_quantity = remaining_quantity - ${take},
+                status = CASE WHEN (remaining_quantity - ${take}) <= 0 THEN 'depleted' ELSE 'active' END,
+                updated_at = now()
+            WHERE id = ${own.id}
+          `);
+          need -= take;
+        }
+      }
+
+      // 2) FIFO fallback across the product's remaining batches.
+      if (need > 0) {
+        const entries = await tx
+          .select()
+          .from(productStockEntries)
+          .where(
+            and(
+              eq(productStockEntries.productId, item.productId),
+              eq(productStockEntries.warehouseId, warehouseId),
+              sql`${productStockEntries.remainingQuantity} > 0`
+            )
+          )
+          .orderBy(sql`${productStockEntries.expiryDate} asc nulls last`)
+          .for('update');
+        for (const e of entries) {
+          if (need <= 0) break;
+          const take = Math.min(need, Number(e.remainingQuantity || 0));
+          if (take <= 0) continue;
+          await tx.execute(sql`
+            UPDATE product_stock_entries
+            SET remaining_quantity = remaining_quantity - ${take},
+                status = CASE WHEN (remaining_quantity - ${take}) <= 0 THEN 'depleted' ELSE 'active' END,
+                updated_at = now()
+            WHERE id = ${e.id}
+          `);
+          need -= take;
+        }
+      }
+
+      if (need > 0) {
+        const err = new ValidationError('الكمية المتوفرة لا تكفي لإرجاعها للمورد');
+        err.code = 'PURCHASE_RETURN_INSUFFICIENT_STOCK';
+        err.statusCode = 422;
+        throw err;
+      }
+
+      await applyStockChangeTx(tx, {
+        productId: item.productId,
+        warehouseId,
+        quantityChange: -(Number(item.quantity) || 0),
+        movementType: 'purchase_return',
+        referenceType: 'purchase_return',
+        referenceId: purchaseReturnId,
+        notes: null,
+        userId,
+        unitId: item.unitId || null,
+        unitName: item.unitName || null,
+        unitQuantity: item.unitQuantity == null ? null : item.unitQuantity,
+        accountingPeriodId,
+      });
+    }
+  }
+
+  async getExpiryAlerts({ warehouseId, productId, status } = {}) {
+    const db = await getDb();
+    const rows = await db
+      .select({
+        id: productStockEntries.id,
+        productId: productStockEntries.productId,
+        productName: products.name,
+        warehouseId: productStockEntries.warehouseId,
+        warehouseName: warehouses.name,
+        branchId: warehouses.branchId,
+        branchName: branches.name,
+        remainingQuantity: productStockEntries.remainingQuantity,
+        expiryDate: productStockEntries.expiryDate,
+        costPrice: productStockEntries.costPrice,
+      })
+      .from(productStockEntries)
+      .leftJoin(products, eq(productStockEntries.productId, products.id))
+      .leftJoin(warehouses, eq(productStockEntries.warehouseId, warehouses.id))
+      .leftJoin(branches, eq(warehouses.branchId, branches.id));
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return rows
+      .filter(
+        (r) =>
+          (!warehouseId || r.warehouseId === warehouseId) &&
+          (!productId || r.productId === productId)
+      )
+      .map((r) => {
+        const days = r.expiryDate ? Math.floor((new Date(r.expiryDate) - today) / 86400000) : null;
+        const expiryStatus =
+          r.expiryDate == null
+            ? 'بدون تاريخ انتهاء'
+            : days < 0
+              ? 'منتهي'
+              : days <= 7
+                ? 'ينتهي خلال 7 أيام'
+                : days <= 30
+                  ? 'ينتهي خلال 30 يوم'
+                  : days <= 60
+                    ? 'ينتهي خلال 60 يوم'
+                    : 'صالح';
+        return { ...r, daysUntilExpiry: days, status: expiryStatus };
+      })
+      .filter((r) => !status || r.status === status);
+  }
+
+  /** Restore stock from a cancelled or returned sale. Quantities are in base units. */
+  static async restoreSaleStockMovement(
+    tx,
+    { saleId, warehouseId, items, userId, movementType = 'sale_cancel' }
+  ) {
+    if (!warehouseId) return; // Legacy sales without a warehouse — skip silently
+    // Service lines were never deducted, so there is nothing to restore —
+    // skip them to avoid materializing phantom stock on cancel/return.
+    const serviceIds = await fetchServiceProductIds(tx, items);
+    for (const item of items) {
+      if (!item.productId) continue;
+      if (serviceIds.has(item.productId)) continue;
+      await applyStockChangeTx(tx, {
+        productId: item.productId,
+        warehouseId,
+        quantityChange: item.quantity,
+        movementType,
+        referenceType: 'sale',
+        referenceId: saleId,
+        notes: null,
+        userId,
+        allowNegative: true, // restoring never fails on availability
+        unitId: item.unitId || null,
+        unitName: item.unitName || null,
+        unitQuantity: item.unitQuantity == null ? null : item.unitQuantity,
+      });
+    }
+  }
+
+  static async moveStockEntriesTx(
+    tx,
+    { productId, fromWarehouseId, toWarehouseId, quantity, userId }
+  ) {
+    let need = Number(quantity) || 0;
+    const today = new Date().toISOString().slice(0, 10);
+    const entries = await tx
+      .select()
+      .from(productStockEntries)
+      .where(
+        and(
+          eq(productStockEntries.productId, productId),
+          eq(productStockEntries.warehouseId, fromWarehouseId),
+          sql`${productStockEntries.remainingQuantity} > 0`,
+          sql`(${productStockEntries.expiryDate} IS NULL OR ${productStockEntries.expiryDate} >= ${today})`,
+          sql`${productStockEntries.status} = 'active'`
+        )
+      )
+      .orderBy(sql`${productStockEntries.expiryDate} asc nulls last`)
+      .for('update');
+    for (const e of entries) {
+      if (need <= 0) break;
+      const take = Math.min(need, Number(e.remainingQuantity) || 0);
+      if (take <= 0) continue;
+      const out = await tx.execute(sql`
+        UPDATE product_stock_entries
+        SET remaining_quantity = remaining_quantity - ${take},
+            status = CASE WHEN (remaining_quantity - ${take}) <= 0 THEN 'depleted' ELSE 'active' END,
+            updated_at = now()
+        WHERE id = ${e.id} AND remaining_quantity >= ${take}
+        RETURNING id
+      `);
+      const outRows = out.rows ?? out;
+      if (!outRows || outRows.length === 0)
+        throw new ValidationError('Transfer quantity is no longer available');
+      await tx.insert(productStockEntries).values({
+        productId,
+        warehouseId: toWarehouseId,
+        quantity: take,
+        remainingQuantity: take,
+        costPrice: e.costPrice,
+        expiryDate: e.expiryDate || null,
+        status: 'active',
+        createdBy: userId || null,
+      });
+      need -= take;
+    }
+    if (need > 0) throw new ValidationError('Insufficient valid stock for transfer');
+  }
+
+  /** Return movements with optional filters and simple pagination. */
+  async getStockMovements(filters = {}) {
+    const db = await getDb();
+    const { warehouseId, warehouseIds, productId, movementType, page = 1, limit = 20 } = filters;
+
+    const conds = [];
+    if (warehouseId) conds.push(eq(stockMovements.warehouseId, warehouseId));
+    if (!warehouseId && Array.isArray(warehouseIds) && warehouseIds.length > 0) {
+      conds.push(inArray(stockMovements.warehouseId, warehouseIds));
+    }
+    if (productId) conds.push(eq(stockMovements.productId, productId));
+    if (movementType) conds.push(eq(stockMovements.movementType, movementType));
+
+    let countQuery = db.select({ count: sql`count(*)` }).from(stockMovements);
+    if (conds.length) countQuery = countQuery.where(and(...conds));
+    const [countRow] = await countQuery;
+    const total = Number(countRow?.count || 0);
+
+    const offset = (page - 1) * limit;
+
+    let q = db
+      .select({
+        id: stockMovements.id,
+        productId: stockMovements.productId,
+        productName: products.name,
+        warehouseId: stockMovements.warehouseId,
+        warehouseName: warehouses.name,
+        movementType: stockMovements.movementType,
+        quantityChange: stockMovements.quantityChange,
+        quantityBefore: stockMovements.quantityBefore,
+        quantityAfter: stockMovements.quantityAfter,
+        unitId: stockMovements.unitId,
+        unitName: stockMovements.unitName,
+        unitQuantity: stockMovements.unitQuantity,
+        referenceType: stockMovements.referenceType,
+        referenceId: stockMovements.referenceId,
+        notes: stockMovements.notes,
+        createdAt: stockMovements.createdAt,
+        createdByName: users.username,
+      })
+      .from(stockMovements)
+      .leftJoin(products, eq(stockMovements.productId, products.id))
+      .leftJoin(warehouses, eq(stockMovements.warehouseId, warehouses.id))
+      .leftJoin(users, eq(stockMovements.createdBy, users.id))
+      .orderBy(desc(stockMovements.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    if (conds.length) q = q.where(and(...conds));
+
+    const data = await q;
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  /** Return products at or below threshold in a given warehouse. */
+  async getLowStockProducts(warehouseId) {
+    if (!warehouseId) throw new ValidationError('warehouseId is required');
+    const all = await this.getWarehouseStock(warehouseId);
+    return all.filter((r) => r.isLowStock);
+  }
+
+  /** Ensure a product_stock row exists for every active warehouse. Used on product creation. */
+  async ensureProductStockRows(productId) {
+    const db = await getDb();
+    const activeWarehouses = await db
+      .select({ id: warehouses.id })
+      .from(warehouses)
+      .where(eq(warehouses.isActive, true));
+    if (!activeWarehouses.length) return;
+
+    await db
+      .insert(productStock)
+      .values(activeWarehouses.map((w) => ({ productId, warehouseId: w.id, quantity: 0 })))
+      .onConflictDoNothing({
+        target: [productStock.productId, productStock.warehouseId],
+      });
+  }
+}
+
+export default new InventoryService();

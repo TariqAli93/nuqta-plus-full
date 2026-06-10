@@ -1,0 +1,63 @@
+{
+  "name": "nuqtaplus",
+  "version": "1.0.22",
+  "description": "نقطة بلس - نظام إدارة نقاط البيع والمخازن",
+  "private": true,
+  "type": "module",
+  "author": "NuqtaPlus Team",
+  "license": "Proprietary",
+  "scripts": {
+    "dev": "cross-env NODE_ENV=development concurrently \"cd backend && pnpm dev\" \"cd frontend && pnpm dev\"",
+    "dev:client": "cd frontend && cross-env NODE_ENV=development pnpm dev:client",
+    "dev:web": "cross-env NODE_ENV=development concurrently \"cd backend && pnpm dev\" \"cd frontend && pnpm dev:web\"",
+    "dev:backend": "cd backend && cross-env NODE_ENV=development pnpm dev",
+    "dev:electron": "cd frontend && cross-env NODE_ENV=development pnpm dev",
+    "clean": "node scripts/clean.js",
+    "fetch:winsw": "node scripts/fetch-winsw.js",
+    "train:credit-model": "node scripts/train-credit-model.mjs",
+    "export:credit-dataset": "node scripts/export-credit-dataset.mjs",
+    "bump-version": "node pumb-version.js",
+    "verify:versions": "node scripts/verify-versions.js",
+    "build:backend": "pnpm run verify:versions && node build-backend.js",
+    "build:frontend": "cd frontend && pnpm run build:win",
+    "build": "cross-env BUILD_TARGET=server pnpm run clean && pnpm run verify:versions && pnpm run build:backend && pnpm run build:frontend && pnpm run verify:all",
+    "build:server": "cross-env BUILD_TARGET=server pnpm run clean && pnpm run verify:versions && pnpm run build:backend && pnpm run build:frontend && pnpm run verify:all",
+    "build:client": "cross-env BUILD_TARGET=client pnpm run clean && pnpm run verify:versions && cd frontend && pnpm run build:client",
+    "package:server": "cross-env BUILD_TARGET=server pnpm run build:server && cd frontend && pnpm run dist:win",
+    "package:client": "cross-env BUILD_TARGET=client pnpm run build:client && cd frontend && pnpm run dist:client",
+    "publish:server": "node pumb-version.js && pnpm run verify:versions && cross-env BUILD_TARGET=server pnpm run clean && pnpm run build:backend && cd frontend && pnpm run publish:win",
+    "publish:client": "node pumb-version.js && pnpm run verify:versions && cross-env BUILD_TARGET=client pnpm run clean && cd frontend && pnpm run publish:client",
+    "publish:frontend": "cd frontend && pnpm run publish:win",
+    "publish:electron": "node pumb-version.js && pnpm run verify:versions && cross-env BUILD_TARGET=server pnpm run clean && pnpm run build:backend && pnpm run publish:frontend && pnpm run verify:all",
+    "verify:packaged": "node scripts/verify-packaged-backend.js",
+    "verify:credit-model": "node scripts/verify-packaged-credit-model.mjs",
+    "verify:all": "pnpm run verify:versions && pnpm run verify:packaged && pnpm run verify:credit-model",
+    "lint": "cd backend && pnpm lint && cd ../frontend && pnpm lint",
+    "format": "cd backend && pnpm format && cd ../frontend && pnpm format",
+    "db:migrate": "cd backend && pnpm db:migrate",
+    "db:generate": "cd backend && pnpm db:generate",
+    "seed": "cd backend && node src/seed.js --demo"
+  },
+  "keywords": [
+    "accounting",
+    "pos",
+    "installment",
+    "electron",
+    "vue",
+    "fastify"
+  ],
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "cross-env": "^10.1.0",
+    "eslint": "^9.15.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-vue": "^9.31.0",
+    "fs-extra": "^11.3.2",
+    "prettier": "^3.3.3",
+    "protobufjs": "^7.4.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  }
+}

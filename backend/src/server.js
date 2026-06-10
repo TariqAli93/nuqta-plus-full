@@ -1,0 +1,366 @@
+import Fastify from 'fastify';
+import config from './config.js';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+import { getLanAddresses } from './utils/networkInterfaces.js';
+
+// Get package version
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const packageJson = JSON.parse(readFileSync(join(__dirname, '../package.json'), 'utf8'));
+const version = packageJson.version || '1.0.0';
+// Plugins
+import websocket from '@fastify/websocket';
+import securityPlugin from './plugins/security.js';
+import authPlugin from './plugins/auth.js';
+import errorHandlerPlugin from './plugins/errorHandler.js';
+
+// Routes
+import authRoutes from './routes/authRoutes.js';
+import customerRoutes from './routes/customerRoutes.js';
+import productRoutes from './routes/productRoutes.js';
+import saleRoutes from './routes/saleRoutes.js';
+import categoryRoutes from './routes/categoryRoutes.js';
+import userRoutes from './routes/userRoutes.js';
+import currencyRoutes from './routes/currencyRoutes.js';
+import settingsRoutes from './routes/settingsRoutes.js';
+import backupRoutes from './routes/backupRoutes.js';
+import dataBackupRoutes from './routes/dataBackupRoutes.js';
+import alertRoutes from './routes/alertRoutes.js';
+import alertWsRoutes from './routes/alertWsRoutes.js';
+import auditRoutes from './routes/auditRoutes.js';
+import resetRoutes from './routes/resetRoutes.js';
+import jobRoutes from './routes/jobRoutes.js';
+import branchRoutes from './routes/branchRoutes.js';
+import warehouseRoutes from './routes/warehouseRoutes.js';
+import inventoryRoutes from './routes/inventoryRoutes.js';
+import warehouseTransferRoutes from './routes/warehouseTransferRoutes.js';
+import featureFlagsRoutes from './routes/featureFlagsRoutes.js';
+import notificationRoutes from './routes/notificationRoutes.js';
+import reportRoutes from './routes/reportRoutes.js';
+import cashSessionRoutes from './routes/cashSessionRoutes.js';
+import accountingPeriodRoutes from './routes/accountingPeriodRoutes.js';
+import installmentRoutes from './routes/installmentRoutes.js';
+import collectionsRoutes from './routes/collectionsRoutes.js';
+import expensesRoutes from './routes/expensesRoutes.js';
+import setupRoutes from './routes/setupRoutes.js';
+import remoteAccessRoutes from './routes/remoteAccessRoutes.js';
+import treasuryRoutes from './routes/treasuryRoutes.js';
+import voucherRoutes from './routes/voucherRoutes.js';
+import supplierRoutes from './routes/supplierRoutes.js';
+import purchaseRoutes from './routes/purchaseRoutes.js';
+import glRoutes from './routes/glRoutes.js';
+import financialReportRoutes from './routes/financialReportRoutes.js';
+import openingBalanceRoutes from './routes/openingBalanceRoutes.js';
+
+// Debug features - only in development
+const isProduction = config.server.env === 'production';
+
+// Initialize Fastify
+const fastify = Fastify({
+  logger: {
+    level: config.logging.level || 'info',
+    transport: config.logging.pretty
+      ? {
+          target: 'pino-pretty',
+          options: {
+            colorize: true,
+            translateTime: 'HH:MM:ss Z',
+            ignore: 'pid,hostname',
+          },
+        }
+      : undefined,
+  },
+});
+
+// Log server startup information using Fastify logger
+// Note: Logger will be available after fastify is initialized
+
+// Start server
+const start = async () => {
+  try {
+    // Register plugins
+    // Only register debugger plugin in development
+    if (!isProduction) {
+      const { default: debuggerPlugin } = await import('./plugins/debugger.js');
+      await fastify.register(debuggerPlugin);
+    }
+    await fastify.register(websocket);
+    await fastify.register(securityPlugin);
+    await fastify.register(authPlugin);
+    await fastify.register(errorHandlerPlugin);
+
+    // Audit logging — auto-logs all mutating API requests
+    const { default: auditLogPlugin } = await import('./plugins/auditLog.js');
+    await fastify.register(auditLogPlugin);
+
+    // Health check route
+    fastify.get('/', async () => {
+      return {
+        status: 'ok',
+        service: 'nuqtaplus Backend API',
+        version: version,
+        timestamp: new Date().toISOString(),
+      };
+    });
+
+    fastify.get('/health', async () => {
+      return {
+        status: 'healthy',
+        database: 'connected',
+        timestamp: new Date().toISOString(),
+      };
+    });
+
+    // Infrastructure route: version compatibility check used by Electron
+    fastify.get('/version', async () => {
+      return { version };
+    });
+
+    // Server info endpoint — used by client apps to discover and identify the server.
+    // Responds without authentication so clients can probe before login.
+    fastify.get('/server-info', async (request) => {
+      return {
+        name: 'Nuqta Plus Server',
+        version,
+        mode: 'server',
+        host: config.server.host,
+        port: config.server.port,
+        addresses: getLanAddresses(),
+        timestamp: new Date().toISOString(),
+        clientIp: request.ip,
+      };
+    });
+
+    // Register API routes
+    await fastify.register(authRoutes, { prefix: '/api/auth' });
+    await fastify.register(customerRoutes, { prefix: '/api/customers' });
+    await fastify.register(productRoutes, { prefix: '/api/products' });
+    await fastify.register(saleRoutes, { prefix: '/api/sales' });
+    await fastify.register(categoryRoutes, { prefix: '/api/categories' });
+    await fastify.register(userRoutes, { prefix: '/api/users' });
+    await fastify.register(currencyRoutes, { prefix: '/api/currencies' });
+    await fastify.register(settingsRoutes, { prefix: '/api/settings' });
+    await fastify.register(backupRoutes, { prefix: '/api/settings/backups' });
+    await fastify.register(dataBackupRoutes, { prefix: '/api/backup' });
+    await fastify.register(alertRoutes, { prefix: '/api/alerts' });
+    await fastify.register(alertWsRoutes, { prefix: '/api/alerts' });
+    await fastify.register(auditRoutes, { prefix: '/api/audit' });
+    await fastify.register(resetRoutes, { prefix: '/api/reset' });
+    await fastify.register(jobRoutes, { prefix: '/api/jobs' });
+    await fastify.register(branchRoutes, { prefix: '/api/branches' });
+    await fastify.register(warehouseRoutes, { prefix: '/api/warehouses' });
+    await fastify.register(inventoryRoutes, { prefix: '/api/inventory' });
+    await fastify.register(warehouseTransferRoutes, { prefix: '/api/warehouse-transfers' });
+    await fastify.register(featureFlagsRoutes, { prefix: '/api/feature-flags' });
+    await fastify.register(notificationRoutes, { prefix: '/api/notifications' });
+    await fastify.register(reportRoutes, { prefix: '/api/reports' });
+    await fastify.register(cashSessionRoutes, { prefix: '/api/cash-sessions' });
+    await fastify.register(accountingPeriodRoutes, { prefix: '/api/accounting-periods' });
+    await fastify.register(installmentRoutes, { prefix: '/api/installments' });
+    await fastify.register(collectionsRoutes, { prefix: '/api/collections' });
+    await fastify.register(expensesRoutes, { prefix: '/api/expenses' });
+    await fastify.register(setupRoutes, { prefix: '/api/setup' });
+    await fastify.register(remoteAccessRoutes, { prefix: '/api/tunnel' });
+    await fastify.register(treasuryRoutes, { prefix: '/api/treasury' });
+    await fastify.register(voucherRoutes, { prefix: '/api/vouchers' });
+    await fastify.register(supplierRoutes, { prefix: '/api/suppliers' });
+    await fastify.register(purchaseRoutes, { prefix: '/api/purchases' });
+    await fastify.register(glRoutes, { prefix: '/api/gl' });
+    await fastify.register(financialReportRoutes, { prefix: '/api/reports/financial' });
+    await fastify.register(openingBalanceRoutes, { prefix: '/api/opening-balances' });
+    // Only register debug routes in development
+    if (!isProduction) {
+      const { default: debugRoutes } = await import('./routes/debugRoutes.js');
+      await fastify.register(debugRoutes, { prefix: '/debug' });
+    }
+
+    // Authenticated shutdown route — only admins can trigger
+    fastify.post(
+      '/__shutdown__',
+      {
+        onRequest: [fastify.authenticate],
+        config: { skipAudit: true },
+      },
+      async (req, res) => {
+        if (req.user?.role !== 'admin') {
+          return res.code(403).send({ error: 'Forbidden' });
+        }
+        fastify.log.info('Shutdown requested via authenticated API call');
+        res.send({ message: 'Shutting down...' });
+        setTimeout(async () => {
+          try {
+            await closeServer();
+            process.exit(0);
+          } catch (err) {
+            fastify.log.error('Error closing server:', err);
+            process.exit(1);
+          }
+        }, 200);
+      }
+    );
+
+    // Delete old draft sales on startup
+    try {
+      const { SaleService } = await import('./services/saleService.js');
+      const saleService = new SaleService();
+      const deletedCount = await saleService.deleteOldDrafts();
+      if (deletedCount > 0) {
+        fastify.log.info(`Deleted ${deletedCount} old draft sale(s) on startup`);
+      }
+    } catch (error) {
+      fastify.log.warn('Failed to delete old drafts on startup:', error.message);
+    }
+
+    // Register background jobs (daily credit scoring, etc.)
+    try {
+      const { registerDefaultJobs } = await import('./jobs/scheduler.js');
+      registerDefaultJobs(fastify);
+    } catch (error) {
+      fastify.log.warn('Failed to register background jobs:', error.message);
+    }
+
+    // Notification queue worker — picks up pending notifications and dispatches
+    // them through the configured provider. The worker is a no-op when the
+    // notification system is disabled in settings, so it's always safe to start.
+    try {
+      const { startWorker } = await import('./services/notifications/notificationQueue.js');
+      const intervalMs = Number(process.env.NOTIFICATIONS_WORKER_INTERVAL_MS) || 10_000;
+      startWorker({ intervalMs, log: fastify.log });
+    } catch (error) {
+      fastify.log.warn('Failed to start notification worker:', error.message);
+    }
+
+    // Remote-access auto-resume — if the user previously enabled the Cloudflare
+    // tunnel, re-spawn cloudflared from on-disk config without re-calling the
+    // provisioning API. Survives Windows-service / app-restart / crash.
+    try {
+      const { resumeIfPreviouslyEnabled } = await import('./services/remoteAccessService.js');
+      await resumeIfPreviouslyEnabled({ log: fastify.log });
+    } catch (error) {
+      fastify.log.warn(`Remote-access auto-resume skipped: ${error.message}`);
+    }
+
+    // Initialize ONNX credit scoring model (optional — falls back to rules if absent)
+    try {
+      const { initCreditScoreModel, getModelStatus } =
+        await import('./services/onnxCreditScoringService.js');
+      await initCreditScoreModel();
+      const status = getModelStatus();
+      if (status.available) {
+        fastify.log.info(`ONNX credit model loaded: ${status.modelPath}`);
+      } else {
+        fastify.log.info('ONNX credit model not available — using rule-based scoring');
+      }
+    } catch (error) {
+      fastify.log.warn(`ONNX model init skipped: ${error.message}`);
+    }
+
+    // Start listening
+    await fastify.listen({
+      port: config.server.port,
+      host: config.server.host,
+    });
+
+    fastify.log.info('Server successfully started');
+    fastify.log.info(`Server running on http://${config.server.host}:${config.server.port}`);
+    fastify.log.info(`Environment: ${config.server.env}`);
+    fastify.log.info(`Log Level: ${config.logging.level}`);
+    fastify.log.info('Ready to accept requests');
+
+    // LAN discovery — advertise this server over mDNS / Bonjour so client
+    // desktops on the same network can auto-discover and connect. Failures
+    // here are non-fatal: the backend still runs, clients can still connect
+    // manually by IP.
+    try {
+      const { start: startMdns } = await import('./services/mdns-advertisement.service.js');
+      const { getOrCreateMachineId } = await import('./utils/machineId.js');
+      const { SettingsService } = await import('./services/settingsService.js');
+
+      const settingsService = new SettingsService();
+      const [companyName, branchName] = await Promise.all([
+        settingsService.getValue('company_name').catch(() => null),
+        settingsService.getValue('branch_name').catch(() => null),
+      ]);
+
+      // Best-effort remote URL lookup — only if Cloudflare tunnel is currently enabled.
+      let remoteUrl = '';
+      try {
+        const { getStatus: getRemoteAccessStatus } = await import(
+          './services/remoteAccessService.js'
+        );
+        const status = await getRemoteAccessStatus();
+        if (status && status.enabled && status.publicUrl) {
+          remoteUrl = status.publicUrl;
+        }
+      } catch (err) {
+        fastify.log.warn(`mDNS: remote-access status unavailable: ${err.message}`);
+      }
+
+      await startMdns({
+        port: config.server.port,
+        machineId: getOrCreateMachineId(),
+        companyName: companyName || 'NuqtaPlus',
+        branchName: branchName || 'Main',
+        version,
+        remoteUrl,
+        log: fastify.log,
+      });
+    } catch (err) {
+      fastify.log.warn(`mDNS advertisement failed to start: ${err.message}`);
+    }
+  } catch (err) {
+    fastify.log.error(err);
+    process.exit(1);
+  }
+};
+
+export const closeServer = async () => {
+  fastify.log.info('Shutting down server...');
+
+  // Stop the LAN advertisement before tearing down the HTTP server so clients
+  // don't keep seeing a "ghost" record while we shut down.
+  try {
+    const { stop: stopMdns } = await import('./services/mdns-advertisement.service.js');
+    await stopMdns();
+  } catch (err) {
+    fastify.log.warn(`mDNS shutdown failed: ${err.message}`);
+  }
+
+  // Stop the Cloudflare tunnel child process before closing Fastify so it
+  // doesn't outlive the parent. Lazy import to avoid bootstrap cycles.
+  try {
+    const { shutdown: shutdownRemoteAccess } = await import(
+      './services/remoteAccessService.js'
+    );
+    await shutdownRemoteAccess();
+  } catch (err) {
+    fastify.log.warn(`Remote-access shutdown failed: ${err.message}`);
+  }
+
+  await fastify.close();
+
+  // Close the PostgreSQL connection pool
+  const { closeDatabase } = await import('./db.js');
+  await closeDatabase();
+
+  fastify.log.info('Server shut down complete.');
+};
+
+start();
+
+// Graceful shutdown on process signals
+const gracefulShutdown = async (signal) => {
+  fastify.log.info(`${signal} received — shutting down gracefully`);
+  try {
+    await closeServer();
+    process.exit(0);
+  } catch (err) {
+    fastify.log.error(`Error during ${signal} shutdown:`, err);
+    process.exit(1);
+  }
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));

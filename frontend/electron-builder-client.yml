@@ -1,0 +1,61 @@
+appId: com.nuqtaplus.client
+productName: 'NuqtaPlus Client'
+asar: true
+
+files:
+  - package.json
+  - dist-electron/**/*
+  - '!**/*.map'
+  - '!**/.env*'
+
+extraResources:
+  - from: dist-electron
+    to: dist-electron
+    filter:
+      - '**/*'
+
+  - from: ./splash.html
+    to: dist-electron/dist/splash.html
+
+  - from: ./electron/scripts
+    to: dist-electron/scripts
+
+# Client installer DELIBERATELY does NOT ship:
+#   - resources/backend/        (no local backend; clients call the LAN server)
+#   - credit-score.onnx         (no local ONNX inference; clients are renderer-only)
+#   - onnxruntime-node          (not present in the client deps)
+# All credit-risk scoring happens server-side via /api/customers/:id/credit-score.
+
+directories:
+  buildResources: build
+  output: ../release-client
+
+publish:
+  - provider: github
+    owner: TariqAli93
+    repo: nuqta-plus-refactored
+    releaseType: release
+
+win:
+  target:
+    - nsis
+  icon: build/icon.ico
+  artifactName: NuqtaPlus-Client-Setup-${version}.exe
+
+nsis:
+  oneClick: false
+  perMachine: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: 'NuqtaPlus Client'
+  installerHeader: build/installer-header.bmp
+  installerSidebar: build/installer-sidebar.bmp
+  uninstallerIcon: build/icon.ico
+  uninstallDisplayName: 'NuqtaPlus Client'
+  license: build/license.md
+  unicode: true
+  # Client uses a no-op include so the installer does NOT register or start
+  # the backend Windows Service — the client is renderer-only and points at
+  # a remote LAN server.
+  include: ../scripts/installer-include-client.nsh

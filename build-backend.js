@@ -1,0 +1,321 @@
+/**
+ * build-backend.js
+ *
+ * Builds a self-contained backend artifact in ./dist-backend that will later
+ * be copied verbatim into the packaged Electron app at:
+ *   <app>/resources/backend
+ *
+ * Pipeline:
+ *   1. Clean ./dist-backend
+ *   2. Copy ./backend sources (excluding node_modules)
+ *   3. Install production dependencies via npm
+ *   4. Bundle Windows Service host (WinSW)
+ *
+ * The `pg` driver is pure JavaScript — no native rebuild step is needed.
+ *
+ * On any failure this script exits with a non-zero code so the electron
+ * packaging step is never reached with a broken backend.
+ */
+
+import { execSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const ROOT = __dirname;
+const SOURCE_DIR = path.join(ROOT, 'backend');
+const DIST_DIR = path.join(ROOT, 'dist-backend');
+const IS_WIN = process.platform === 'win32';
+
+// ── Windows Service host (WinSW) ───────────────────────────────────────────
+const SERVICE_NAME = 'NuqtaPlusBackend';
+const WINSW_SOURCE = path.join(ROOT, 'tools', 'winsw', 'WinSW-x64.exe');
+const SERVICE_TEMPLATE_DIR = path.join(SOURCE_DIR, 'service');
+const SERVICE_XML_TEMPLATE = path.join(SERVICE_TEMPLATE_DIR, `${SERVICE_NAME}.xml.tmpl`);
+const SERVICE_EXE_DIST = path.join(DIST_DIR, `${SERVICE_NAME}.exe`);
+const SERVICE_XML_DIST = path.join(DIST_DIR, `${SERVICE_NAME}.xml`);
+const SERVICE_SCRIPTS_DIST = path.join(DIST_DIR, 'service');
+
+const REQUIRED_SOURCE_FILES = [
+  'src/server.js',
+  'src/db.js',
+  'package.json',
+];
+
+const log = (msg) => console.log(`[build-backend] ${msg}`);
+const warn = (msg) => console.warn(`[build-backend] ⚠ ${msg}`);
+const fail = (msg) => {
+  console.error(`[build-backend] ❌ ${msg}`);
+  process.exit(1);
+};
+
+function cleanDist() {
+  if (fs.existsSync(DIST_DIR)) {
+    log('Cleaning dist-backend...');
+    fs.rmSync(DIST_DIR, { recursive: true, force: true });
+  }
+  fs.mkdirSync(DIST_DIR, { recursive: true });
+}
+
+function copyBackendSource() {
+  log('Copying backend source → dist-backend (excluding node_modules)...');
+  if (!fs.existsSync(SOURCE_DIR)) {
+    fail(`Backend source directory not found: ${SOURCE_DIR}`);
+  }
+
+  fs.cpSync(SOURCE_DIR, DIST_DIR, {
+    recursive: true,
+    dereference: false,
+    filter: (src) => {
+      const rel = path.relative(SOURCE_DIR, src).split(path.sep);
+      if (rel[0] === 'node_modules') return false;
+      if (rel.length === 1 && rel[0] === 'package-lock.json') return false;
+      if (rel.length === 1 && rel[0] === 'pnpm-lock.yaml') return false;
+      // Strip dev .env files so we never ship dev credentials. Production
+      // overrides ship via .env.production / .env.production.example below.
+      if (rel.length === 1 && rel[0] === '.env') return false;
+      if (rel.length === 1 && rel[0] === '.env.debug') return false;
+      if (rel.length === 1 && rel[0] === '.env.example') return false;
+      return true;
+    },
+  });
+
+  // ── Ship a .env.production.example as a template for admins ──────────
+  // The backend's envLoader.js searches:
+  //   1) $NUQTA_ENV_FILE
+  //   2) cwd/.env
+  //   3) <backend>/.env, <backend>/.env.production
+  //   4) %PROGRAMDATA%\NuqtaPlus\.env
+  // We always ship the example so the documented override location is
+  // discoverable. If a real .env.production exists in the source tree it is
+  // also copied (for sites that build per-customer images).
+  writeEnvProductionExample();
+  copyEnvProductionIfPresent();
+
+  for (const rel of REQUIRED_SOURCE_FILES) {
+    const abs = path.join(DIST_DIR, rel);
+    if (!fs.existsSync(abs)) fail(`Source copy missing required file: ${rel}`);
+  }
+}
+
+function writeEnvProductionExample() {
+  const target = path.join(DIST_DIR, '.env.production.example');
+  const content =
+`# NuqtaPlus backend — production environment overrides.
+#
+# The service descriptor (NuqtaPlusBackend.xml) sets default values for
+# PG_HOST/PG_USER/etc. Values in THIS file are loaded by envLoader.js but
+# DO NOT override values already set by the service descriptor.
+#
+# To use this file as an actual override, either:
+#   1. Rename it to .env.production (next to NuqtaPlusBackend.xml)
+#   2. Place it at %PROGRAMDATA%\\NuqtaPlus\\.env
+#   3. Set NUQTA_ENV_FILE=<absolute path> in the service descriptor
+# In all cases, REMOVE the matching <env> line from NuqtaPlusBackend.xml so
+# this file's value can take effect.
+
+# DATABASE_URL takes precedence over PG_* when set:
+# DATABASE_URL=postgresql://postgres:root@127.0.0.1:5432/nuqta_db
+
+# Individual PostgreSQL connection params:
+PG_HOST=127.0.0.1
+PG_PORT=5432
+PG_DATABASE=nuqta_db
+PG_USER=postgres
+PG_PASSWORD=root
+PG_SSL=false
+
+# Connection retry policy:
+PG_CONNECT_RETRY_ATTEMPTS=30
+PG_CONNECT_RETRY_DELAY_MS=2000
+
+# Strong random secret REQUIRED in production. Generate one with:
+#   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+JWT_SECRET=replace_me_with_a_strong_random_32_byte_hex_string
+
+# Diagnostics log directory (default: %PROGRAMDATA%\\NuqtaPlus\\logs):
+# NUQTA_LOG_DIR=C:\\ProgramData\\NuqtaPlus\\logs
+`;
+  fs.writeFileSync(target, content, 'utf8');
+  log(`✓ ${path.relative(ROOT, target)}`);
+}
+
+function copyEnvProductionIfPresent() {
+  const src = path.join(SOURCE_DIR, '.env.production');
+  if (fs.existsSync(src)) {
+    const dst = path.join(DIST_DIR, '.env.production');
+    fs.copyFileSync(src, dst);
+    warn(
+      `Shipped backend/.env.production into dist-backend. Make sure it does ` +
+      `NOT contain dev secrets — this file ends up on every customer install.`
+    );
+    log(`✓ ${path.relative(ROOT, dst)}`);
+  }
+}
+
+function installProductionDeps() {
+  log('Installing production dependencies inside dist-backend...');
+  execSync('npm install --omit=dev --no-audit --no-fund --loglevel=error', {
+    cwd: DIST_DIR,
+    stdio: 'inherit',
+    env: { ...process.env },
+  });
+
+  if (!fs.existsSync(path.join(DIST_DIR, 'node_modules'))) {
+    fail('npm install completed but dist-backend/node_modules is missing');
+  }
+
+  // Verify pg driver is present
+  const pgDir = path.join(DIST_DIR, 'node_modules', 'pg');
+  if (!fs.existsSync(pgDir)) {
+    fail('pg module not found in dist-backend/node_modules — check backend/package.json dependencies');
+  }
+  log('✓ pg driver installed');
+
+  // Verify onnxruntime-node (optional — app works without it via rule-based fallback)
+  const ortDir = path.join(DIST_DIR, 'node_modules', 'onnxruntime-node');
+  if (fs.existsSync(ortDir)) {
+    log('✓ onnxruntime-node installed (ONNX credit scoring enabled)');
+  } else {
+    warn('onnxruntime-node not found — ONNX credit scoring disabled, rule-based fallback active');
+  }
+}
+
+// ── Credit-risk model artifacts ─────────────────────────────────────────
+// The model + meta sidecar must ship inside the backend bundle. They are
+// copied as part of copyBackendSource() (since they live under backend/models/),
+// so this step is purely a guard rail — fail loudly if either is missing,
+// non-empty, or has a meta.json shape that the runtime won't accept.
+function verifyCreditModelArtifacts() {
+  const modelPath = path.join(DIST_DIR, 'models', 'credit-score.onnx');
+  const metaPath = path.join(DIST_DIR, 'models', 'credit-score.meta.json');
+
+  // Allow opt-out only when explicitly building a no-model image (e.g. for
+  // CI smoke tests). Production builds MUST have both artifacts.
+  const modelRequired = process.env.CREDIT_MODEL_REQUIRED !== 'false';
+  const expectedModel = path.relative(ROOT, modelPath);
+  const expectedMeta = path.relative(ROOT, metaPath);
+
+  if (!fs.existsSync(modelPath)) {
+    if (!modelRequired) {
+      warn(`CREDIT_MODEL_REQUIRED=false — shipping without ${expectedModel}`);
+      return;
+    }
+    fail(
+      `Missing credit scoring model files.\nRun:\npnpm run train:credit-model\nExpected:\n- ${expectedModel}\n- ${expectedMeta}`
+    );
+  }
+  if (fs.statSync(modelPath).size === 0) {
+    fail(`credit-score.onnx is empty at ${path.relative(ROOT, modelPath)} — re-train.`);
+  }
+
+  if (!fs.existsSync(metaPath)) {
+    if (!modelRequired) {
+      warn(`CREDIT_MODEL_REQUIRED=false — shipping without ${expectedMeta}`);
+      return;
+    }
+    fail(
+      `Missing credit scoring model files.\nRun:\npnpm run train:credit-model\nExpected:\n- ${expectedModel}\n- ${expectedMeta}`
+    );
+  }
+
+  let meta;
+  try {
+    meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+  } catch (err) {
+    fail(`credit-score.meta.json is not valid JSON: ${err.message}`);
+  }
+  if (!meta || typeof meta !== 'object') {
+    fail('credit-score.meta.json is not an object');
+  }
+  if (!Array.isArray(meta.featureNames) || meta.featureNames.length === 0) {
+    fail('credit-score.meta.json missing required field: featureNames');
+  }
+  if (!meta.modelVersion) {
+    fail('credit-score.meta.json missing required field: modelVersion');
+  }
+
+  log(
+    `✓ credit-risk model artifacts present (version=${meta.modelVersion}, ` +
+      `features=${meta.featureNames.length})`
+  );
+}
+
+function bundleServiceHost() {
+  log('Bundling Windows Service host (WinSW)...');
+
+  if (!fs.existsSync(WINSW_SOURCE)) {
+    fail(
+      `WinSW binary missing: ${WINSW_SOURCE}\n` +
+        'Run `pnpm fetch:winsw` to download and verify it, then re-run this build.\n' +
+        'See scripts/fetch-winsw.js for the pinned version and supply-chain checks.'
+    );
+  }
+
+  if (!fs.existsSync(SERVICE_XML_TEMPLATE)) {
+    fail(
+      `Service descriptor template missing: ${SERVICE_XML_TEMPLATE}\n` +
+        'Expected backend/service/NuqtaPlusBackend.xml.tmpl to be committed.'
+    );
+  }
+
+  // 1. Copy WinSW.exe → dist-backend/NuqtaPlusBackend.exe
+  fs.copyFileSync(WINSW_SOURCE, SERVICE_EXE_DIST);
+  log(`✓ ${path.relative(ROOT, SERVICE_EXE_DIST)}`);
+
+  // 2. Render the XML descriptor with the backend version baked in.
+  const backendPkg = JSON.parse(
+    fs.readFileSync(path.join(DIST_DIR, 'package.json'), 'utf8')
+  );
+  const tmpl = fs.readFileSync(SERVICE_XML_TEMPLATE, 'utf8');
+  const rendered = tmpl.replace(/\$\{BACKEND_VERSION\}/g, backendPkg.version || '0.0.0');
+  fs.writeFileSync(SERVICE_XML_DIST, rendered, 'utf8');
+  log(`✓ ${path.relative(ROOT, SERVICE_XML_DIST)} (v${backendPkg.version})`);
+
+  // 3. Sanity check the service scripts directory.
+  if (!fs.existsSync(SERVICE_SCRIPTS_DIST)) {
+    fail(
+      `Service scripts directory missing in dist-backend: ${SERVICE_SCRIPTS_DIST}\n` +
+        'Expected backend/service/*.cmd to be copied by copyBackendSource().'
+    );
+  }
+  for (const required of [
+    'install-service.cmd',
+    'uninstall-service.cmd',
+    'start-service.cmd',
+    'stop-service.cmd',
+    'restart-service.cmd',
+    'status-service.cmd',
+    'verify-version.ps1',
+    'free-port.ps1',
+    'stop-wait.ps1',
+    'repair-service.ps1',
+  ]) {
+    const abs = path.join(SERVICE_SCRIPTS_DIST, required);
+    if (!fs.existsSync(abs)) fail(`Missing service script: service/${required}`);
+  }
+  // Remove template — not needed at runtime.
+  const distTmpl = path.join(SERVICE_SCRIPTS_DIST, `${SERVICE_NAME}.xml.tmpl`);
+  if (fs.existsSync(distTmpl)) fs.rmSync(distTmpl, { force: true });
+
+  log('✓ service host bundled');
+}
+
+function main() {
+  log(`Platform: ${process.platform}`);
+  log(`Source:   ${SOURCE_DIR}`);
+  log(`Dist:     ${DIST_DIR}`);
+
+  cleanDist();
+  copyBackendSource();
+  installProductionDeps();
+  verifyCreditModelArtifacts();
+  bundleServiceHost();
+
+  log('✅ Backend build complete — dist-backend is ready for packaging');
+}
+
+main();
