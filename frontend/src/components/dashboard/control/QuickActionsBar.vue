@@ -139,7 +139,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
 <style scoped lang="scss">
 .qa-grid {
   display: grid;
-  grid-template-columns: repeat(8, minmax(132px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
   gap: 0.6rem;
   padding: 0.85rem;
 }

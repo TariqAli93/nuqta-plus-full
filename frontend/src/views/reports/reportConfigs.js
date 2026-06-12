@@ -105,20 +105,28 @@ export const REPORT_CONFIGS = {
     accent: '#dc2626',
     permission: 'sales:read',
     defaultRange: 'all',
-    filters: ['debtFilter', 'search', 'branch'],
-    searchPlaceholder: 'بحث باسم العميل أو رقم الهاتف',
+    // Debt facets: party (عميل/وكيل/مورد), direction (لنا/علينا) and status.
+    filters: ['partyType', 'direction', 'debtStatus', 'date', 'search', 'branch'],
+    defaultPartyType: 'all',
+    defaultDirection: 'all',
+    defaultDebtStatus: 'all',
+    searchPlaceholder: 'بحث بالاسم أو الهاتف أو رقم الفاتورة أو الملاحظات',
     summary: [
-      { key: 'totalDebt', label: 'إجمالي الديون', format: money, accent: '#dc2626', big: true },
-      { key: 'customers', label: 'عدد العملاء المدينين', format: int, accent: '#9333ea' },
+      { key: 'totalReceivable', label: 'إجمالي الديون التي لنا', format: money, accent: '#16a34a', big: true },
+      { key: 'totalPayable', label: 'إجمالي الديون التي علينا', format: money, accent: '#dc2626', big: true },
+      { key: 'netDebt', label: 'صافي الديون', format: 'netDebt', accent: '#2563eb', big: true },
     ],
     columns: [
-      { key: 'customer_name', label: 'اسم العميل' },
+      { key: 'partyType', label: 'النوع', format: 'partyType' },
+      { key: 'partyName', label: 'الاسم' },
       { key: 'phone', label: 'رقم الهاتف' },
-      { key: 'total_amount', label: 'إجمالي المبلغ', format: money, align: 'end' },
-      { key: 'paid', label: 'المدفوع', format: money, align: 'end' },
-      { key: 'remaining', label: 'المتبقي', format: money, align: 'end' },
-      { key: 'last_payment', label: 'آخر دفعة', format: date },
-      { key: 'last_invoice', label: 'آخر فاتورة', format: date },
+      { key: 'totalAmount', label: 'إجمالي الدين', format: money, align: 'end' },
+      { key: 'paidAmount', label: 'المدفوع', format: money, align: 'end' },
+      { key: 'remainingAmount', label: 'المتبقي', format: money, align: 'end' },
+      { key: 'direction', label: 'اتجاه الدين', format: 'direction' },
+      { key: 'status', label: 'الحالة', format: 'debtStatus' },
+      { key: 'lastTransactionDate', label: 'آخر عملية', format: date },
+      { key: 'lastPaymentDate', label: 'آخر دفعة', format: date },
     ],
   },
 
@@ -207,11 +215,43 @@ export const REPORT_ORDER = [
   'sales', 'profit', 'top-products', 'debts', 'cash-box', 'expenses', 'cash-movement',
 ];
 
-export const DEBT_FILTER_OPTIONS = [
-  { value: 'due', title: 'الديون المستحقة' },
-  { value: 'all', title: 'كل الديون' },
-  { value: 'partial', title: 'مسددة جزئياً' },
+// ── Debts report option sets ────────────────────────────────────────────────
+export const PARTY_TYPE_OPTIONS = [
+  { value: 'all', title: 'كل الأطراف' },
+  { value: 'customer', title: 'العملاء' },
+  { value: 'agent', title: 'الوكلاء' },
+  { value: 'supplier', title: 'الموردون' },
 ];
+
+export const DEBT_DIRECTION_OPTIONS = [
+  { value: 'all', title: 'كل الاتجاهات' },
+  { value: 'receivable', title: 'لنا' },
+  { value: 'payable', title: 'علينا' },
+];
+
+export const DEBT_STATUS_OPTIONS = [
+  { value: 'all', title: 'كل الديون' },
+  { value: 'open', title: 'مفتوح' },
+  { value: 'partial', title: 'مسدد جزئياً' },
+  { value: 'paid', title: 'مسدد بالكامل' },
+  { value: 'overdue', title: 'متأخر' },
+];
+
+/** Arabic labels + chip colors for the debt row cells. */
+export const PARTY_TYPE_LABELS = { customer: 'عميل', agent: 'وكيل', supplier: 'مورد' };
+export const DEBT_DIRECTION_LABELS = { receivable: 'لنا', payable: 'علينا' };
+export const DEBT_STATUS_LABELS = {
+  open: 'مفتوح',
+  partial: 'مسدد جزئياً',
+  paid: 'مسدد بالكامل',
+  overdue: 'متأخر',
+};
+export const DEBT_STATUS_COLORS = {
+  open: 'info',
+  partial: 'warning',
+  paid: 'success',
+  overdue: 'error',
+};
 
 export const MOVEMENT_TYPE_OPTIONS = [
   { value: 'all', title: 'الكل' },

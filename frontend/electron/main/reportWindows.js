@@ -58,24 +58,30 @@ async function loadReportRoute(win, type, params) {
   throw new Error(`Failed to locate index.html for report window: ${lastErr?.message || 'unknown'}`);
 }
 
-async function openReportWindow(parentWindow, { type, params }) {
+function openReportWindow(parentWindow, { type, params }) {
   if (!TITLES[type]) throw new Error(`Unknown report type: ${type}`);
 
   // Already open → focus it (and push the latest filters) instead of duplicating.
   const existing = windows.get(type);
   if (existing && !existing.isDestroyed()) {
     if (existing.isMinimized()) existing.restore();
+    existing.show(); // no-op if already visible; guarantees a still-loading one surfaces
     existing.focus();
     try { existing.webContents.send('reports:params', params || {}); } catch { /* ignore */ }
-    return { focused: true };
+    return { ok: true, focused: true };
   }
 
+  // Open the frame IMMEDIATELY (show: true) so the user gets instant feedback;
+  // the report page paints its own skeleton/loading and fetches data after the
+  // window is up. We do NOT await page load before returning — blocking the IPC
+  // on `did-finish-load` is what made cards feel frozen for several seconds.
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 720,
     minHeight: 520,
-    show: false,
+    show: true,
+    backgroundColor: '#ffffff', // avoids a transparent flash while the SPA boots
     title: TITLES[type],
     parent: parentWindow && !parentWindow.isDestroyed() ? parentWindow : undefined,
     modal: false,
@@ -87,6 +93,8 @@ async function openReportWindow(parentWindow, { type, params }) {
     },
   });
   win.removeMenu();
+  // Register synchronously, BEFORE the async load, so a rapid second click finds
+  // this window and focuses it instead of spawning a duplicate.
   windows.set(type, win);
 
   win.webContents.on('before-input-event', (event, input) => {
@@ -96,18 +104,18 @@ async function openReportWindow(parentWindow, { type, params }) {
     }
   });
 
-  win.once('ready-to-show', () => { win.show(); win.focus(); });
+  win.once('ready-to-show', () => { win.focus(); });
   win.on('closed', () => { windows.delete(type); });
 
-  try {
-    await loadReportRoute(win, type, params);
-  } catch (err) {
+  // Fire-and-forget the navigation; on failure tear the (already-shown) window
+  // down so a blank frame doesn't linger and a retry can re-create it.
+  loadReportRoute(win, type, params).catch((err) => {
     logger.error(`reports:open — ${err.message}`);
     if (!win.isDestroyed()) win.destroy();
     windows.delete(type);
-    throw err;
-  }
-  return { opened: true };
+  });
+
+  return { ok: true, opened: true };
 }
 
 /**

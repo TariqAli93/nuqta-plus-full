@@ -1,6 +1,7 @@
 import { getPool } from '../db.js';
 import { branchFilterFor } from './scopeService.js';
 import { isFeatureEnabled } from './featureFlagsService.js';
+import { hasPermission } from '../auth/permissionMatrix.js';
 
 /**
  * "Quick question" POS/accounting reports (الأسئلة السريعة) — the data behind the
@@ -272,62 +273,177 @@ class PosReportsService {
     };
   }
 
-  // ── 4) شنو عليه دين؟ — Customer debts ──────────────────────────────────────
+  // ── 4) شنو عليه دين؟ — Debts across customers, agents & suppliers ──────────
+  //
+  // A debt is signed by who owes whom, NOT lumped together:
+  //   • customers / agents → outstanding sales (AR)  → normally "لنا" (receivable)
+  //   • suppliers          → outstanding purchases (AP) → normally "علينا" (payable)
+  // Agents are simply customers classified `customer_type = 'agent'`; a credit
+  // balance (negative remaining) flips a row's direction so an over-paid customer
+  // shows as "علينا" and an over-paid supplier as "لنا". The summary nets the two
+  // sides: netDebt = totalReceivable − totalPayable (positive = صافي لنا).
   async debts(filters, user) {
     const pool = await getPool();
     const branch = effectiveBranch(user, filters.branchId);
-    if (branch === -1) return this.#empty(filters);
+    if (branch === -1) return this.#emptyDebts(filters);
     const { page, limit, offset } = paging(filters);
 
-    // Per-customer aggregation over their (non-opening) sales.
-    const where = ['s.customer_id IS NOT NULL', 'COALESCE(s.is_opening_balance,false) = false'];
+    const partyType = ['customer', 'agent', 'supplier', 'all'].includes(filters.partyType)
+      ? filters.partyType : 'all';
+    const direction = ['receivable', 'payable', 'all'].includes(filters.direction)
+      ? filters.direction : 'all';
+    // Map the legacy `filter` (due/all/partial/customer) onto the new `status`.
+    const legacy = { due: 'all', partial: 'partial', customer: 'all' };
+    const statusRaw = filters.status || legacy[filters.filter] || filters.filter || 'all';
+    const status = ['open', 'partial', 'paid', 'overdue', 'all'].includes(statusRaw)
+      ? statusRaw : 'all';
+
+    // RBAC: only surface the supplier (AP) leg to users who may read suppliers /
+    // purchases; sales-only users still get the customer/agent side.
+    const canReadSuppliers =
+      hasPermission('suppliers:read', user?.role) || hasPermission('purchases:read', user?.role);
+    const wantCustomers = partyType === 'all' || partyType === 'customer' || partyType === 'agent';
+    const wantSuppliers = (partyType === 'all' || partyType === 'supplier') && canReadSuppliers;
+
+    // Shared, positional params across both UNION legs.
     const a = [];
-    const add = (cond, val) => { a.push(val); where.push(cond.replace('$$', `$${a.length}`)); };
-    if (branch !== null) add('s.branch_id = $$', branch);
-    if (filters.from) add('s.created_at::date >= $$', filters.from);
-    if (filters.to) add('s.created_at::date <= $$', filters.to);
-    if (filters.customerId) add('s.customer_id = $$', Number(filters.customerId));
-    if (filters.search) {
-      a.push(`%${filters.search}%`); const p1 = a.length;
-      a.push(`%${filters.search}%`); const p2 = a.length;
-      where.push(`(c.name ILIKE $${p1} OR c.phone ILIKE $${p2})`);
+    const P = (v) => { a.push(v); return `$${a.length}`; };
+    const branchP = branch !== null ? P(branch) : null;
+    const fromP = filters.from ? P(filters.from) : null;
+    const toP = filters.to ? P(filters.to) : null;
+    const searchP = filters.search ? P(`%${filters.search}%`) : null;
+    if (filters.customerId) {
+      // Back-compat: drilling into one customer from older callers.
+      P(Number(filters.customerId));
     }
-    // status filter on the aggregate
-    const filter = filters.filter || 'due';
-    let having = 'SUM(s.remaining_amount) > 0';
-    if (filter === 'all') having = 'SUM(s.total) > 0';              // anyone who ever bought on account
-    else if (filter === 'partial') having = 'SUM(s.paid_amount) > 0 AND SUM(s.remaining_amount) > 0';
-    else if (filter === 'customer') having = 'SUM(s.total) > 0';
-    const W = where.join(' AND ');
+    const customerIdP = filters.customerId ? `$${a.length}` : null;
 
-    const base = `
-      FROM sales s JOIN customers c ON c.id = s.customer_id
-      WHERE ${W}
-      GROUP BY c.id, c.name, c.phone
-      HAVING ${having}`;
+    const legs = [];
 
-    const [{ cnt, debt }] = (await pool.query(
-      `SELECT COUNT(*)::int cnt, COALESCE(SUM(remaining),0) debt FROM (
-        SELECT SUM(s.remaining_amount) remaining ${base}
-      ) t`, a
+    if (wantCustomers) {
+      const w = ['s.customer_id IS NOT NULL', 'COALESCE(s.is_opening_balance,false) = false'];
+      if (partyType === 'customer') w.push(`COALESCE(c.customer_type,'retail') <> 'agent'`);
+      if (partyType === 'agent') w.push(`COALESCE(c.customer_type,'retail') = 'agent'`);
+      if (branchP) w.push(`s.branch_id = ${branchP}`);
+      if (fromP) w.push(`s.created_at::date >= ${fromP}`);
+      if (toP) w.push(`s.created_at::date <= ${toP}`);
+      if (customerIdP) w.push(`s.customer_id = ${customerIdP}`);
+      if (searchP)
+        w.push(`(c.name ILIKE ${searchP} OR c.phone ILIKE ${searchP}
+                 OR s.invoice_number ILIKE ${searchP} OR COALESCE(c.notes,'') ILIKE ${searchP})`);
+      legs.push(`
+        SELECT
+          CASE WHEN COALESCE(c.customer_type,'retail') = 'agent' THEN 'agent' ELSE 'customer' END AS party_type,
+          c.id AS party_id, c.name AS party_name, c.phone AS phone,
+          SUM(s.total) AS total_amount,
+          SUM(s.paid_amount) AS paid_amount,
+          SUM(s.remaining_amount) AS remaining_amount,
+          MAX(s.created_at) AS last_transaction_date,
+          MIN(CASE WHEN s.remaining_amount > 0 THEN s.created_at END) AS oldest_unpaid,
+          (SELECT MAX(pay.payment_date) FROM payments pay WHERE pay.customer_id = c.id) AS last_payment_date
+        FROM sales s JOIN customers c ON c.id = s.customer_id
+        WHERE ${w.join(' AND ')}
+        GROUP BY c.id, c.name, c.phone, c.customer_type`);
+    }
+
+    if (wantSuppliers) {
+      const w = [`pi.status <> 'cancelled'`, 'COALESCE(pi.is_opening_balance,false) = false'];
+      if (branchP) w.push(`pi.branch_id = ${branchP}`);
+      if (fromP) w.push(`pi.invoice_date >= ${fromP}`);
+      if (toP) w.push(`pi.invoice_date <= ${toP}`);
+      if (searchP)
+        w.push(`(sup.name ILIKE ${searchP} OR sup.phone ILIKE ${searchP}
+                 OR pi.invoice_number ILIKE ${searchP} OR COALESCE(pi.notes,'') ILIKE ${searchP})`);
+      legs.push(`
+        SELECT
+          'supplier' AS party_type,
+          sup.id AS party_id, sup.name AS party_name, sup.phone AS phone,
+          SUM(pi.total) AS total_amount,
+          SUM(pi.paid_amount) AS paid_amount,
+          SUM(pi.remaining_amount) AS remaining_amount,
+          MAX(pi.invoice_date)::timestamp AS last_transaction_date,
+          MIN(CASE WHEN pi.remaining_amount > 0 THEN pi.invoice_date END)::timestamp AS oldest_unpaid,
+          (SELECT MAX(v.voucher_date)::timestamp FROM vouchers v
+            WHERE v.supplier_id = sup.id AND v.voucher_type = 'payment' AND v.status = 'active') AS last_payment_date
+        FROM purchase_invoices pi JOIN suppliers sup ON sup.id = pi.supplier_id
+        WHERE ${w.join(' AND ')}
+        GROUP BY sup.id, sup.name, sup.phone`);
+    }
+
+    if (!legs.length) return this.#emptyDebts(filters);
+
+    // Classify each party: direction (receivable/payable), positive outstanding
+    // magnitude, and a mutually-exclusive status (paid → overdue → partial → open).
+    const classified = `
+      SELECT p.*,
+        ABS(p.remaining_amount) AS outstanding,
+        CASE WHEN p.party_type = 'supplier'
+             THEN CASE WHEN p.remaining_amount >= 0 THEN 'payable' ELSE 'receivable' END
+             ELSE CASE WHEN p.remaining_amount >= 0 THEN 'receivable' ELSE 'payable' END
+        END AS direction,
+        CASE
+          WHEN ABS(p.remaining_amount) < 0.005 THEN 'paid'
+          WHEN p.oldest_unpaid IS NOT NULL AND p.oldest_unpaid < (CURRENT_DATE - INTERVAL '30 days') THEN 'overdue'
+          WHEN p.paid_amount > 0 THEN 'partial'
+          ELSE 'open'
+        END AS status
+      FROM ( ${legs.join('\n        UNION ALL\n')} ) p`;
+
+    // Outer filters on the classified set. `direction`/`status` are strict enums
+    // validated above, so inlining them is safe.
+    const outer = [];
+    if (direction !== 'all') outer.push(`direction = '${direction}'`);
+    outer.push(status === 'all' ? `status <> 'paid'` : `status = '${status}'`);
+    const filtered = `SELECT * FROM ( ${classified} ) c WHERE ${outer.join(' AND ')}`;
+
+    const [sum] = (await pool.query(
+      `SELECT
+         COALESCE(SUM(CASE WHEN direction='receivable' THEN outstanding ELSE 0 END),0) AS total_receivable,
+         COALESCE(SUM(CASE WHEN direction='payable'    THEN outstanding ELSE 0 END),0) AS total_payable,
+         COUNT(*) FILTER (WHERE direction='receivable')::int AS receivable_count,
+         COUNT(*) FILTER (WHERE direction='payable')::int    AS payable_count,
+         COUNT(*)::int AS total
+       FROM ( ${filtered} ) f`, a
     )).rows;
 
     const rows = (await pool.query(
-      `SELECT c.id customer_id, c.name customer_name, c.phone,
-              SUM(s.total) total_amount,
-              SUM(s.paid_amount) paid,
-              SUM(s.remaining_amount) remaining,
-              (SELECT MAX(pay.payment_date) FROM payments pay WHERE pay.customer_id = c.id) last_payment,
-              MAX(s.created_at) last_invoice
-       ${base}
-       ORDER BY remaining DESC
+      `SELECT party_type, party_id, party_name, phone,
+              total_amount, paid_amount, remaining_amount, outstanding,
+              direction, status, last_transaction_date, last_payment_date
+       FROM ( ${filtered} ) f
+       ORDER BY outstanding DESC, party_name ASC
        LIMIT ${limit} OFFSET ${offset}`, a
     )).rows;
 
+    const totalReceivable = num(sum.total_receivable);
+    const totalPayable = num(sum.total_payable);
     return {
-      summary: { totalDebt: num(debt), customers: num(cnt) },
-      rows,
-      meta: { page, limit, total: num(cnt) },
+      summary: {
+        totalReceivable,
+        totalPayable,
+        netDebt: totalReceivable - totalPayable,
+        receivableCount: num(sum.receivable_count),
+        payableCount: num(sum.payable_count),
+        // Legacy keys so any older consumer of this report keeps working.
+        totalDebt: totalReceivable,
+        customers: num(sum.receivable_count),
+      },
+      rows: rows.map((r) => ({
+        partyType: r.party_type,
+        partyId: r.party_id,
+        partyName: r.party_name,
+        phone: r.phone,
+        totalAmount: num(r.total_amount),
+        paidAmount: num(r.paid_amount),
+        remainingAmount: num(r.outstanding),
+        direction: r.direction,
+        lastTransactionDate: r.last_transaction_date,
+        lastPaymentDate: r.last_payment_date,
+        status: r.status,
+        sourceType: r.party_type === 'supplier' ? 'purchase' : 'sale',
+        sourceId: r.party_id,
+      })),
+      meta: { page, limit, total: num(sum.total) },
     };
   }
 
@@ -556,6 +672,18 @@ class PosReportsService {
   #empty(filters) {
     const { page, limit } = paging(filters);
     return { summary: {}, rows: [], meta: { page, limit, total: 0 } };
+  }
+
+  #emptyDebts(filters) {
+    const { page, limit } = paging(filters);
+    return {
+      summary: {
+        totalReceivable: 0, totalPayable: 0, netDebt: 0,
+        receivableCount: 0, payableCount: 0, totalDebt: 0, customers: 0,
+      },
+      rows: [],
+      meta: { page, limit, total: 0 },
+    };
   }
 }
 

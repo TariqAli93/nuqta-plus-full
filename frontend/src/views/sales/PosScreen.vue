@@ -28,7 +28,13 @@
         <!-- Shift status / open / close shift bar -->
         <div class="shift-bar">
           <template v-if="hasOpenSession">
-            <v-chip data-testid="pos-shift-chip" size="small" color="success" variant="flat" prepend-icon="mdi-cash-register">
+            <v-chip
+              data-testid="pos-shift-chip"
+              size="small"
+              color="success"
+              variant="flat"
+              prepend-icon="mdi-cash-register"
+            >
               وردية #{{ currentSession.id }} — افتتاحي
               {{ formatMoney(currentSession.openingCash, currentSession.currency) }}
             </v-chip>
@@ -115,20 +121,10 @@
           <v-btn-toggle
             v-if="agentPricingOn"
             :model-value="priceType"
-            mandatory
-            density="comfortable"
-            color="primary"
-            variant="outlined"
-            divided
             aria-label="نوع التسعيرة"
             @update:model-value="setPriceType"
           >
-            <v-btn
-              v-for="tier in PRICE_TIERS"
-              :key="tier.value"
-              :value="tier.value"
-              size="small"
-            >
+            <v-btn v-for="tier in PRICE_TIERS" :key="tier.value" :value="tier.value" size="small">
               {{ tier.label }}
             </v-btn>
           </v-btn-toggle>
@@ -455,7 +451,9 @@
 
         <div class="cart__total-main">
           <span class="cart__total-label">الإجمالي</span>
-          <span class="cart__total-value" data-testid="pos-total">{{ formatMoney(total, currency) }}</span>
+          <span class="cart__total-value" data-testid="pos-total">{{
+            formatMoney(total, currency)
+          }}</span>
         </div>
 
         <!-- Collapsible discount / tax options (hidden by default) -->

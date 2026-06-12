@@ -14,14 +14,16 @@ import router from '@/router';
 export function openReportWindow(type, params = {}) {
   const electron = typeof window !== 'undefined' ? window.electronAPI : null;
   if (electron?.openReportWindow) {
-    return Promise.resolve(electron.openReportWindow(type, params)).catch((err) => {
-      // If the IPC fails for any reason, degrade to a browser window.
-      console.warn('[reports] IPC openReportWindow failed, falling back:', err);
-      openInBrowser(type, params);
-    });
+    // In Electron we let IPC failures REJECT so the caller can clear its loading
+    // state and show a clear "تعذر فتح التقرير" message. The main process opens
+    // the window immediately and resolves right away (it does not wait for the
+    // report data), so this promise settles fast — typically well under 100ms.
+    return Promise.resolve(electron.openReportWindow(type, params));
   }
+  // Plain browser (dev / web): open the route in its own popup, or same-tab if
+  // popups are blocked, so the feature still works.
   openInBrowser(type, params);
-  return Promise.resolve({ opened: true, web: true });
+  return Promise.resolve({ ok: true, opened: true, web: true });
 }
 
 function openInBrowser(type, params) {

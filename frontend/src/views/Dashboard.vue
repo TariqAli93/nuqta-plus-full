@@ -13,7 +13,7 @@
 
       <div class="cc-command__tools">
         <!-- حالة الوردية -->
-        <v-chip
+        <v-btn
           v-if="canSeeShift"
           :color="hasOpenShift ? 'success' : 'medium-emphasis'"
           :variant="hasOpenShift ? 'tonal' : 'outlined'"
@@ -26,7 +26,7 @@
             الوردية مفتوحة<span v-if="cashInBox != null"> • {{ fmt(cashInBox) }}</span>
           </template>
           <template v-else>فتح وردية</template>
-        </v-chip>
+        </v-btn>
 
         <CustomizeMenu />
 

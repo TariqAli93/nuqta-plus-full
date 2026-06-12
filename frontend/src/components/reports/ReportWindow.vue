@@ -90,14 +90,34 @@
         </template>
 
         <v-select
-          v-if="cfg.filters.includes('debtFilter')"
-          v-model="debtFilter"
-          :items="DEBT_FILTER_OPTIONS"
-          label="نوع الدين"
+          v-if="cfg.filters.includes('partyType')"
+          v-model="partyType"
+          :items="PARTY_TYPE_OPTIONS"
+          label="نوع الطرف"
           density="compact"
           variant="outlined"
           hide-details
-          max-width="200"
+          max-width="170"
+        />
+        <v-select
+          v-if="cfg.filters.includes('direction')"
+          v-model="direction"
+          :items="DEBT_DIRECTION_OPTIONS"
+          label="اتجاه الدين"
+          density="compact"
+          variant="outlined"
+          hide-details
+          max-width="160"
+        />
+        <v-select
+          v-if="cfg.filters.includes('debtStatus')"
+          v-model="debtStatus"
+          :items="DEBT_STATUS_OPTIONS"
+          label="الحالة"
+          density="compact"
+          variant="outlined"
+          hide-details
+          max-width="160"
         />
         <v-select
           v-if="cfg.filters.includes('movementType')"
@@ -163,13 +183,19 @@
       <v-col v-for="card in cfg.summary" :key="card.key" cols="12" sm="6" md="6" lg="6">
         <v-card>
           <v-card-text class="d-flex align-center ga-3">
-            <v-avatar :color="sem(card.accent)" variant="tonal" rounded="lg" size="44">
-              <v-icon :icon="cfg.icon" />
+            <v-avatar :color="summaryColor(card)" variant="tonal" rounded="lg" size="44">
+              <v-icon :icon="summaryIcon(card)" />
             </v-avatar>
             <div class="d-flex flex-column" style="min-width: 0">
               <span class="text-caption text-medium-emphasis">{{ card.label }}</span>
-              <span class="font-weight-bold text-truncate report-num">
+              <span
+                class="font-weight-bold text-truncate report-num"
+                :class="card.format === 'netDebt' ? `text-${summaryColor(card)}` : ''"
+              >
                 {{ fmt(summary[card.key], card.format) }}
+                <span v-if="card.format === 'netDebt'" class="text-caption font-weight-medium">
+                  {{ Number(summary.netDebt || 0) >= 0 ? 'لنا' : 'علينا' }}
+                </span>
               </span>
             </div>
           </v-card-text>
@@ -233,7 +259,26 @@
         @update:items-per-page="onLimit"
       >
         <template v-for="col in cfg.columns" :key="col.key" #[`item.${col.key}`]="{ item }">
-          <span :class="col.align === 'end' ? 'report-num' : ''">{{
+          <v-chip
+            v-if="col.format === 'direction'"
+            size="small"
+            variant="tonal"
+            :color="item[col.key] === 'payable' ? 'warning' : 'success'"
+          >
+            {{ DEBT_DIRECTION_LABELS[item[col.key]] || item[col.key] }}
+          </v-chip>
+          <v-chip
+            v-else-if="col.format === 'debtStatus'"
+            size="small"
+            variant="tonal"
+            :color="DEBT_STATUS_COLORS[item[col.key]] || 'default'"
+          >
+            {{ DEBT_STATUS_LABELS[item[col.key]] || item[col.key] }}
+          </v-chip>
+          <span v-else-if="col.format === 'partyType'">
+            {{ PARTY_TYPE_LABELS[item[col.key]] || item[col.key] }}
+          </span>
+          <span v-else :class="col.align === 'end' ? 'report-num' : ''">{{
             fmt(item[col.key], col.format)
           }}</span>
         </template>
@@ -278,8 +323,14 @@ import { useInventoryStore } from '@/stores/inventory';
 import { formatCurrency } from '@/utils/formatters';
 import {
   REPORT_CONFIGS,
-  DEBT_FILTER_OPTIONS,
   MOVEMENT_TYPE_OPTIONS,
+  PARTY_TYPE_OPTIONS,
+  DEBT_DIRECTION_OPTIONS,
+  DEBT_STATUS_OPTIONS,
+  PARTY_TYPE_LABELS,
+  DEBT_DIRECTION_LABELS,
+  DEBT_STATUS_LABELS,
+  DEBT_STATUS_COLORS,
 } from '@/views/reports/reportConfigs.js';
 
 const props = defineProps({ type: { type: String, required: true } });
@@ -296,13 +347,18 @@ const range = ref(route.query.range || cfg.value.defaultRange || 'today');
 const from = ref(route.query.from || '');
 const to = ref(route.query.to || '');
 const search = ref(route.query.search || '');
-const debtFilter = ref(route.query.filter || 'due');
+const partyType = ref(route.query.partyType || cfg.value.defaultPartyType || 'all');
+const direction = ref(route.query.direction || cfg.value.defaultDirection || 'all');
+const debtStatus = ref(route.query.status || cfg.value.defaultDebtStatus || 'all');
 const movementType = ref(route.query.type || 'all');
 const branchId = ref(route.query.branchId ? Number(route.query.branchId) : null);
 const cashSessionId = ref(route.query.cashSessionId ? Number(route.query.cashSessionId) : null);
 const limit = ref(Number(route.query.limit) || 50);
 
-const loading = ref(false);
+// Start in the loading state so a freshly-opened report window paints its
+// table skeleton immediately (the window opens before any data is fetched);
+// `fetchData` flips it off in its finally block.
+const loading = ref(true);
 const error = ref(null);
 const lastUpdated = ref(null);
 const rows = ref([]);
@@ -327,6 +383,18 @@ const SEMANTIC_BY_HEX = {
 };
 const sem = (hex) => SEMANTIC_BY_HEX[String(hex || '').toLowerCase()] || 'primary';
 const accentColor = computed(() => sem(cfg.value.accent));
+
+// The "صافي الديون" card is colored by which side wins: positive = لنا (success),
+// negative = علينا (error); other cards use their configured accent.
+function summaryColor(card) {
+  if (card.format === 'netDebt') return Number(summary.netDebt || 0) >= 0 ? 'success' : 'error';
+  return sem(card.accent);
+}
+function summaryIcon(card) {
+  if (card.format === 'netDebt')
+    return Number(summary.netDebt || 0) >= 0 ? 'mdi-trending-up' : 'mdi-trending-down';
+  return cfg.value.icon;
+}
 const lastUpdatedLabel = computed(() =>
   lastUpdated.value ? lastUpdated.value.toLocaleTimeString('en-GB', { hour12: false }) : '—'
 );
@@ -382,7 +450,9 @@ function buildParams() {
     if (r.to) p.to = r.to;
   }
   if (cfg.value.filters.includes('search') && search.value) p.search = search.value;
-  if (cfg.value.filters.includes('debtFilter')) p.filter = debtFilter.value;
+  if (cfg.value.filters.includes('partyType')) p.partyType = partyType.value;
+  if (cfg.value.filters.includes('direction')) p.direction = direction.value;
+  if (cfg.value.filters.includes('debtStatus')) p.status = debtStatus.value;
   if (cfg.value.filters.includes('movementType')) p.type = movementType.value;
   if (cfg.value.filters.includes('branch') && branchId.value) p.branchId = branchId.value;
   if (cfg.value.filters.includes('cashSession') && cashSessionId.value)
@@ -424,7 +494,9 @@ function resetFilters() {
   from.value = '';
   to.value = '';
   search.value = '';
-  debtFilter.value = 'due';
+  partyType.value = cfg.value.defaultPartyType || 'all';
+  direction.value = cfg.value.defaultDirection || 'all';
+  debtStatus.value = cfg.value.defaultDebtStatus || 'all';
   movementType.value = 'all';
   branchId.value = null;
   cashSessionId.value = null;
@@ -440,7 +512,10 @@ function onLimit(n) {
 }
 
 // Re-fetch (reset to page 1) when any filter changes.
-watch([range, from, to, debtFilter, movementType, branchId, cashSessionId, limit], reload);
+watch(
+  [range, from, to, partyType, direction, debtStatus, movementType, branchId, cashSessionId, limit],
+  reload
+);
 
 let searchTimer = null;
 watch(search, () => {
@@ -502,6 +577,8 @@ const STAT = {
   partially_returned: 'مرتجعة جزئياً',
 };
 function fmt(v, type) {
+  // netDebt shows its magnitude — the لنا/علينا direction is rendered beside it.
+  if (type === 'netDebt') return formatCurrency(Math.abs(Number(v || 0)), 'IQD');
   if (v === null || v === undefined || v === '')
     return type === 'money' || type === 'int' ? fmtZero(type) : '—';
   if (type === 'money') return formatCurrency(Number(v), 'IQD');
@@ -510,6 +587,9 @@ function fmt(v, type) {
   if (type === 'datetime') return new Date(v).toLocaleString('en-GB', { hour12: false });
   if (type === 'paymentType') return PAY[v] || v;
   if (type === 'status') return STAT[v] || v;
+  if (type === 'partyType') return PARTY_TYPE_LABELS[v] || v;
+  if (type === 'direction') return DEBT_DIRECTION_LABELS[v] || v;
+  if (type === 'debtStatus') return DEBT_STATUS_LABELS[v] || v;
   return v;
 }
 function fmtZero(type) {
@@ -556,11 +636,15 @@ function exportExcel() {
 }
 function excelCell(v, type) {
   if (v === null || v === undefined) return '';
+  if (type === 'netDebt') return Math.abs(Number(v || 0));
   if (type === 'money' || type === 'int') return Number(v);
   if (type === 'date') return new Date(v).toLocaleDateString('en-GB');
   if (type === 'datetime') return new Date(v).toLocaleString('en-GB', { hour12: false });
   if (type === 'paymentType') return PAY[v] || v;
   if (type === 'status') return STAT[v] || v;
+  if (type === 'partyType') return PARTY_TYPE_LABELS[v] || v;
+  if (type === 'direction') return DEBT_DIRECTION_LABELS[v] || v;
+  if (type === 'debtStatus') return DEBT_STATUS_LABELS[v] || v;
   return v;
 }
 function escapeHtml(s) {

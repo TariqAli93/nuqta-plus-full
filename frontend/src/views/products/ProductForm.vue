@@ -15,13 +15,7 @@
             <!-- ─── Product type (inventory vs service) ─────────────────── -->
             <v-col cols="12">
               <div class="text-subtitle-2 mb-2">نوع المنتج</div>
-              <v-btn-toggle
-                v-model="formData.productType"
-                mandatory
-                divided
-                color="primary"
-                density="comfortable"
-              >
+              <v-btn-toggle v-model="formData.productType" color="primary">
                 <v-btn value="inventory" prepend-icon="mdi-package-variant">منتج مخزني</v-btn>
                 <v-btn value="service" prepend-icon="mdi-room-service-outline">خدمة</v-btn>
               </v-btn-toggle>
@@ -476,7 +470,13 @@
 
           <div class="d-flex justify-end gap-2 flex-wrap">
             <v-btn data-testid="product-cancel" variant="text" @click="$router.back()">إلغاء</v-btn>
-            <v-btn data-testid="product-save" type="submit" color="primary" prepend-icon="mdi-content-save" :loading="loading">
+            <v-btn
+              data-testid="product-save"
+              type="submit"
+              color="primary"
+              prepend-icon="mdi-content-save"
+              :loading="loading"
+            >
               حفظ
             </v-btn>
           </div>
@@ -503,8 +503,15 @@
         <v-divider />
         <v-card-actions class="pa-3">
           <v-spacer />
-          <v-btn data-testid="product-opening-stock-skip" variant="text" @click="skipOpeningStock">لاحقاً</v-btn>
-          <v-btn data-testid="product-opening-stock-add" color="primary" prepend-icon="mdi-arrow-left" @click="goToAddOpeningStock">
+          <v-btn data-testid="product-opening-stock-skip" variant="text" @click="skipOpeningStock"
+            >لاحقاً</v-btn
+          >
+          <v-btn
+            data-testid="product-opening-stock-add"
+            color="primary"
+            prepend-icon="mdi-arrow-left"
+            @click="goToAddOpeningStock"
+          >
             إضافة مخزون
           </v-btn>
         </v-card-actions>

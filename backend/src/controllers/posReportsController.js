@@ -19,6 +19,10 @@ function parse(q = {}) {
     search: q.search ? String(q.search).trim() : null,
     type: q.type || null,
     filter: q.filter || null,
+    // Debts report: party / direction / status facets.
+    partyType: q.partyType || null,
+    direction: q.direction || null,
+    status: q.status || null,
   };
 }
 

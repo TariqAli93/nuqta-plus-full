@@ -3,10 +3,10 @@
     <template #activator="{ props }">
       <v-btn
         v-bind="props"
-        variant="tonal"
-        color="primary"
+        color="medium-emphasis"
+        variant="outlined"
         size="small"
-        prepend-icon="mdi-tune-variant"
+        class="cc-shift"
       >
         تخصيص
       </v-btn>
