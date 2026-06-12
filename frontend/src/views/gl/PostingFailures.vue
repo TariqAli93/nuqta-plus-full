@@ -5,7 +5,7 @@
       subtitle="مستندات فشل ترحيلها محاسبياً — يبقى المستند سليماً والقيد فقط هو المعلّق. أعد الترحيل بعد إصلاح السبب."
       icon="mdi-wrench-clock"
     >
-      <v-btn-toggle v-model="statusFilter" density="comfortable" mandatory @update:model-value="reload">
+      <v-btn-toggle v-model="statusFilter" @update:model-value="reload">
         <v-btn value="pending" size="small">معلّقة</v-btn>
         <v-btn value="resolved" size="small">محلولة</v-btn>
         <v-btn value="ignored" size="small">متجاهلة</v-btn>
@@ -27,7 +27,13 @@
             <th class="text-start">المعرّف</th>
             <th class="text-start">سبب الفشل</th>
             <th class="text-start">التاريخ</th>
-            <th v-if="canManage && statusFilter === 'pending'" class="text-end" style="width: 180px">إجراء</th>
+            <th
+              v-if="canManage && statusFilter === 'pending'"
+              class="text-end"
+              style="width: 180px"
+            >
+              إجراء
+            </th>
           </tr>
         </thead>
         <tbody>

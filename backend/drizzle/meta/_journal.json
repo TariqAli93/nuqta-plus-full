@@ -85,6 +85,13 @@
       "when": 1780900900000,
       "tag": "0011_sale_price_type",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1780901000000,
+      "tag": "0012_coa_description_friendly",
+      "breakpoints": true
     }
   ]
 }

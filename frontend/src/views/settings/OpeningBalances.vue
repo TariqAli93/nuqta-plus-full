@@ -31,7 +31,7 @@
               label="مبلغ الدين الافتتاحي"
               variant="outlined"
               density="comfortable"
-              class="mt-2"
+              class="mt-2 mb-2"
             />
             <v-btn
               color="primary"
@@ -70,7 +70,7 @@
               label="مبلغ الرصيد الافتتاحي"
               variant="outlined"
               density="comfortable"
-              class="mt-2"
+              class="mt-2 mb-2"
             />
             <v-btn
               color="deep-purple"
@@ -126,8 +126,8 @@
         </v-row>
 
         <v-alert type="info" variant="tonal" density="compact" class="mt-3">
-          سيُنشأ قيد متوازن: مدين (نقد + مخزون + ذمم العملاء) / دائن (ذمم الموردين)،
-          والفرق يُرحَّل إلى حساب «حقوق الأرصدة الافتتاحية».
+          سيُنشأ قيد متوازن: مدين (نقد + مخزون + ذمم العملاء) / دائن (ذمم الموردين)، والفرق يُرحَّل
+          إلى حساب «حقوق الأرصدة الافتتاحية».
         </v-alert>
       </v-card-text>
       <v-divider />
@@ -187,7 +187,10 @@ async function loadSuppliers() {
 async function saveCustomer() {
   cust.saving = true;
   try {
-    await api.post('/opening-balances/customer', { customerId: cust.customerId, amount: cust.amount });
+    await api.post('/opening-balances/customer', {
+      customerId: cust.customerId,
+      amount: cust.amount,
+    });
     notify.success('تم تسجيل رصيد العميل');
     cust.customerId = null;
     cust.amount = null;
@@ -202,7 +205,10 @@ async function saveCustomer() {
 async function saveSupplier() {
   sup.saving = true;
   try {
-    await api.post('/opening-balances/supplier', { supplierId: sup.supplierId, amount: sup.amount });
+    await api.post('/opening-balances/supplier', {
+      supplierId: sup.supplierId,
+      amount: sup.amount,
+    });
     notify.success('تم تسجيل رصيد المورد');
     sup.supplierId = null;
     sup.amount = null;

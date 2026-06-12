@@ -65,7 +65,7 @@ export const useGlStore = defineStore('gl', {
     async seedTemplate(template) {
       const notify = useNotificationStore();
       const res = await api.post('/gl/templates/seed', { template });
-      notify.success('تم بذر شجرة الحسابات');
+      notify.success('تم إنشاء شجرة الحسابات');
       return res?.data;
     },
 

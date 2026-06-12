@@ -105,7 +105,7 @@ export class GlController {
       resource: 'accounts',
       details: result,
     });
-    return reply.send({ success: true, data: result, message: 'تم بذر شجرة الحسابات' });
+    return reply.send({ success: true, data: result, message: 'تم إنشاء شجرة الحسابات' });
   }
 
   // ── System accounts mapping ───────────────────────────────────────────────

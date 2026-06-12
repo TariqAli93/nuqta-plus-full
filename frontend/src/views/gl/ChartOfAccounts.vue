@@ -19,7 +19,7 @@
       <v-card-text v-if="!loading && accounts.length === 0">
         <EmptyState
           title="لا توجد حسابات بعد"
-          description="ابذر قالب شجرة الحسابات من إعدادات النمط الكامل، أو أنشئ الحسابات يدوياً."
+          description="اختر قالب شجرة الحسابات من إعدادات النمط الكامل، أو أنشئ الحسابات يدوياً."
           icon="mdi-file-tree-outline"
         />
       </v-card-text>

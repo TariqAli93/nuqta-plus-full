@@ -186,12 +186,12 @@ const routes = [
         name: 'Reports',
         component: Reports,
       },
-      {
-        path: 'reports/simple',
-        name: 'SimpleReports',
-        component: SimpleReports,
-        meta: { permission: 'view:reports' },
-      },
+      // {
+      //   path: 'reports/simple',
+      //   name: 'SimpleReports',
+      //   component: SimpleReports,
+      //   meta: { permission: 'view:reports' },
+      // },
       {
         path: 'expenses',
         name: 'Expenses',
@@ -316,15 +316,60 @@ const routes = [
         name: 'Notifications',
         component: Notifications,
       },
-      { path: 'inventory', name: 'Inventory', component: Inventory, meta: { feature: 'inventory' } },
-      { path: 'inventory/movements', name: 'StockMovements', component: StockMovements, meta: { feature: 'inventory' } },
-      { path: 'inventory/transfer', name: 'StockTransfer', component: StockTransfer, meta: { feature: 'inventoryTransfers', capability: 'canTransferStock' } },
-      { path: 'inventory/low-stock', name: 'LowStock', component: LowStock, meta: { feature: 'inventory' } },
-      { path: 'inventory/transfers', name: 'TransferRequests', component: TransferRequests, meta: { feature: 'inventoryTransfers' } },
-      { path: 'inventory/expiry-alerts', name: 'ExpiryAlerts', component: ExpiryAlerts, meta: { feature: 'inventory' } },
-      { path: 'inventory/settings', name: 'BranchesWarehouses', component: BranchesWarehouses, meta: { requiresManageProducts: true, anyFeature: ['multiBranch', 'multiWarehouse'] } },
-      { path: 'settings/feature-flags', name: 'FeatureFlags', component: FeatureFlags, meta: { requiresGlobalAdmin: true } },
-      { path: 'setup', name: 'SetupWizard', component: SetupWizard, meta: { requiresGlobalAdmin: true } },
+      {
+        path: 'inventory',
+        name: 'Inventory',
+        component: Inventory,
+        meta: { feature: 'inventory' },
+      },
+      {
+        path: 'inventory/movements',
+        name: 'StockMovements',
+        component: StockMovements,
+        meta: { feature: 'inventory' },
+      },
+      {
+        path: 'inventory/transfer',
+        name: 'StockTransfer',
+        component: StockTransfer,
+        meta: { feature: 'inventoryTransfers', capability: 'canTransferStock' },
+      },
+      {
+        path: 'inventory/low-stock',
+        name: 'LowStock',
+        component: LowStock,
+        meta: { feature: 'inventory' },
+      },
+      {
+        path: 'inventory/transfers',
+        name: 'TransferRequests',
+        component: TransferRequests,
+        meta: { feature: 'inventoryTransfers' },
+      },
+      {
+        path: 'inventory/expiry-alerts',
+        name: 'ExpiryAlerts',
+        component: ExpiryAlerts,
+        meta: { feature: 'inventory' },
+      },
+      {
+        path: 'inventory/settings',
+        name: 'BranchesWarehouses',
+        component: BranchesWarehouses,
+        meta: { requiresManageProducts: true, anyFeature: ['multiBranch', 'multiWarehouse'] },
+      },
+      {
+        path: 'settings/feature-flags',
+        name: 'FeatureFlags',
+        component: FeatureFlags,
+        meta: { requiresGlobalAdmin: true },
+      },
+      {
+        path: 'setup',
+        name: 'SetupWizard',
+        component: SetupWizard,
+        meta: { requiresGlobalAdmin: true },
+      },
       { path: 'users', name: 'Users', component: Users, meta: { requiresViewUsers: true } },
       { path: 'profile', name: 'Profile', component: Profile }, // 👈 صفحة الملف الشخصي
       { path: 'settings', name: 'Settings', component: Settings },
@@ -336,13 +381,48 @@ const routes = [
   // Top-level (NOT under MainLayout) so each renders as a full, chrome-free
   // desktop report inside its own Electron BrowserWindow. RBAC via meta.permission
   // (guard → Forbidden) plus an in-component gate; backend authorizes too.
-  { path: '/reports/sales', name: 'Report_sales', component: SalesReportPage, meta: { requiresAuth: true, permission: 'sales:read', standaloneReport: true } },
-  { path: '/reports/profit', name: 'Report_profit', component: ProfitReportPage, meta: { requiresAuth: true, permission: 'reports:read_profit', standaloneReport: true } },
-  { path: '/reports/top-products', name: 'Report_top_products', component: TopProductsReportPage, meta: { requiresAuth: true, permission: 'reports:read_profit', standaloneReport: true } },
-  { path: '/reports/debts', name: 'Report_debts', component: DebtsReportPage, meta: { requiresAuth: true, permission: 'sales:read', standaloneReport: true } },
-  { path: '/reports/cash-box', name: 'Report_cash_box', component: CashBoxReportPage, meta: { requiresAuth: true, permission: 'reports:read_financial', standaloneReport: true } },
-  { path: '/reports/expenses', name: 'Report_expenses', component: ExpensesReportPage, meta: { requiresAuth: true, permission: 'view:expenses', standaloneReport: true } },
-  { path: '/reports/cash-movement', name: 'Report_cash_movement', component: CashMovementReportPage, meta: { requiresAuth: true, permission: 'reports:read_financial', standaloneReport: true } },
+  {
+    path: '/reports/sales',
+    name: 'Report_sales',
+    component: SalesReportPage,
+    meta: { requiresAuth: true, permission: 'sales:read', standaloneReport: true },
+  },
+  {
+    path: '/reports/profit',
+    name: 'Report_profit',
+    component: ProfitReportPage,
+    meta: { requiresAuth: true, permission: 'reports:read_profit', standaloneReport: true },
+  },
+  {
+    path: '/reports/top-products',
+    name: 'Report_top_products',
+    component: TopProductsReportPage,
+    meta: { requiresAuth: true, permission: 'reports:read_profit', standaloneReport: true },
+  },
+  {
+    path: '/reports/debts',
+    name: 'Report_debts',
+    component: DebtsReportPage,
+    meta: { requiresAuth: true, permission: 'sales:read', standaloneReport: true },
+  },
+  {
+    path: '/reports/cash-box',
+    name: 'Report_cash_box',
+    component: CashBoxReportPage,
+    meta: { requiresAuth: true, permission: 'reports:read_financial', standaloneReport: true },
+  },
+  {
+    path: '/reports/expenses',
+    name: 'Report_expenses',
+    component: ExpensesReportPage,
+    meta: { requiresAuth: true, permission: 'view:expenses', standaloneReport: true },
+  },
+  {
+    path: '/reports/cash-movement',
+    name: 'Report_cash_movement',
+    component: CashMovementReportPage,
+    meta: { requiresAuth: true, permission: 'reports:read_financial', standaloneReport: true },
+  },
 ];
 
 const router = createRouter({

@@ -1,5 +1,5 @@
-appId: com.nuqtaplus.server
-productName: 'NuqtaPlus Server'
+appId: com.nuqtaplus-full.server
+productName: 'NuqtaPlus'
 asar: true
 
 files:
@@ -44,7 +44,7 @@ directories:
 publish:
   - provider: github
     owner: TariqAli93
-    repo: nuqta-plus-refactored
+    repo: nuqta-plus-full
     releaseType: release
 
 win:

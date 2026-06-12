@@ -7,7 +7,7 @@
           ? 'اختر نمط العمل المناسب لنشاطك وسيقوم البرنامج بتهيئة نفسه تلقائياً.'
           : mode === 'simple'
             ? 'اختر طريقة استخدامك للنظام. يمكن تغيير أي شيء لاحقاً من الإعدادات.'
-            : 'إعدادات النمط الكامل — اختر قالب الشجرة المحاسبية.' }}
+            : 'اختر طريقة إنشاء شجرة الحسابات: قالب جاهز أو إنشاء يدوي. يمكن تعديل الحسابات لاحقاً.' }}
       </div>
     </div>
 
@@ -99,7 +99,7 @@
     <!-- ── الخطوة 2 (الكامل): قالب الشجرة + الفروع ────────────────────── -->
     <template v-else>
       <v-row justify="center">
-        <v-col v-for="t in coaTemplates" :key="t.id" cols="12" md="5">
+        <v-col v-for="t in coaTemplates" :key="t.id" cols="12" md="4">
           <v-card
             :variant="coaTemplate === t.id ? 'tonal' : 'outlined'"
             :color="coaTemplate === t.id ? 'primary' : undefined"
@@ -259,20 +259,32 @@ const coaTemplates = [
     description:
       'قالب يتبع ترقيم وتصنيفات النظام المحاسبي الموحد المعتمد في العراق — مناسب للشركات الخاضعة للرقابة والتدقيق.',
   },
+  {
+    id: 'manual',
+    title: 'إنشاء يدوي',
+    icon: 'mdi-pencil-plus-outline',
+    color: 'grey',
+    description:
+      'لا يتم إنشاء أي حسابات الآن. بعد الإعداد ستنتقل إلى صفحة شجرة الحسابات لإضافة حساباتك بنفسك.',
+  },
 ];
 
 const apply = async () => {
+  if (saving.value) return; // prevent double submits while accounts are being created
   saving.value = true;
   try {
-    const payload =
-      mode.value === 'full'
-        ? { preset: 'full', coaTemplate: coaTemplate.value }
-        : { preset: selected.value };
+    const isFull = mode.value === 'full';
+    const wantsManualCoa = isFull && coaTemplate.value === 'manual';
+    const payload = isFull
+      ? { preset: 'full', coaTemplate: coaTemplate.value }
+      : { preset: selected.value };
+    // The backend applies the preset AND seeds the chosen COA template
+    // (idempotent) in one call — so this resolves only after the accounts exist.
     const response = await api.post('/feature-flags/setup', payload);
     let flags = response.data?.flags || {};
 
     // النمط الكامل يفعّل الفروع افتراضياً — أطفئها إن لم يرغب المستخدم.
-    if (mode.value === 'full' && !multiBranchEnabled.value) {
+    if (isFull && !multiBranchEnabled.value) {
       const updated = await api.put('/feature-flags', {
         multiBranch: false,
         multiWarehouse: false,
@@ -285,10 +297,23 @@ const apply = async () => {
     await authStore.setFeatureFlags(flags);
     authStore.setupMode = 'done';
     localStorage.setItem('setupMode', 'done');
-    notify.success('تم تهيئة النظام بنجاح');
-    router.replace({ name: 'Dashboard' });
-  } catch {
-    /* handled globally */
+
+    if (wantsManualCoa) {
+      // Manual choice: nothing was seeded — guide the user to build the tree.
+      notify.success('تم تهيئة النظام — أضف حساباتك من شجرة الحسابات');
+      router.replace({ name: 'ChartOfAccounts' });
+    } else {
+      const created = response.data?.coaSeed?.created;
+      notify.success(
+        created ? `تم تهيئة النظام وإنشاء ${created} حساباً` : 'تم تهيئة النظام بنجاح'
+      );
+      router.replace({ name: 'Dashboard' });
+    }
+  } catch (err) {
+    // Surface a clear, actionable error instead of leaving the button spinning.
+    const msg =
+      err?.response?.data?.message || err?.message || 'تعذّر إنشاء شجرة الحسابات، حاول مرة أخرى';
+    notify.error(msg);
   } finally {
     saving.value = false;
   }

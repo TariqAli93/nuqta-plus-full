@@ -11,6 +11,10 @@
 
 export const version = 1;
 
+// Arabic display name shown to users. The technical key 'simple_tree' stays
+// internal — never surfaced in the UI.
+export const label = 'شجرة الحسابات المبسطة';
+
 export const accounts = [
   // ── 1 الأصول ─────────────────────────────────────────────────────────────
   { code: '1', name: 'الأصول', type: 'asset', parent: null, postable: false },
@@ -97,4 +101,4 @@ export const systemAccountKeys = {
   'expense_cat:other': '5309',
 };
 
-export default { version, accounts, systemAccountKeys };
+export default { version, label, accounts, systemAccountKeys };

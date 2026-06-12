@@ -13,6 +13,10 @@
 
 export const version = 1;
 
+// Arabic display name shown to users (e.g. in auto-generated descriptions). The
+// technical key 'iraqi_unified' stays internal — never surfaced in the UI.
+export const label = 'النظام المحاسبي العراقي الموحد';
+
 export const accounts = [
   // ── 1 الموجودات ──────────────────────────────────────────────────────────
   { code: '1', name: 'الموجودات', type: 'asset', parent: null, postable: false },
@@ -109,4 +113,4 @@ export const systemAccountKeys = {
   'expense_cat:other': '339',
 };
 
-export default { version, accounts, systemAccountKeys };
+export default { version, label, accounts, systemAccountKeys };

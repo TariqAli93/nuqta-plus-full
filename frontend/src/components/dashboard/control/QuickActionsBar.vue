@@ -103,15 +103,6 @@ const allActions = computed(() => [
     allowed: feat('inventoryTransfers') && can('canTransferStock'),
     to: '/inventory/transfer',
   },
-  {
-    key: 'report',
-    title: 'إنشاء تقرير',
-    icon: 'mdi-chart-box-outline',
-    accent: '#0EA5E9',
-    hotkey: 'f10',
-    allowed: perm('view:reports'),
-    to: '/reports/simple',
-  },
 ]);
 
 const visibleActions = computed(() => allActions.value.filter((a) => a.allowed));

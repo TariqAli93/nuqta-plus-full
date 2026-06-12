@@ -95,7 +95,12 @@ export class CoaTemplateService {
       if (existing) continue;
       await db
         .insert(systemAccounts)
-        .values({ key, accountId, description: `بُذر من قالب ${templateKey} v${template.version}` })
+        .values({
+          key,
+          accountId,
+          // User-facing — friendly Arabic only, never the technical key/version.
+          description: `تم إنشاؤه تلقائياً من قالب ${template.label || 'شجرة الحسابات'}`,
+        })
         .onConflictDoNothing({ target: systemAccounts.key });
       mappedKeys += 1;
     }
