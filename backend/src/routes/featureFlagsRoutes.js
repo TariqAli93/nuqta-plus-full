@@ -33,7 +33,7 @@ export default async function featureFlagsRoutes(fastify) {
     onRequest: [fastify.authenticate, fastify.authorize('app_mode:upgrade')],
     handler: controller.setAppMode,
     schema: {
-      description: 'Change the operating mode (simple → full upgrade only)',
+      description: 'Switch the operating mode in either direction (simple ⇄ full)',
       tags: ['settings'],
       security: [{ bearerAuth: [] }],
     },

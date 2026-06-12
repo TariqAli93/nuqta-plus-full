@@ -78,6 +78,13 @@
       "when": 1780900800000,
       "tag": "0010_opening_balances",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1780900900000,
+      "tag": "0011_sale_price_type",
+      "breakpoints": true
     }
   ]
 }

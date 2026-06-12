@@ -12,11 +12,10 @@ import {
   getProductUnits,
   getDefaultSaleUnit,
   getUnitConversionFactor,
-  getUnitSalePrice,
-  getUnitCostPrice,
   getUnitAvailableStock,
   toBaseQuantity,
   calculateUnitProfit,
+  resolveTierUnitPrice,
 } from '@/utils/productUnits';
 
 /**
@@ -43,6 +42,18 @@ export function usePosCart() {
   const customerId = ref(null);
   const notes = ref('');
   const submitting = ref(false);
+  // Active pricing tier (تسعير الوكلاء): مفرد/جملة/وكيل. Drives every cart
+  // line's price and is sent as `priceType`. Defaults to retail (مفرد).
+  const priceType = ref('retail');
+
+  /** Build a product-shaped object from a cart line so the tier resolver can
+   *  re-price it after a unit switch or a price-tier change. */
+  const rowProductLike = (row) => ({
+    sellingPrice: Number(row.basePrice) || 0,
+    costPrice: Number(row.baseCostPrice) || 0,
+    wholesalePrice: row.wholesalePrice ?? null,
+    agentPrice: row.agentPrice ?? null,
+  });
 
   /** Cart lines. Reactive array so splice/push trigger updates. */
   const items = reactive([]);
@@ -137,7 +148,7 @@ export function usePosCart() {
 
     const basePrice = Number(product.sellingPrice) || 0;
     const baseCostPrice = Number(product.costPrice) || 0;
-    const unitPrice = getUnitSalePrice(product, selectedUnit);
+    const unitPrice = resolveTierUnitPrice(product, selectedUnit, priceType.value);
 
     items.push({
       id: nextId(product.id),
@@ -149,6 +160,10 @@ export function usePosCart() {
       // the source of truth when the user switches units.
       basePrice,
       baseCostPrice,
+      // Per-base-unit tier prices (تسعير الوكلاء) — frozen so a unit switch or
+      // a price-tier change can re-resolve the line without re-fetching.
+      wholesalePrice: product.wholesalePrice == null ? null : Number(product.wholesalePrice),
+      agentPrice: product.agentPrice == null ? null : Number(product.agentPrice),
       // Per-selected-unit numbers. Recomputed by updateLineUnit().
       price: unitPrice,
       originalPrice: unitPrice,
@@ -191,12 +206,8 @@ export function usePosCart() {
 
     // Re-price using basePrice (per BASE unit) — never rely on the previous
     // line price, which was already scaled to the OLD unit and would compound
-    // the conversion error.
-    const productLike = {
-      sellingPrice: Number(row.basePrice) || 0,
-      costPrice: Number(row.baseCostPrice) || 0,
-    };
-    row.price = getUnitSalePrice(productLike, newUnit);
+    // the conversion error. Honour the active tier (مفرد/جملة/وكيل).
+    row.price = resolveTierUnitPrice(rowProductLike(row), newUnit, priceType.value);
     row.originalPrice = row.price;
     // Reset any per-unit discount: a discount that made sense for قطعة is
     // almost never the right number for درزن, and silently re-applying it
@@ -211,6 +222,22 @@ export function usePosCart() {
       notify.warning(
         `الكمية المتوفرة غير كافية لهذه الوحدة. المتاح: ${row.availableStock} ${row.unitName || ''}`.trim()
       );
+    }
+  };
+
+  /**
+   * Switch the active pricing tier (مفرد/جملة/وكيل) and re-price every existing
+   * cart line at the new tier using each line's current unit. A line the
+   * cashier hand-edited is re-priced too — switching tiers is an explicit
+   * "use the X price everywhere" action.
+   */
+  const setPriceType = (next) => {
+    const value = ['retail', 'wholesale', 'agent'].includes(next) ? next : 'retail';
+    priceType.value = value;
+    for (const row of items) {
+      const unit = (row.units || []).find((u) => u.id === row.unitId) || null;
+      row.price = resolveTierUnitPrice(rowProductLike(row), unit, value);
+      row.originalPrice = row.price;
     }
   };
 
@@ -281,6 +308,7 @@ export function usePosCart() {
     payment.saveAsInstallment = false;
     customerId.value = null;
     notes.value = '';
+    priceType.value = 'retail';
   };
 
   // ── Totals ───────────────────────────────────────────────────────────────
@@ -376,7 +404,6 @@ export function usePosCart() {
   // ── Submit ───────────────────────────────────────────────────────────────
   const buildPayload = () => {
     const taxPercent = tax.enabled && tax.type === 'percent' ? Number(tax.value) || 0 : 0;
-    const isInstallment = payment.saveAsInstallment && remaining.value > 0;
 
     return {
       // ── v2 source / type ──────────────────────────────────────────────────
@@ -387,6 +414,8 @@ export function usePosCart() {
       // ─────────────────────────────────────────────────────────────────────
       customerId: customerId.value || null,
       currency: currency.value,
+      // Pricing tier chosen for this invoice (مفرد/جملة/وكيل).
+      priceType: priceType.value,
       items: items.map((i) => ({
         productId: i.productId,
         quantity: i.qty,
@@ -461,6 +490,7 @@ export function usePosCart() {
 
     if (draft.currency) currency.value = draft.currency;
     if (draft.customerId !== undefined) customerId.value = draft.customerId || null;
+    if (draft.priceType) priceType.value = draft.priceType;
     if (draft.notes) notes.value = String(draft.notes);
 
     const findProduct = (id) =>
@@ -494,6 +524,8 @@ export function usePosCart() {
         barcode: product?.barcode || null,
         basePrice: Number(product?.sellingPrice) || price / (factor || 1),
         baseCostPrice: Number(product?.costPrice) || 0,
+        wholesalePrice: product?.wholesalePrice == null ? null : Number(product.wholesalePrice),
+        agentPrice: product?.agentPrice == null ? null : Number(product.agentPrice),
         price,
         originalPrice: Number(product?.sellingPrice) || price,
         originalCurrency: product?.currency || currency.value,
@@ -527,6 +559,7 @@ export function usePosCart() {
     // state
     currency,
     customerId,
+    priceType,
     notes,
     items,
     saleDiscount,
@@ -560,6 +593,7 @@ export function usePosCart() {
     updateLineDiscount,
     updateLineNote,
     updateLineUnit,
+    setPriceType,
     clear,
     applyExact,
     addToPaid,

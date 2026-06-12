@@ -1,7 +1,34 @@
 import reportController from '../controllers/reportController.js';
+import posReportsController from '../controllers/posReportsController.js';
 
 export default async function reportRoutes(fastify) {
   fastify.addHook('onRequest', fastify.authenticate);
+
+  // ── Quick-question report windows (الأسئلة السريعة) ───────────────────────
+  // Each opens in its own Electron window. RBAC: the dashboard hides the card
+  // when the user lacks the permission; the route below returns 403 if hit
+  // directly. Branch/warehouse/shift scoping is applied inside the service.
+  // Namespaced under /quick to avoid colliding with the legacy /profit route.
+  const quick = [
+    ['/quick/sales', 'sales:read', 'sales'],
+    ['/quick/profit', 'reports:read_profit', 'profit'],
+    ['/quick/top-products', 'reports:read_profit', 'topProducts'],
+    ['/quick/debts', 'sales:read', 'debts'],
+    ['/quick/cash-box', 'reports:read_financial', 'cashBox'],
+    ['/quick/expenses', 'view:expenses', 'expenses'],
+    ['/quick/cash-movement', 'reports:read_financial', 'cashMovement'],
+  ];
+  for (const [path, permission, method] of quick) {
+    fastify.get(path, {
+      onRequest: [fastify.authenticate, fastify.authorize(permission)],
+      handler: posReportsController[method].bind(posReportsController),
+      schema: {
+        description: `Quick report: ${method} (from/to/branchId/cashSessionId/page/limit/search)`,
+        tags: ['reports'],
+        security: [{ bearerAuth: [] }],
+      },
+    });
+  }
 
   fastify.get('/dashboard', {
     onRequest: [fastify.authenticate, fastify.authorize('sales:read')],
@@ -50,6 +77,17 @@ export default async function reportRoutes(fastify) {
     schema: {
       description:
         'Profit report — revenue, COGS, expenses, gross/net profit by branch and period.',
+      tags: ['reports'],
+      security: [{ bearerAuth: [] }],
+    },
+  });
+
+  fastify.get('/inventory-valuation', {
+    onRequest: [fastify.authenticate, fastify.authorize('inventory:read')],
+    handler: reportController.inventoryValuation.bind(reportController),
+    schema: {
+      description:
+        'Inventory valuation by price tier (قيمة المخزون حسب نوع التسعيرة) — stock value at retail/wholesale/agent + cost, grouped by currency, filtered by branch/warehouse/product/category.',
       tags: ['reports'],
       security: [{ bearerAuth: [] }],
     },

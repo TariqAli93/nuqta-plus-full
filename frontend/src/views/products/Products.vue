@@ -243,6 +243,16 @@
         <template #[`item.sellingPrice`]="{ item }">
           {{ formatCurrency(item.sellingPrice, item.currency) }}
         </template>
+        <template #[`item.wholesalePrice`]="{ item }">
+          <span :class="{ 'text-medium-emphasis': item.wholesalePrice == null }">
+            {{ item.wholesalePrice == null ? '—' : formatCurrency(item.wholesalePrice, item.currency) }}
+          </span>
+        </template>
+        <template #[`item.agentPrice`]="{ item }">
+          <span :class="{ 'text-medium-emphasis': item.agentPrice == null }">
+            {{ item.agentPrice == null ? '—' : formatCurrency(item.agentPrice, item.currency) }}
+          </span>
+        </template>
         <template #[`item.status`]="{ item }">
           <v-chip :color="getStatusColor(item.status)" size="small">
             {{ getStatusText(item.status) }}
@@ -333,6 +343,9 @@ const userRole = computed(() => authStore.user?.role);
 const canManageProducts = computed(() =>
   userRole.value ? uiAccess.canManageProducts(userRole.value) : false
 );
+// Wholesale/agent price tiers (تسعير الوكلاء) — when on, the catalogue shows
+// the جملة/وكيل columns next to سعر البيع. Off → table is unchanged.
+const agentPricingOn = computed(() => authStore.hasFeature?.('agentPricing') === true);
 const canDeleteProducts = computed(() =>
   userRole.value ? uiAccess.canManageProducts(userRole.value) : false
 );
@@ -438,19 +451,26 @@ const dismissError = () => {
   error.value = null;
 };
 
-const headers = [
+const headers = computed(() => [
   { title: 'الاسم', key: 'name' },
   { title: 'رمز المنتج', key: 'sku' },
   { title: 'النوع', key: 'productType', sortable: false },
   { title: 'التصنيف', key: 'category' },
-  { title: 'سعر البيع', key: 'sellingPrice' },
+  { title: 'سعر المفرد', key: 'sellingPrice' },
+  // Wholesale/agent tiers — only shown when the agentPricing feature is on.
+  ...(agentPricingOn.value
+    ? [
+        { title: 'سعر الجملة', key: 'wholesalePrice' },
+        { title: 'سعر الوكيل', key: 'agentPrice' },
+      ]
+    : []),
   { title: 'المخزون', key: 'stock' },
   { title: 'الحد الأدنى للمخزون', key: 'minStock' },
   { title: 'باركود', key: 'barcode' },
   { title: 'حالة الصلاحية', key: 'expiry' },
   { title: 'الحالة', key: 'status' },
   { title: 'إجراءات', key: 'actions', sortable: false },
-];
+]);
 
 const getStatusColor = (status) => {
   const colors = {
@@ -502,12 +522,16 @@ const notificationStore = useNotificationStore();
 
 const handleExport = () => {
   try {
-    const exportHeaders = headers.map((h) => ({
+    const exportHeaders = headers.value.map((h) => ({
       title: h.title,
       key: h.key,
       value: (item) => {
         if (h.key === 'stock') return item.stock;
         if (h.key === 'sellingPrice') return `${item.sellingPrice} ${item.currency}`;
+        if (h.key === 'wholesalePrice')
+          return item.wholesalePrice == null ? '' : `${item.wholesalePrice} ${item.currency}`;
+        if (h.key === 'agentPrice')
+          return item.agentPrice == null ? '' : `${item.agentPrice} ${item.currency}`;
         if (h.key === 'status') return getStatusText(item.status);
         return item[h.key] || '';
       },

@@ -112,6 +112,26 @@
             hide-details
             label="إخفاء المنتهي"
           />
+          <v-btn-toggle
+            v-if="agentPricingOn"
+            :model-value="priceType"
+            mandatory
+            density="comfortable"
+            color="primary"
+            variant="outlined"
+            divided
+            aria-label="نوع التسعيرة"
+            @update:model-value="setPriceType"
+          >
+            <v-btn
+              v-for="tier in PRICE_TIERS"
+              :key="tier.value"
+              :value="tier.value"
+              size="small"
+            >
+              {{ tier.label }}
+            </v-btn>
+          </v-btn-toggle>
         </div>
 
         <v-slide-group show-arrows>
@@ -913,6 +933,7 @@ import CloseShiftDialog from '@/components/cashSession/CloseShiftDialog.vue';
 import EmptyState from '@/components/EmptyState.vue';
 import api from '@/plugins/axios';
 import { formatCurrency as formatMoney } from '@/utils/formatters';
+import { PRICE_TIERS } from '@/utils/productUnits';
 
 // ── Stores ──────────────────────────────────────────────────────────────────
 const productStore = useProductStore();
@@ -958,6 +979,8 @@ const accountingPeriodsEnabled = computed(
   () => authStore.hasFeature?.('accountingPeriods') === true
 );
 const multiBranchEnabled = computed(() => authStore.hasFeature?.('multiBranch') === true);
+// Wholesale/agent price tiers (تسعير الوكلاء) — gates the price-type selector.
+const agentPricingOn = computed(() => authStore.hasFeature?.('agentPricing') === true);
 const currentBranchId = computed(
   () => inventoryStore.selectedBranchId || authStore.assignedBranchId || null
 );
@@ -1042,16 +1065,18 @@ const onOpenShiftClick = async () => {
   openShiftDialog.value = true;
 };
 
-const onOpenShiftConfirm = async ({ openingCash, currency: cur, notes, cashboxId }) => {
+const onOpenShiftConfirm = async ({ openingCash, currency: cur, notes, cashboxId, branchId }) => {
   shiftLoading.value = true;
   try {
-    // Carry the cashier's active branch through so the session row stores
-    // a real branch_id (instead of NULL) for global / unassigned admins.
+    // The dialog decides the branch: a switcher's chosen branch, or null for
+    // branch-bound users / branches-off (the backend's central resolver then
+    // binds the shift to the assigned or default branch). We never force a
+    // possibly-stale selectedBranchId onto a non-switcher.
     await cashSessionStore.openSession({
       openingCash,
       currency: cur,
       notes,
-      branchId: inventoryStore.selectedBranchId || null,
+      branchId: branchId || null,
       cashboxId: cashboxId || null,
     });
     openShiftDialog.value = false;
@@ -1107,6 +1132,7 @@ const {
   itemCount,
   canSubmit,
   lineSubtotal,
+  priceType,
 
   addItem,
   removeItem,
@@ -1116,6 +1142,7 @@ const {
   updateLineDiscount,
   updateLineNote,
   updateLineUnit,
+  setPriceType,
   clear,
   applyExact,
   addToPaid,

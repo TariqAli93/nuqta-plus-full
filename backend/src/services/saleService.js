@@ -518,6 +518,13 @@ export class SaleService {
 
     const customerId = saleData.customerId || null;
 
+    // Pricing tier the cashier sold at (تسعير الوكلاء). The frontend already
+    // resolved each line's unitPrice for this tier; we only stamp the choice for
+    // reporting. Unknown/missing → 'retail' (مفرد) so legacy callers are safe.
+    const priceType = ['retail', 'wholesale', 'agent'].includes(saleData.priceType)
+      ? saleData.priceType
+      : 'retail';
+
     if (isInstallmentSale && !customerId) {
       throw new ValidationError('Customer is required for installment payments');
     }
@@ -615,6 +622,7 @@ export class SaleService {
           paymentType,
           saleSource,
           saleType,
+          priceType,
           paidAmount: String(paidAmount),
           remainingAmount: String(remainingAmount),
           status: remainingAmount <= 0 ? 'completed' : 'pending',
@@ -671,6 +679,7 @@ export class SaleService {
           unitConversionFactor: String(unit.conversionFactor),
           baseQuantity: baseQty,
           unitCostPrice: String(perUnitCost || 0),
+          priceType,
         }).returning({ id: saleItems.id });
 
         stockItems.push({
@@ -877,6 +886,7 @@ export class SaleService {
         total: sales.total,
         currency: sales.currency,
         paymentType: sales.paymentType,
+        priceType: sales.priceType,
         paidAmount: sales.paidAmount,
         remainingAmount: sales.remainingAmount,
         status: sales.status,
@@ -945,6 +955,7 @@ export class SaleService {
         interestRate: sales.interestRate,
         interestAmount: sales.interestAmount,
         paymentType: sales.paymentType,
+        priceType: sales.priceType,
         paidAmount: sales.paidAmount,
         remainingAmount: sales.remainingAmount,
         status: sales.status,
@@ -996,6 +1007,7 @@ export class SaleService {
         // Frozen per-unit cost (NULL on legacy rows — falls back to current
         // products.cost_price * baseQuantity).
         unitCostPrice: saleItems.unitCostPrice,
+        priceType: saleItems.priceType,
         // Profit visibility — uses the product's current cost_price. Returns
         // null when the product was deleted so the UI can render "n/a".
         costPrice: products.costPrice,
@@ -2300,6 +2312,12 @@ export class SaleService {
       saleData.exchangeRate ||
       (currency === 'USD' ? currencySettings.usdRate : currencySettings.iqdRate);
 
+    // Pricing tier the draft was built at (تسعير الوكلاء). Carried so completing
+    // the draft later defaults to the same tier. Unknown/missing → 'retail'.
+    const priceType = ['retail', 'wholesale', 'agent'].includes(saleData.priceType)
+      ? saleData.priceType
+      : 'retail';
+
     const draftValues = {
       invoiceNumber,
       subtotal: String(totals.subtotal),
@@ -2309,6 +2327,7 @@ export class SaleService {
       currency,
       exchangeRate: String(exchangeRate),
       paymentType: saleData.paymentType || 'cash',
+      priceType,
       paidAmount: '0',
       remainingAmount: String(totals.total),
       status: 'draft',
@@ -2361,6 +2380,7 @@ export class SaleService {
           unitPrice: String(item.unitPrice || 0),
           discount: String(itemDiscountTotal),
           subtotal: String(parseFloat(itemSubtotal.toFixed(2))),
+          priceType,
         });
       }
 
@@ -2470,6 +2490,14 @@ export class SaleService {
       cashSessionId = session.id;
     }
 
+    // Pricing tier (تسعير الوكلاء): explicit completion payload → the tier the
+    // draft was saved with → 'retail'. Stamped for reporting only.
+    const priceType = ['retail', 'wholesale', 'agent'].includes(saleData.priceType)
+      ? saleData.priceType
+      : ['retail', 'wholesale', 'agent'].includes(draft.priceType)
+        ? draft.priceType
+        : 'retail';
+
     const updatedSaleId = await withTransaction(async (tx) => {
       await tx.delete(saleItems).where(eq(saleItems.saleId, draftId));
 
@@ -2497,6 +2525,7 @@ export class SaleService {
           currency,
           exchangeRate: String(exchangeRate),
           paymentType: saleData.paymentType || draft.paymentType,
+          priceType,
           paidAmount: String(paidAmount),
           remainingAmount: String(remainingAmount),
           status: remainingAmount <= 0 ? 'completed' : 'pending',
@@ -2551,6 +2580,7 @@ export class SaleService {
           unitConversionFactor: String(unit.conversionFactor),
           baseQuantity: baseQty,
           unitCostPrice: String(perUnitCost || 0),
+          priceType,
         }).returning({ id: saleItems.id });
 
         stockItems.push({

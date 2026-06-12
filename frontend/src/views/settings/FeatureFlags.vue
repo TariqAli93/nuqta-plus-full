@@ -25,7 +25,7 @@
           </div>
           <div class="text-body-2 text-medium-emphasis">
             {{ isFullMode
-              ? 'كل وحدات النظام المحاسبي متاحة، ويمكن إيقاف أي وحدة لا تحتاجها.'
+              ? 'كل وحدات النظام المحاسبي متاحة، ويمكن إيقاف أي وحدة لا تحتاجها أو الرجوع للنمط السهل في أي وقت دون فقدان أي بيانات.'
               : 'الوحدات المحاسبية المتقدمة (الموردون، المشتريات، القيود، التقارير المالية) مقفلة. الترقية للنمط الكامل تفتحها دون فقدان أي بيانات.' }}
           </div>
         </div>
@@ -33,10 +33,20 @@
           v-if="!isFullMode && canManage"
           color="success"
           prepend-icon="mdi-arrow-up-bold-circle"
-          :loading="upgrading"
+          :loading="switching"
           @click="upgradeDialog = true"
         >
           الترقية للنمط الكامل
+        </v-btn>
+        <v-btn
+          v-if="isFullMode && canManage"
+          color="primary"
+          variant="tonal"
+          prepend-icon="mdi-arrow-down-bold-circle"
+          :loading="switching"
+          @click="downgradeDialog = true"
+        >
+          الرجوع للنمط السهل
         </v-btn>
       </v-card-text>
     </v-card>
@@ -100,14 +110,31 @@
             الربح والخسارة والوضع المالي) لتفعيلها من هذه الشاشة.
           </p>
           <p class="text-medium-emphasis text-body-2 mb-0">
-            لا تُفقد أي بيانات، ولا يمكن الرجوع للنمط السهل — لكن يمكنك إيقاف أي وحدة لا
-            تحتاجها في أي وقت.
+            لا تُفقد أي بيانات، ويمكنك الرجوع للنمط السهل في أي وقت — أو إيقاف أي وحدة لا
+            تحتاجها.
           </p>
         </v-card-text>
         <v-card-actions>
           <v-spacer />
           <v-btn variant="text" @click="upgradeDialog = false">إلغاء</v-btn>
-          <v-btn color="success" :loading="upgrading" @click="upgradeMode">تأكيد الترقية</v-btn>
+          <v-btn color="success" :loading="switching" @click="upgradeMode">تأكيد الترقية</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- تأكيد الرجوع للنمط السهل -->
+    <v-dialog v-model="downgradeDialog" max-width="520">
+      <v-card>
+        <v-card-title class="text-h6">الرجوع للنمط السهل</v-card-title>
+        <v-card-text>
+          <p class="mb-0">
+            سيتم إخفاء الميزات المتقدمة فقط، ولن يتم حذف أي بيانات. هل تريد المتابعة؟
+          </p>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="downgradeDialog = false">إلغاء</v-btn>
+          <v-btn color="primary" :loading="switching" @click="downgradeMode">تأكيد الرجوع</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -126,8 +153,9 @@ const notify = useNotificationStore();
 
 const flags = reactive({ ...(authStore.featureFlags || {}) });
 const saving = ref(false);
-const upgrading = ref(false);
+const switching = ref(false);
 const upgradeDialog = ref(false);
+const downgradeDialog = ref(false);
 const appMode = ref(authStore.appMode || 'simple');
 
 const canManage = computed(() => authStore.hasPermission('manage_feature_toggles'));
@@ -334,19 +362,34 @@ const toggle = async (key, value) => {
   }
 };
 
-const upgradeMode = async () => {
-  upgrading.value = true;
+// Switch the operating mode in either direction, then reload settings from the
+// backend so flags + appMode + capabilities (menus/routes/buttons) update live.
+const switchMode = async (mode) => {
+  switching.value = true;
   try {
-    await api.put('/feature-flags/app-mode', { mode: 'full' });
-    appMode.value = 'full';
+    await api.put('/feature-flags/app-mode', { mode });
     upgradeDialog.value = false;
-    // Refresh session so authStore.appMode + capabilities reflect the change.
-    await authStore.refreshSession({ force: true });
-    notify.success('تمت الترقية للنمط الكامل — فعّل الوحدات التي تحتاجها من هذه الشاشة');
+    downgradeDialog.value = false;
+    // Re-read the canonical settings (the backend may have toggled full-only
+    // flags off on downgrade) and refresh the session for capabilities/scope.
+    await load();
+    return true;
   } catch {
-    /* handled globally */
+    return false; // handled globally
   } finally {
-    upgrading.value = false;
+    switching.value = false;
+  }
+};
+
+const upgradeMode = async () => {
+  if (await switchMode('full')) {
+    notify.success('تمت الترقية للنمط الكامل — فعّل الوحدات التي تحتاجها من هذه الشاشة');
+  }
+};
+
+const downgradeMode = async () => {
+  if (await switchMode('simple')) {
+    notify.success('تم الرجوع للنمط السهل — أُخفيت الميزات المتقدمة فقط، وبياناتك محفوظة');
   }
 };
 

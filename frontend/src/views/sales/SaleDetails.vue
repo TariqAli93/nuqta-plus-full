@@ -87,6 +87,9 @@
               <p class="mb-1">
                 <strong>نوع الدفع: </strong> {{ getPaymentTypeText(sale.paymentType) }}
               </p>
+              <p v-if="agentPricingOn" class="mb-1">
+                <strong>نوع السعر: </strong> {{ priceTierLabel(sale.priceType) }}
+              </p>
               <p class="mb-1"><strong>العملة:</strong> {{ sale.currency }}</p>
               <p class="mb-1">
                 <strong>المدفوع: </strong>
@@ -792,6 +795,7 @@ import { useAuthStore } from '@/stores/auth';
 import SelectPrinter from '@/components/SelectPrinter.vue';
 import PageHeader from '@/components/PageHeader.vue';
 import { formatReceiptData } from '@/utils/receiptFormatter';
+import { priceTierLabel } from '@/utils/productUnits';
 import {
   toYmd,
   toYmdWithTime,
@@ -814,6 +818,9 @@ const settings = ref(null);
 
 // Profit visibility — manager and above only.
 const canViewProfit = computed(() => authStore.hasPermission?.(['manage:sales']));
+
+// Wholesale/agent price tiers (تسعير الوكلاء) — gates the "نوع السعر" row.
+const agentPricingOn = computed(() => authStore.hasFeature?.('agentPricing') === true);
 
 // ── Return / Refund dialog state ────────────────────────────────────────────
 const returnDialog = ref(false);

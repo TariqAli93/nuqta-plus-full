@@ -329,21 +329,24 @@ export async function getAppMode() {
 }
 
 /**
- * Set the operating mode. Simple→full is the supported upgrade; full→simple
- * is rejected because full-mode data (GL, purchases...) would be orphaned —
- * operators who want a leaner UI turn individual flags off instead.
+ * Set the operating mode. The switch is TWO-WAY and always available:
+ *
+ *   simple → full : unlocks the advanced suite; flags stay as they are and the
+ *                   operator enables the modules they want.
+ *   full → simple : a pure VIEW/OPERATION downgrade — it only HIDES the advanced
+ *                   suite by turning the full-only module flags off. NO data is
+ *                   ever deleted: every supplier/purchase/journal/account row
+ *                   stays in place, and re-upgrading re-enables the modules with
+ *                   all data intact. Flags that work in both modes (multiBranch,
+ *                   multiWarehouse, treasury, accountingPeriods, agentPricing…)
+ *                   are left untouched so sales/inventory/shifts/reports keep
+ *                   working exactly as before.
  */
 export async function setAppMode(value, userId) {
   if (value !== APP_MODES.SIMPLE && value !== APP_MODES.FULL) {
     throw new ValidationError(`Unknown app mode: ${value}`);
   }
   const current = await getAppMode();
-  if (current === APP_MODES.FULL && value === APP_MODES.SIMPLE) {
-    const err = new ValidationError('Downgrading from full mode is not supported');
-    err.statusCode = 422;
-    err.code = 'MODE_DOWNGRADE_UNSUPPORTED';
-    throw err;
-  }
   if (current === value) return value;
 
   const db = await getDb();
@@ -361,6 +364,17 @@ export async function setAppMode(value, userId) {
       updatedBy: userId || null,
     });
   }
+
+  // Downgrading to simple HIDES the advanced suite: switch the full-only module
+  // flags off so menus / routes / capabilities reflect simple mode. This is a
+  // display/operation layer only — the underlying rows are never touched, so
+  // re-upgrading restores everything. Turning a flag OFF is always permitted
+  // (the mode guard in updateFeatureFlags only blocks turning them ON).
+  if (value === APP_MODES.SIMPLE) {
+    const off = Object.fromEntries(FULL_MODE_ONLY_FLAGS.map((f) => [f, false]));
+    await updateFeatureFlags(off, userId);
+  }
+
   return value;
 }
 

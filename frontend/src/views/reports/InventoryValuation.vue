@@ -1,0 +1,260 @@
+<template>
+  <div class="page-shell">
+    <PageHeader
+      title="قيمة المخزون حسب التسعيرة"
+      subtitle="قيمة البضاعة الموجودة فعلياً في المخزون مُقيّمة بسعر المفرد والجملة والوكيل (الكمية × السعر)"
+      icon="mdi-cash-multiple"
+    />
+
+    <!-- ── الفلاتر ─────────────────────────────────────────────────────────── -->
+    <v-card variant="outlined" class="mb-4">
+      <v-card-text>
+        <v-row dense>
+          <v-col v-if="multiBranchOn" cols="12" sm="6" md="3">
+            <v-select
+              v-model="filters.branchId"
+              :items="branchItems"
+              item-title="name"
+              item-value="id"
+              label="الفرع"
+              clearable
+              density="comfortable"
+              variant="outlined"
+              hide-details
+            />
+          </v-col>
+          <v-col v-if="multiWarehouseOn" cols="12" sm="6" md="3">
+            <v-select
+              v-model="filters.warehouseId"
+              :items="warehouseItems"
+              item-title="name"
+              item-value="id"
+              label="المخزن"
+              clearable
+              density="comfortable"
+              variant="outlined"
+              hide-details
+            />
+          </v-col>
+          <v-col cols="12" sm="6" md="3">
+            <v-select
+              v-model="filters.categoryId"
+              :items="categoryStore.categories"
+              item-title="name"
+              item-value="id"
+              label="التصنيف"
+              clearable
+              density="comfortable"
+              variant="outlined"
+              hide-details
+            />
+          </v-col>
+          <v-col cols="12" sm="6" md="3">
+            <v-autocomplete
+              v-model="filters.productId"
+              :items="productStore.products"
+              item-title="name"
+              item-value="id"
+              label="المادة"
+              clearable
+              density="comfortable"
+              variant="outlined"
+              hide-details
+            />
+          </v-col>
+          <v-col cols="12" sm="6" md="3">
+            <v-select
+              v-model="filters.priceType"
+              :items="PRICE_TIERS"
+              item-title="label"
+              item-value="value"
+              label="نوع التسعيرة (للإبراز)"
+              density="comfortable"
+              variant="outlined"
+              hide-details
+            />
+          </v-col>
+          <v-col cols="12" sm="6" md="3" class="d-flex align-center ga-2">
+            <v-btn color="primary" :loading="loading" prepend-icon="mdi-refresh" @click="load">
+              عرض التقرير
+            </v-btn>
+            <v-btn variant="text" @click="resetFilters">مسح</v-btn>
+          </v-col>
+        </v-row>
+      </v-card-text>
+    </v-card>
+
+    <!-- ── الملخّص لكل عملة ─────────────────────────────────────────────────── -->
+    <template v-if="hasData">
+      <div v-for="(totals, cur) in totalsByCurrency" :key="cur" class="mb-5">
+        <div class="text-subtitle-2 text-medium-emphasis mb-2">
+          العملة: <strong>{{ cur }}</strong> — إجمالي الكمية في المخزون:
+          <strong>{{ formatQty(totals.totalQty) }}</strong>
+        </div>
+        <v-row dense>
+          <v-col v-for="card in tierCards(totals)" :key="card.key" cols="12" sm="6" md="3">
+            <v-card
+              :variant="filters.priceType === card.key ? 'flat' : 'tonal'"
+              :color="card.color"
+              :class="{ 'tier-card--active': filters.priceType === card.key }"
+            >
+              <v-card-text>
+                <div class="d-flex align-center justify-space-between">
+                  <span class="text-caption">{{ card.label }}</span>
+                  <v-icon size="18">{{ card.icon }}</v-icon>
+                </div>
+                <div class="text-h6 font-weight-bold mt-1">
+                  {{ formatCurrency(card.value, cur) }}
+                </div>
+              </v-card-text>
+            </v-card>
+          </v-col>
+        </v-row>
+      </div>
+
+      <!-- ── التفصيل لكل مادة ──────────────────────────────────────────────── -->
+      <v-card variant="outlined">
+        <v-card-title class="text-subtitle-1">التفصيل حسب المادة</v-card-title>
+        <v-data-table
+          :headers="tableHeaders"
+          :items="rows"
+          :items-per-page="25"
+          density="comfortable"
+          class="valuation-table"
+        >
+          <template #[`item.quantity`]="{ item }">{{ formatQty(item.quantity) }}</template>
+          <template #[`item.retailValue`]="{ item }">
+            {{ formatCurrency(item.retailValue, item.currency) }}
+          </template>
+          <template #[`item.wholesaleValue`]="{ item }">
+            {{ formatCurrency(item.wholesaleValue, item.currency) }}
+          </template>
+          <template #[`item.agentValue`]="{ item }">
+            {{ formatCurrency(item.agentValue, item.currency) }}
+          </template>
+          <template #[`item.costValue`]="{ item }">
+            {{ formatCurrency(item.costValue, item.currency) }}
+          </template>
+          <template #[`item.categoryName`]="{ item }">
+            {{ item.categoryName || '—' }}
+          </template>
+        </v-data-table>
+      </v-card>
+    </template>
+
+    <v-card v-else-if="!loading" variant="outlined" class="text-center pa-8">
+      <v-icon size="48" color="grey">mdi-package-variant-closed</v-icon>
+      <div class="text-body-1 mt-2 text-medium-emphasis">
+        لا توجد بضاعة في المخزون مطابقة للفلاتر المحددة.
+      </div>
+    </v-card>
+  </div>
+</template>
+
+<script setup>
+import { reactive, computed, onMounted } from 'vue';
+import { useReportStore } from '@/stores/report';
+import { useInventoryStore } from '@/stores/inventory';
+import { useCategoryStore } from '@/stores/category';
+import { useProductStore } from '@/stores/product';
+import { useAuthStore } from '@/stores/auth';
+import PageHeader from '@/components/PageHeader.vue';
+import { formatCurrency } from '@/utils/formatters';
+import { PRICE_TIERS } from '@/utils/productUnits';
+
+const reportStore = useReportStore();
+const inventoryStore = useInventoryStore();
+const categoryStore = useCategoryStore();
+const productStore = useProductStore();
+const authStore = useAuthStore();
+
+const multiBranchOn = computed(() => authStore.hasFeature?.('multiBranch') === true);
+const multiWarehouseOn = computed(() => authStore.hasFeature?.('multiWarehouse') === true);
+
+const filters = reactive({
+  branchId: multiBranchOn.value ? inventoryStore.selectedBranchId || null : null,
+  warehouseId: multiWarehouseOn.value ? inventoryStore.selectedWarehouseId || null : null,
+  categoryId: null,
+  productId: null,
+  priceType: 'retail',
+});
+
+const loading = computed(() => reportStore.loading);
+const report = computed(() => reportStore.inventoryValuation);
+const totalsByCurrency = computed(() => report.value?.totalsByCurrency || {});
+const rows = computed(() => report.value?.rows || []);
+const hasData = computed(() => rows.value.length > 0);
+
+const branchItems = computed(() => inventoryStore.branches);
+const warehouseItems = computed(() => inventoryStore.warehousesForBranch);
+
+// Four valuation cards per currency. The card matching the selected price-type
+// filter is visually emphasised so the owner can focus on one tier.
+const tierCards = (totals) => [
+  { key: 'retail', label: 'قيمة المخزون — مفرد', value: totals.retailValue, color: 'primary', icon: 'mdi-tag' },
+  { key: 'wholesale', label: 'قيمة المخزون — جملة', value: totals.wholesaleValue, color: 'indigo', icon: 'mdi-tag-multiple' },
+  { key: 'agent', label: 'قيمة المخزون — وكيل', value: totals.agentValue, color: 'teal', icon: 'mdi-account-star' },
+  { key: 'cost', label: 'قيمة المخزون — التكلفة', value: totals.costValue, color: 'blue-grey', icon: 'mdi-cash' },
+];
+
+const tableHeaders = [
+  { title: 'المادة', key: 'productName' },
+  { title: 'التصنيف', key: 'categoryName' },
+  { title: 'الكمية', key: 'quantity', align: 'end' },
+  { title: 'قيمة المفرد', key: 'retailValue', align: 'end' },
+  { title: 'قيمة الجملة', key: 'wholesaleValue', align: 'end' },
+  { title: 'قيمة الوكيل', key: 'agentValue', align: 'end' },
+  { title: 'قيمة التكلفة', key: 'costValue', align: 'end' },
+];
+
+const formatQty = (n) => (Number(n) || 0).toLocaleString('en-US');
+
+// Drop empty filter keys so the backend only receives the active filters.
+const buildParams = () => {
+  const out = {};
+  if (multiBranchOn.value && filters.branchId) out.branchId = filters.branchId;
+  if (multiWarehouseOn.value && filters.warehouseId) out.warehouseId = filters.warehouseId;
+  if (filters.categoryId) out.categoryId = filters.categoryId;
+  if (filters.productId) out.productId = filters.productId;
+  if (filters.priceType) out.priceType = filters.priceType;
+  return out;
+};
+
+const load = async () => {
+  await reportStore.fetchInventoryValuation(buildParams());
+};
+
+const resetFilters = () => {
+  filters.branchId = null;
+  filters.warehouseId = null;
+  filters.categoryId = null;
+  filters.productId = null;
+  filters.priceType = 'retail';
+  load();
+};
+
+onMounted(async () => {
+  // Load filter option sources (best-effort) then run the initial report.
+  const tasks = [
+    categoryStore.fetchCategories().catch(() => {}),
+    productStore.fetch({ page: 1, limit: 500 }).catch(() => {}),
+  ];
+  if (multiBranchOn.value && inventoryStore.branches.length === 0) {
+    tasks.push(inventoryStore.fetchBranches().catch(() => {}));
+  }
+  if (inventoryStore.warehouses.length === 0) {
+    tasks.push(inventoryStore.fetchWarehouses(filters.branchId).catch(() => {}));
+  }
+  await Promise.all(tasks);
+  await load();
+});
+</script>
+
+<style scoped>
+.tier-card--active {
+  outline: 2px solid rgba(var(--v-theme-primary), 0.6);
+}
+.valuation-table {
+  font-variant-numeric: tabular-nums;
+}
+</style>

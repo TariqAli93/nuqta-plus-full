@@ -31,16 +31,29 @@
                     @customer-selected="onCustomerSelected"
                   />
                   <FormFieldHelp help-text="اختياري - يمكنك إتمام البيع بدون تحديد عميل" />
-                  <v-chip
-                    v-if="agentPricingOn && selectedCustomerType !== 'retail'"
-                    size="small"
-                    color="warning"
-                    variant="tonal"
-                    class="mt-1"
-                    prepend-icon="mdi-account-star"
-                  >
-                    {{ selectedCustomerType === 'agent' ? 'سعر الوكيل مطبّق' : 'سعر الجملة مطبّق' }}
-                  </v-chip>
+                  <div v-if="agentPricingOn" class="mt-2">
+                    <div class="text-caption text-medium-emphasis mb-1">
+                      نوع التسعيرة
+                    </div>
+                    <v-btn-toggle
+                      v-model="selectedCustomerType"
+                      mandatory
+                      density="comfortable"
+                      color="primary"
+                      variant="outlined"
+                      divided
+                      @update:model-value="onPriceTypeChange"
+                    >
+                      <v-btn
+                        v-for="tier in PRICE_TIERS"
+                        :key="tier.value"
+                        :value="tier.value"
+                        size="small"
+                      >
+                        {{ tier.label }}
+                      </v-btn>
+                    </v-btn-toggle>
+                  </div>
                 </v-col>
                 <v-col cols="12" md="6">
                   <v-select
@@ -614,9 +627,10 @@ import {
   getProductUnits,
   getDefaultSaleUnit,
   getUnitConversionFactor,
-  getUnitSalePrice,
   getUnitAvailableStock,
   toBaseQuantity,
+  resolveTierUnitPrice as resolveTierPriceFor,
+  PRICE_TIERS,
 } from '@/utils/productUnits';
 
 const router = useRouter();
@@ -726,31 +740,20 @@ const currencySettings = ref({
 });
 
 // ── Agent/wholesale pricing (تسعير الوكلاء) ────────────────────────────────
-// The selected customer's tier drives the auto-applied price. Resolution chain
-// mirrors the backend: unit tier → product tier → unit salePrice → sellingPrice.
+// `selectedCustomerType` is the ACTIVE pricing tier (مفرد/جملة/وكيل). It
+// defaults from the selected customer's type but can be overridden manually via
+// the price-type selector. The chosen tier drives the per-line price and is
+// sent as `priceType` so reports can show which tier the invoice used.
 const selectedCustomerType = ref('retail');
 
-const resolveTierUnitPrice = (product, unit) => {
-  const tierKey =
-    selectedCustomerType.value === 'wholesale'
-      ? 'wholesalePrice'
-      : selectedCustomerType.value === 'agent'
-        ? 'agentPrice'
-        : null;
-  if (tierKey) {
-    const num = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
-    const unitTier = unit ? num(unit[tierKey]) : null;
-    if (unitTier != null) return unitTier;
-    const productTier = num(product?.[tierKey]);
-    if (productTier != null) return productTier;
-  }
-  return getUnitSalePrice(product, unit);
-};
+// Thin wrapper over the shared resolver so existing call sites stay unchanged;
+// closes over the currently active tier. Chain: unit tier → product tier →
+// unit salePrice → sellingPrice.
+const resolveTierUnitPrice = (product, unit) =>
+  resolveTierPriceFor(product, unit, selectedCustomerType.value);
 
-// When the customer (tier) changes, re-price every line that hasn't been
-// manually edited away from its tier price.
-const onCustomerSelected = (customer) => {
-  selectedCustomerType.value = customer?.customerType || 'retail';
+// Re-price every cart line at the active tier (converted to the sale currency).
+const repriceAllItems = () => {
   for (const item of sale.value.items) {
     const p = productOf(item);
     if (!p) continue;
@@ -759,6 +762,17 @@ const onCustomerSelected = (customer) => {
     item.unitPriceOriginal = perUnit;
     item.unitPrice = convertPrice(perUnit, p.currency || 'USD', sale.value.currency);
   }
+};
+
+// Selecting a customer defaults the tier to their type, then reprices the cart.
+const onCustomerSelected = (customer) => {
+  selectedCustomerType.value = customer?.customerType || 'retail';
+  repriceAllItems();
+};
+
+// Manual tier override from the price-type selector — reprice the whole cart.
+const onPriceTypeChange = () => {
+  repriceAllItems();
 };
 
 // Computed property for available currencies
@@ -1285,6 +1299,8 @@ const submitSale = async () => {
       saleSource: SALE_SOURCE_NEW_SALE,
       saleType:
         sale.value.paymentType === 'installment' ? SALE_TYPE_INSTALLMENT : SALE_TYPE_CASH,
+      // Pricing tier chosen for this invoice (مفرد/جملة/وكيل).
+      priceType: selectedCustomerType.value,
       // ────────────────────────────────────────────────────────────────────
       branchId: inventoryStore.selectedBranchId || undefined,
       warehouseId: inventoryStore.selectedWarehouseId || undefined,

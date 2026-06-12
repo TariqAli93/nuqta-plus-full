@@ -7,7 +7,7 @@
       :temporary="isMobile"
       width="280"
       rail
-      rail-width="145"
+      rail-width="165"
       class="!fixed top-0 h-screen"
       @update:model-value="onDrawerUpdate"
     >
@@ -342,9 +342,16 @@ const toggleTheme = () => {
   applyColorScheme(newTheme);
 };
 
-const handleLogout = () => {
+const handleLogout = async () => {
+  // logout() closes any open shift on the server first; if that fails it
+  // throws and we must NOT tear down the session or navigate away — the user
+  // stays logged in and the error toast (shown by the store) tells them why.
+  try {
+    await authStore.logout();
+  } catch {
+    return;
+  }
   alertStore.disconnectRealtime();
-  authStore.logout();
   router.push({ name: 'Login' });
 };
 

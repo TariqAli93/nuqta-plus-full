@@ -1,0 +1,222 @@
+/**
+ * Config for every quick-question report window. One entry per report drives:
+ *   - the dashboard card (title/icon/accent/permission),
+ *   - the standalone page (summary cards, table columns, which filters show),
+ *   - the backend endpoint (`/reports/<type>`).
+ *
+ * Keeping this declarative means the 7 pages and the dashboard cards never drift
+ * apart, and adding a report is a single config entry + a thin page wrapper.
+ *
+ * `permission` is the RBAC gate: the dashboard hides the card and the route
+ * guard blocks direct navigation when the user lacks it (backend enforces too).
+ */
+
+const money = 'money';
+const int = 'int';
+const date = 'date';
+const datetime = 'datetime';
+
+export const REPORT_CONFIGS = {
+  sales: {
+    type: 'sales',
+    title: 'تقرير المبيعات',
+    question: 'شكد بعت؟',
+    icon: 'mdi-cash-multiple',
+    accent: '#2563eb',
+    permission: 'sales:read',
+    defaultRange: 'today',
+    filters: ['date', 'search', 'branch'],
+    searchPlaceholder: 'بحث برقم الفاتورة أو اسم العميل',
+    summary: [
+      { key: 'totalSales', label: 'إجمالي المبيعات', format: money, accent: '#2563eb', big: true },
+      { key: 'invoices', label: 'عدد الفواتير', format: int, accent: '#0891b2' },
+      { key: 'discounts', label: 'إجمالي الخصومات', format: money, accent: '#d97706' },
+      { key: 'netSales', label: 'صافي المبيعات', format: money, accent: '#16a34a' },
+    ],
+    columns: [
+      { key: 'invoice_number', label: 'رقم الفاتورة' },
+      { key: 'created_at', label: 'التاريخ', format: date },
+      { key: 'customer_name', label: 'العميل' },
+      { key: 'total', label: 'المبلغ الكلي', format: money, align: 'end' },
+      { key: 'paid_amount', label: 'المدفوع', format: money, align: 'end' },
+      { key: 'remaining_amount', label: 'المتبقي', format: money, align: 'end' },
+      { key: 'payment_type', label: 'طريقة الدفع', format: 'paymentType' },
+      { key: 'status', label: 'الحالة', format: 'status' },
+    ],
+  },
+
+  profit: {
+    type: 'profit',
+    title: 'تقرير الأرباح',
+    question: 'شكد ربحت؟',
+    icon: 'mdi-chart-line',
+    accent: '#16a34a',
+    permission: 'reports:read_profit',
+    defaultRange: 'month',
+    filters: ['date', 'branch'],
+    summary: [
+      { key: 'netSales', label: 'صافي المبيعات', format: money, accent: '#2563eb' },
+      { key: 'cogs', label: 'تكلفة البضاعة المباعة', format: money, accent: '#d97706' },
+      { key: 'returnedValue', label: 'المرتجعات', format: money, accent: '#dc2626' },
+      { key: 'expenses', label: 'المصاريف', format: money, accent: '#9333ea' },
+      { key: 'netProfit', label: 'صافي الربح', format: money, accent: '#16a34a', big: true },
+    ],
+    columns: [
+      { key: 'product_name', label: 'المنتج' },
+      { key: 'sku', label: 'SKU' },
+      { key: 'qty', label: 'الكمية', format: int, align: 'end' },
+      { key: 'sales', label: 'إجمالي البيع', format: money, align: 'end' },
+      { key: 'cogs', label: 'التكلفة', format: money, align: 'end' },
+      { key: 'profit', label: 'الربح', format: money, align: 'end' },
+    ],
+  },
+
+  'top-products': {
+    type: 'top-products',
+    title: 'أكثر المنتجات مبيعاً',
+    question: 'شنو أكثر بضاعة تنباع؟',
+    icon: 'mdi-trophy',
+    accent: '#d97706',
+    permission: 'reports:read_profit',
+    defaultRange: 'month',
+    filters: ['date', 'search'],
+    searchPlaceholder: 'بحث باسم المنتج أو الباركود أو SKU',
+    summary: [
+      { key: 'totalQty', label: 'إجمالي الكمية المباعة', format: int, accent: '#d97706', big: true },
+      { key: 'totalSales', label: 'إجمالي البيع', format: money, accent: '#2563eb' },
+      { key: 'products', label: 'عدد المنتجات', format: int, accent: '#0891b2' },
+    ],
+    columns: [
+      { key: 'product_name', label: 'اسم المنتج' },
+      { key: 'sku', label: 'SKU' },
+      { key: 'barcode', label: 'الباركود' },
+      { key: 'qty_sold', label: 'الكمية المباعة', format: int, align: 'end' },
+      { key: 'invoices', label: 'عدد الفواتير', format: int, align: 'end' },
+      { key: 'total_sales', label: 'إجمالي البيع', format: money, align: 'end' },
+      { key: 'total_profit', label: 'إجمالي الربح', format: money, align: 'end' },
+    ],
+  },
+
+  debts: {
+    type: 'debts',
+    title: 'تقرير الديون',
+    question: 'شنو عليه دين؟',
+    icon: 'mdi-account-cash',
+    accent: '#dc2626',
+    permission: 'sales:read',
+    defaultRange: 'all',
+    filters: ['debtFilter', 'search', 'branch'],
+    searchPlaceholder: 'بحث باسم العميل أو رقم الهاتف',
+    summary: [
+      { key: 'totalDebt', label: 'إجمالي الديون', format: money, accent: '#dc2626', big: true },
+      { key: 'customers', label: 'عدد العملاء المدينين', format: int, accent: '#9333ea' },
+    ],
+    columns: [
+      { key: 'customer_name', label: 'اسم العميل' },
+      { key: 'phone', label: 'رقم الهاتف' },
+      { key: 'total_amount', label: 'إجمالي المبلغ', format: money, align: 'end' },
+      { key: 'paid', label: 'المدفوع', format: money, align: 'end' },
+      { key: 'remaining', label: 'المتبقي', format: money, align: 'end' },
+      { key: 'last_payment', label: 'آخر دفعة', format: date },
+      { key: 'last_invoice', label: 'آخر فاتورة', format: date },
+    ],
+  },
+
+  'cash-box': {
+    type: 'cash-box',
+    title: 'تقرير الصندوق',
+    question: 'شكد بالصندوق؟',
+    icon: 'mdi-cash-register',
+    accent: '#0891b2',
+    permission: 'reports:read_financial',
+    defaultRange: 'today',
+    filters: ['date', 'branch', 'cashSession'],
+    summary: [
+      { key: 'currentBalance', label: 'الرصيد الحالي', format: money, accent: '#0891b2', big: true },
+      { key: 'receipts', label: 'المقبوضات', format: money, accent: '#16a34a' },
+      { key: 'expenses', label: 'المصروفات', format: money, accent: '#dc2626' },
+      { key: 'returns', label: 'المرتجعات', format: money, accent: '#d97706' },
+      { key: 'net', label: 'صافي حركة الصندوق', format: money, accent: '#2563eb' },
+    ],
+    columns: [
+      { key: 'ts', label: 'التاريخ', format: datetime },
+      { key: 'type_label', label: 'نوع الحركة' },
+      { key: 'description', label: 'الوصف' },
+      { key: 'amount_in', label: 'داخل', format: money, align: 'end' },
+      { key: 'amount_out', label: 'خارج', format: money, align: 'end' },
+      { key: 'balance_after', label: 'الرصيد', format: money, align: 'end' },
+      { key: 'user_name', label: 'المستخدم' },
+      { key: 'branch_name', label: 'الفرع' },
+    ],
+  },
+
+  expenses: {
+    type: 'expenses',
+    title: 'تقرير المصروفات',
+    question: 'شكد صرفت؟',
+    icon: 'mdi-cash-minus',
+    accent: '#9333ea',
+    permission: 'view:expenses',
+    defaultRange: 'month',
+    filters: ['date', 'search', 'branch'],
+    searchPlaceholder: 'بحث بنوع المصروف أو الوصف',
+    summary: [
+      { key: 'totalExpenses', label: 'إجمالي المصروفات', format: money, accent: '#9333ea', big: true },
+      { key: 'count', label: 'عدد العمليات', format: int, accent: '#0891b2' },
+    ],
+    breakdownKey: 'byCategory', // chips: { category, amount }
+    columns: [
+      { key: 'expense_date', label: 'التاريخ', format: date },
+      { key: 'category', label: 'نوع المصروف' },
+      { key: 'note', label: 'الوصف' },
+      { key: 'amount', label: 'المبلغ', format: money, align: 'end' },
+      { key: 'user_name', label: 'المستخدم' },
+      { key: 'branch_name', label: 'الفرع' },
+    ],
+  },
+
+  'cash-movement': {
+    type: 'cash-movement',
+    title: 'حركة الصندوق',
+    question: 'شنو حركة الصندوق؟',
+    icon: 'mdi-swap-vertical-bold',
+    accent: '#0d9488',
+    permission: 'reports:read_financial',
+    defaultRange: 'today',
+    filters: ['date', 'movementType', 'branch', 'cashSession'],
+    summary: [
+      { key: 'totalIn', label: 'إجمالي الداخل', format: money, accent: '#16a34a', big: true },
+      { key: 'totalOut', label: 'إجمالي الخارج', format: money, accent: '#dc2626', big: true },
+      { key: 'net', label: 'الصافي', format: money, accent: '#2563eb' },
+    ],
+    columns: [
+      { key: 'ts', label: 'التاريخ والوقت', format: datetime },
+      { key: 'type_label', label: 'نوع الحركة' },
+      { key: 'description', label: 'الوصف' },
+      { key: 'amount_in', label: 'المبلغ الداخل', format: money, align: 'end' },
+      { key: 'amount_out', label: 'المبلغ الخارج', format: money, align: 'end' },
+      { key: 'balance_after', label: 'الرصيد بعد الحركة', format: money, align: 'end' },
+      { key: 'user_name', label: 'المستخدم' },
+      { key: 'branch_name', label: 'الفرع / الوردية' },
+    ],
+  },
+};
+
+/** Ordered list for the dashboard quick-question cards. */
+export const REPORT_ORDER = [
+  'sales', 'profit', 'top-products', 'debts', 'cash-box', 'expenses', 'cash-movement',
+];
+
+export const DEBT_FILTER_OPTIONS = [
+  { value: 'due', title: 'الديون المستحقة' },
+  { value: 'all', title: 'كل الديون' },
+  { value: 'partial', title: 'مسددة جزئياً' },
+];
+
+export const MOVEMENT_TYPE_OPTIONS = [
+  { value: 'all', title: 'الكل' },
+  { value: 'receipt', title: 'قبض' },
+  { value: 'debt_settlement', title: 'تسديد دين' },
+  { value: 'expense', title: 'صرف' },
+  { value: 'return', title: 'مرتجع' },
+];

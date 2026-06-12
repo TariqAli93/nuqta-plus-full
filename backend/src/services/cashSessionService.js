@@ -9,7 +9,13 @@ import {
 } from '../models/index.js';
 import { eq, and, desc, gte, lte, sql } from 'drizzle-orm';
 import { NotFoundError, ValidationError, AuthorizationError } from '../utils/errors.js';
-import { isGlobalAdmin, branchFilterFor, resolveEffectiveBranchId } from './scopeService.js';
+import {
+  isGlobalAdmin,
+  isBranchAdmin,
+  isBranchManager,
+  branchFilterFor,
+  resolveBranchIdForOperation,
+} from './scopeService.js';
 import auditService from './auditService.js';
 import accountingPeriodService from './accountingPeriodService.js';
 import featureFlagsService from './featureFlagsService.js';
@@ -20,6 +26,16 @@ import { ensureDefaultCashbox } from './systemDefaultsService.js';
 const n = (v) => (v === null || v === undefined ? 0 : Number(v));
 
 const round4 = (v) => Math.round((Number(v) || 0) * 10000) / 10000;
+
+/**
+ * Roles allowed to VIEW / CLOSE other users' shifts within their own branch.
+ * "مدير الفرع" maps to both the branch-admin and branch-manager roles. Plain
+ * managers / cashiers / viewers are NOT branch session managers — they may
+ * only act on their OWN shift (enforced via the owner check).
+ */
+function isBranchSessionManager(user) {
+  return isBranchAdmin(user) || isBranchManager(user);
+}
 
 /**
  * Cash session / shift closing business logic.
@@ -51,15 +67,13 @@ export class CashSessionService {
       throw new ValidationError('Opening cash cannot be negative');
     }
 
-    // Resolve the branch through the SAME central helper the accounting period
-    // uses, so a shift's branch_id ALWAYS matches the branch_id of the period it
-    // binds to. When branches are off this returns the system default branch
-    // (never null); when on it validates the user's branch permission.
-    const effectiveBranchId = await resolveEffectiveBranchId({
-      user,
-      requestedBranchId: branchId,
-      ensure: true,
-    });
+    // Resolve + validate the branch through the SINGLE central resolver shared
+    // by accounting periods, sales, expenses, inventory, etc. — so a shift's
+    // branch_id ALWAYS matches the period it binds to, and a bad/inactive/
+    // foreign branch surfaces a clear localized error (not a downstream FK
+    // DatabaseError). Branches OFF → system default; branch-bound user → their
+    // assigned branch; switcher → requested (validated) or default.
+    const effectiveBranchId = await resolveBranchIdForOperation(user, branchId, { ensure: true });
 
     const db = await getDb();
     const existing = await this.findOpenSession(user.id, effectiveBranchId);
@@ -140,12 +154,10 @@ export class CashSessionService {
       throw new ValidationError('Cash session is already closed');
     }
 
-    // Cashiers / managers can only close sessions they own. Global / branch
-    // admins may close any session inside their scope.
-    const ownsSession = Number(session.userId) === Number(user.id);
-    if (!ownsSession && !isGlobalAdmin(user) && user.role !== 'branch_admin') {
-      throw new AuthorizationError('You can only close your own cash session');
-    }
+    // Owner / super-admin / branch-manager-in-scope. getById above already
+    // enforced this (it throws before we get here for an out-of-scope user),
+    // but we re-assert with close-specific wording as defense in depth.
+    await this.assertCanAccessSession(session, user, { action: 'close' });
 
     const closing = round4(closingCash);
     if (!Number.isFinite(closing) || closing < 0) {
@@ -205,6 +217,73 @@ export class CashSessionService {
   }
 
   /**
+   * Auto-close every OPEN session belonging to `user`. Called on logout so a
+   * user can never leave a shift hanging open after they sign out.
+   *
+   * Because there is no physical drawer count at logout, the shift is closed
+   * at its EXPECTED cash (closingCash = expected, variance = 0). Each closed
+   * shift is stamped with `closedAt` and an audit entry. Variance is always 0
+   * so no GL posting is triggered.
+   *
+   * Throws if any open session fails to close — the caller (logout) surfaces
+   * the error and blocks sign-out until it's resolved.
+   *
+   * Returns `{ closed: number[] }` — the ids of the sessions that were closed.
+   */
+  async closeOpenSessionsForUser(user, { notes = 'إغلاق تلقائي عند تسجيل الخروج' } = {}) {
+    if (!user?.id) return { closed: [] };
+    const db = await getDb();
+
+    const openSessions = await db
+      .select()
+      .from(cashSessions)
+      .where(and(eq(cashSessions.userId, user.id), eq(cashSessions.status, 'open')))
+      .orderBy(desc(cashSessions.openedAt));
+
+    const closed = [];
+    for (const s of openSessions) {
+      const totals = await this.computeSessionTotals(s.id);
+      const expected = round4(n(s.openingCash) + totals.cashIn - totals.cashOut);
+
+      const [updated] = await db
+        .update(cashSessions)
+        .set({
+          closingCash: String(expected),
+          expectedCash: String(expected),
+          variance: '0',
+          status: 'closed',
+          closedAt: new Date(),
+          notes: s.notes ? `${s.notes} — ${notes}` : notes,
+        })
+        .where(and(eq(cashSessions.id, s.id), eq(cashSessions.status, 'open')))
+        .returning();
+
+      // Lost the race (closed concurrently) — not an error, just skip it.
+      if (!updated) continue;
+
+      closed.push(updated.id);
+      await auditService.log({
+        userId: user.id,
+        username: user.username,
+        action: 'cash_session:auto_close',
+        resource: 'cash_sessions',
+        resourceId: updated.id,
+        details: {
+          reason: 'logout',
+          openingCash: n(s.openingCash),
+          closingCash: expected,
+          expectedCash: expected,
+          variance: 0,
+          cashIn: totals.cashIn,
+          cashOut: totals.cashOut,
+        },
+      });
+    }
+
+    return { closed };
+  }
+
+  /**
    * Find the user's open session that should cover a sale in `branchId`, or
    * null. Used to enforce "open session required" before a cash POS sale.
    *
@@ -254,6 +333,55 @@ export class CashSessionService {
     return await this.getById(session.id, user);
   }
 
+  /**
+   * Authorize a user to VIEW or CLOSE a specific session row.
+   *
+   * Access model (matches the shift-permissions spec):
+   *   - Super admin (global_admin / admin) → ANY session in ANY branch.
+   *   - Owner (session.userId === user.id)  → their OWN shift, ALWAYS, even
+   *     when their assigned branch differs from the shift's branch (e.g. the
+   *     shift was opened against the system default branch while multiBranch is
+   *     OFF, or the user was reassigned mid-shift). This is the fix for the
+   *     spurious "Cash session belongs to a different branch" error a cashier
+   *     used to get just loading their own current shift.
+   *   - Branch manager (branch_admin / branch_manager) → any session that lives
+   *     inside their branch. Branch scoping is only enforced when the
+   *     `multiBranch` feature is ON; when it's OFF every session shares the
+   *     single internal default branch so there is nothing to cross.
+   *   - Everyone else (manager / cashier / viewer) accessing someone ELSE's
+   *     session → denied with a clear message.
+   *
+   * `action` only tunes the wording ('view' vs 'close').
+   */
+  async assertCanAccessSession(session, user, { action = 'view' } = {}) {
+    if (!user) return;
+    if (isGlobalAdmin(user)) return; // super admin overrides branch scope
+    if (Number(session.userId) === Number(user.id)) return; // own shift
+
+    // Beyond this point the user is reaching for SOMEONE ELSE's shift.
+    if (!isBranchSessionManager(user)) {
+      throw new AuthorizationError(
+        action === 'close'
+          ? 'لا يمكنك إغلاق وردية مستخدم آخر'
+          : 'لا يمكنك الوصول إلى وردية مستخدم آخر'
+      );
+    }
+
+    // Branch managers: only within their own branch — and only when the
+    // multi-branch feature is actually on (otherwise branches are a no-op).
+    const flags = await featureFlagsService.getFeatureFlags();
+    const multiBranchOn = flags.multiBranch !== false;
+    if (multiBranchOn && session.branchId) {
+      const allowed = branchFilterFor(user); // [assignedBranchId] | [] | null
+      const inScope =
+        allowed === null ||
+        allowed.some((b) => Number(b) === Number(session.branchId));
+      if (!inScope) {
+        throw new AuthorizationError('الوردية تتبع فرعاً آخر');
+      }
+    }
+  }
+
   async getById(id, user = null) {
     const db = await getDb();
     const [row] = await db
@@ -285,17 +413,8 @@ export class CashSessionService {
 
     if (!row) throw new NotFoundError('Cash session');
 
-    if (user && !isGlobalAdmin(user)) {
-      // Branch scope: non-global users can only see sessions inside their branch.
-      const allowedBranches = branchFilterFor(user);
-      if (allowedBranches !== null) {
-        const userBranchId = allowedBranches[0];
-        // null branch sessions are visible to anyone in the same workspace.
-        if (row.branchId && Number(row.branchId) !== Number(userBranchId)) {
-          throw new AuthorizationError('Cash session belongs to a different branch');
-        }
-      }
-    }
+    // Owner / super-admin / branch-manager-in-scope only. Feature-flag aware.
+    await this.assertCanAccessSession(row, user, { action: 'view' });
 
     const totals = await this.computeSessionTotals(row.id);
     const expected =
@@ -325,17 +444,26 @@ export class CashSessionService {
     if (status) conds.push(eq(cashSessions.status, status));
     if (userId) conds.push(eq(cashSessions.userId, Number(userId)));
 
+    const flags = await featureFlagsService.getFeatureFlags();
+    const multiBranchOn = flags.multiBranch !== false;
+
     if (isGlobalAdmin(user)) {
+      // Super admin: every branch; optional explicit branch filter.
       if (branchId) conds.push(eq(cashSessions.branchId, Number(branchId)));
-    } else {
-      const allowed = branchFilterFor(user);
-      if (allowed === null) {
-        // not global but branchFilterFor returned null — defensive
-      } else if (allowed.length === 0) {
-        return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
-      } else {
+    } else if (isBranchSessionManager(user)) {
+      // Branch manager: all sessions inside their own branch. When multiBranch
+      // is OFF every session shares the single default branch, so no filter.
+      if (multiBranchOn) {
+        const allowed = branchFilterFor(user);
+        if (!allowed || allowed.length === 0) {
+          return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
+        }
         conds.push(eq(cashSessions.branchId, allowed[0]));
       }
+    } else {
+      // Regular user / cashier / viewer: ONLY their own sessions. Any passed
+      // `userId` filter is overridden so they can't enumerate other users.
+      conds.push(eq(cashSessions.userId, Number(user.id)));
     }
 
     if (startDate) conds.push(gte(cashSessions.openedAt, new Date(startDate)));

@@ -76,9 +76,10 @@ export class FeatureFlagsController {
   }
 
   /**
-   * Upgrade the operating mode (simple → full). Setting the mode alone does
-   * not enable any module — flags stay as they are; the caller (upgrade
-   * wizard) follows up with flag updates / COA seeding.
+   * Switch the operating mode in EITHER direction (simple ⇄ full). Upgrading to
+   * full only unlocks the modules (flags stay as they are). Downgrading to
+   * simple hides the advanced suite (full-only flags off) WITHOUT deleting any
+   * data — see featureFlagsService.setAppMode.
    */
   async setAppMode(request, reply) {
     const mode = request.body?.mode;

@@ -17,7 +17,7 @@ const supplierUpdateSchema = supplierSchema.partial().extend({
 
 const listQuerySchema = z.object({
   page: z.coerce.number().int().positive().optional().default(1),
-  limit: z.coerce.number().int().positive().max(200).optional().default(25),
+  limit: z.coerce.number().int().positive().optional().default(25),
   search: z.string().optional(),
   hasDebt: z.coerce.boolean().optional(),
   includeInactive: z.coerce.boolean().optional(),

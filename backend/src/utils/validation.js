@@ -305,6 +305,9 @@ export const saleSchema = z
       .optional()
       .default(0),
     interestAmount: z.number().nonnegative().optional(),
+    // Pricing tier chosen for this invoice (تسعير الوكلاء): مفرد/جملة/وكيل.
+    // Optional + enum so legacy clients omit it and the service defaults to retail.
+    priceType: z.enum(['retail', 'wholesale', 'agent']).optional(),
   })
   .superRefine((data, ctx) => {
     // ── POS-originated sales: cash/card only, no deferred balance ───────────
@@ -448,7 +451,7 @@ export const installmentActionSchema = z
     actionType: z.enum(INSTALLMENT_ACTION_TYPES, {
       errorMap: () => ({ message: 'Invalid action type' }),
     }),
-    note: z.string().trim().max(2000).optional().nullable(),
+    note: z.string().trim().optional().nullable(),
     // promise_to_pay
     promisedAmount: z.coerce.number().positive().optional(),
     promisedDate: ymd.optional(),
@@ -516,7 +519,7 @@ export const installmentActionSchema = z
 // Query schemas
 export const paginationSchema = z.object({
   page: z.number().int().positive().default(1),
-  limit: z.number().int().positive().max(100, 'Limit cannot exceed 100').default(10),
+  limit: z.number().int().positive().default(10),
   search: z.string().optional(),
   sortBy: z.string().optional(),
   sortOrder: z.enum(['asc', 'desc']).optional(),

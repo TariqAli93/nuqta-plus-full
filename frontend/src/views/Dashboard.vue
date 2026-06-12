@@ -1,433 +1,161 @@
 <template>
-  <div class="page-shell">
-    <!-- مركز العمل السريع — الواجهة الأولى لصاحب المحل -->
-    <WorkHub class="mb-6" />
+  <div class="control-center control-center--fixed">
+    <!-- ===== شريط الأوامر العلوي ===== -->
+    <div class="cc-command">
+      <div class="cc-command__greet">
+        <div class="cc-command__hello">{{ greeting }}، {{ userName }}</div>
+        <div class="cc-command__date">
+          <v-icon icon="mdi-calendar-blank-outline" size="14" /> {{ todayLabel }}
+        </div>
+      </div>
 
-    <!-- لوحة التفاصيل والرسوم (للمدير) — تبقى أسفل مركز العمل -->
-    <v-expansion-panels v-if="showDetails" class="mb-4" variant="accordion">
-      <v-expansion-panel>
-        <v-expansion-panel-title>
-          <v-icon class="me-2" size="20">mdi-chart-box</v-icon>
-          تفاصيل ورسوم الأداء
-        </v-expansion-panel-title>
-        <v-expansion-panel-text>
-          <RoleHero class="mb-4" />
+      <v-spacer />
 
-          <v-row>
-      <!-- Side column: quick actions, today summary, alerts -->
-      <v-col cols="12" md="3" :class="$vuetify.display.mdAndUp ? 'sticky-sidebar' : ''">
-        <PageSection
-          v-if="filteredQuickActions.length > 0"
-          icon="mdi-flash"
-          title="إجراءات سريعة"
-          no-padding
+      <div class="cc-command__tools">
+        <!-- حالة الوردية -->
+        <v-chip
+          v-if="canSeeShift"
+          :color="hasOpenShift ? 'success' : 'medium-emphasis'"
+          :variant="hasOpenShift ? 'tonal' : 'outlined'"
+          size="small"
+          :to="hasOpenShift ? '/sales/shifts' : '/sales/pos'"
+          class="cc-shift"
         >
-          <div class="quick-actions">
-            <v-card
-              v-for="action in filteredQuickActions"
-              :key="action.title"
-              :to="action.to"
-              class="quick-actions__item"
-              variant="flat"
-              link
-            >
-              <v-icon size="28" color="primary" class="mb-2">{{ action.icon }}</v-icon>
-              <span class="text-body-2 font-weight-bold">{{ action.title }}</span>
-            </v-card>
-          </div>
-        </PageSection>
-
-        <PageSection
-          icon="mdi-chart-box"
-          title="ملخص اليوم"
-          no-padding
-        >
-          <template #actions>
-            <v-chip size="small" color="primary" variant="tonal">
-              {{ todayLabel }}
-            </v-chip>
+          <v-icon start :icon="hasOpenShift ? 'mdi-cash-register' : 'mdi-clock-start'" size="16" />
+          <template v-if="hasOpenShift">
+            الوردية مفتوحة<span v-if="cashInBox != null"> • {{ fmt(cashInBox) }}</span>
           </template>
-          <div class="pa-4">
-            <div class="summary-grid">
-              <div class="today-stat">
-                <v-icon color="success" size="24">mdi-cash-plus</v-icon>
-                <div>
-                  <div class="text-subtitle-1 font-weight-bold">{{ formatTodayRevenue() }}</div>
-                  <div class="text-caption text-medium-emphasis">
-                    مبيعات اليوم ({{ defaultCurrency === 'IQD' ? 'د.ع' : defaultCurrency }})
-                  </div>
-                </div>
-              </div>
-              <div class="today-stat">
-                <v-icon color="warning" size="24">mdi-account-check-outline</v-icon>
-                <div>
-                  <div class="text-subtitle-1 font-weight-bold">{{ todayCompletedCount }}</div>
-                  <div class="text-caption text-medium-emphasis">العمليات الناجحة</div>
-                </div>
-              </div>
-            </div>
-            <v-divider class="my-3" />
-            <div class="text-body-2 text-info">{{ dynamicHint }}</div>
-          </div>
-        </PageSection>
+          <template v-else>فتح وردية</template>
+        </v-chip>
 
-        <div class="page-section">
-          <AlertsPanel />
-        </div>
-      </v-col>
+        <CustomizeMenu />
 
-      <!-- Main column: stats, charts, recent sales -->
-      <v-col cols="12" md="9">
-        <div class="summary-grid mb-4">
-          <StatCard
-            label="إجمالي المبيعات"
-            :value="countSales"
-            icon="mdi-cash-multiple"
-            icon-color="primary"
-          />
-          <StatCard
-            label="العملاء"
-            :value="stats.totalCustomers"
-            icon="mdi-account-group"
-            icon-color="success"
-          />
-          <StatCard
-            label="المنتجات"
-            :value="stats.totalProducts"
-            icon="mdi-package-variant"
-            icon-color="info"
-          />
-          <StatCard
-            label="منتجات قليلة المخزون"
-            :value="stats.lowStock"
-            icon="mdi-alert-circle"
-            icon-color="warning"
-          />
-        </div>
+        <v-btn
+          icon="mdi-refresh"
+          variant="text"
+          size="small"
+          :loading="loading"
+          aria-label="تحديث البيانات"
+          @click="refresh"
+        />
+      </div>
+    </div>
 
-        <v-row dense>
-          <v-col cols="12">
-            <RevenueChart :sales="recentSales" :loading="loading" />
-          </v-col>
-          <v-col cols="12" md="8">
-            <TopProductsChart :loading="loading" />
-          </v-col>
-          <v-col cols="12" md="4">
-            <SalesStatusChart :sales="recentSales" :loading="loading" />
-          </v-col>
-        </v-row>
+    <!-- ===== شريط المؤشرات ===== -->
+    <KpiStrip v-if="anyKpiVisible" />
 
-        <PageSection
-          class="mt-4"
-          icon="mdi-history"
-          title="أحدث المبيعات"
-          no-padding
-        >
-          <v-data-table
-            :headers="recentSalesHeaders"
-            :items="recentSales.slice(0, 10)"
-            :loading="loading"
-            density="comfortable"
-            hide-default-footer
-            items-per-page="10"
-          >
-            <template #loading>
-              <TableSkeleton :rows="5" :columns="recentSalesHeaders.length" />
-            </template>
-            <template #no-data>
-              <EmptyState
-                title="لا توجد مبيعات حديثة"
-                description="ستظهر هنا أحدث الفواتير عند بدء العمل"
-                icon="mdi-receipt-text-outline"
-                compact
-              />
-            </template>
-            <template #[`item.customer`]="{ item }">
-              {{ item.customer || 'زبون نقدي' }}
-            </template>
-            <template #[`item.total`]="{ item }">
-              {{ formatCurrency(item.total, item.currency) }}
-            </template>
-            <template #[`item.status`]="{ item }">
-              <v-chip :color="getStatusColor(item.status)" size="small">
-                {{ getStatusText(item.status) }}
-              </v-chip>
-            </template>
-            <template #[`item.createdAt`]="{ item }">
-              {{ formatDate(item.createdAt) }}
-            </template>
-          </v-data-table>
-        </PageSection>
-      </v-col>
-          </v-row>
-        </v-expansion-panel-text>
-      </v-expansion-panel>
-    </v-expansion-panels>
+    <!-- ===== منطقة العمل ===== -->
+    <div class="cc-grid">
+      <div class="cc-col">
+        <QuickQuestionsPanel />
+        <QuickActionsBar v-if="prefs.sections.quickActions" />
+        <PerformancePanel v-if="prefs.sections.performance && showPerformance" />
+      </div>
+
+      <div class="cc-col">
+        <AlertsCenter v-if="prefs.sections.alerts" />
+        <RecentActivity v-if="prefs.sections.activity && showActivity" />
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watchEffect } from 'vue';
-import { useSaleStore } from '@/stores/sale';
-import { useProductStore } from '@/stores/product';
-import { useCustomerStore } from '@/stores/customer';
-import { useLoading } from '@/composables/useLoading';
+import { computed, onMounted } from 'vue';
 import { useAuthStore } from '@/stores/auth';
 import { useCurrency } from '@/composables/useCurrency';
-import * as uiAccess from '@/auth/uiAccess.js';
-import RevenueChart from '@/components/dashboard/RevenueChart.vue';
-import TopProductsChart from '@/components/dashboard/TopProductsChart.vue';
-import SalesStatusChart from '@/components/dashboard/SalesStatusChart.vue';
-import AlertsPanel from '@/components/AlertsPanel.vue';
-import RoleHero from '@/components/dashboard/RoleHero.vue';
-import WorkHub from '@/components/dashboard/WorkHub.vue';
-import PageSection from '@/components/PageSection.vue';
-import StatCard from '@/components/StatCard.vue';
-import EmptyState from '@/components/EmptyState.vue';
-import TableSkeleton from '@/components/TableSkeleton.vue';
+import { useDashboardData } from '@/composables/useDashboardData';
+import { useDashboardPrefs } from '@/composables/useDashboardPrefs';
+import KpiStrip from '@/components/dashboard/control/KpiStrip.vue';
+import QuickActionsBar from '@/components/dashboard/control/QuickActionsBar.vue';
+import QuickQuestionsPanel from '@/components/dashboard/control/QuickQuestionsPanel.vue';
+import PerformancePanel from '@/components/dashboard/control/PerformancePanel.vue';
+import AlertsCenter from '@/components/dashboard/control/AlertsCenter.vue';
+import RecentActivity from '@/components/dashboard/control/RecentActivity.vue';
+import CustomizeMenu from '@/components/dashboard/control/CustomizeMenu.vue';
+import '@/components/dashboard/control/control-center.scss';
 
-const saleStore = useSaleStore();
-const productStore = useProductStore();
-const customerStore = useCustomerStore();
 const authStore = useAuthStore();
-const { useAsyncData } = useLoading();
-const {
-  defaultCurrency,
-  initialize: initCurrency,
-  convertAmountSync,
-  formatCurrency: formatCurrencyAmount,
-} = useCurrency();
+const { formatCurrency } = useCurrency();
+const { prefs, anyKpiVisible } = useDashboardPrefs();
+const { refresh, loading, hasOpenShift, cashInBox } = useDashboardData();
 
-const userRole = computed(() => authStore.user?.role);
+const perm = (p) => authStore.hasPermission(p);
 
-// Managers and above get the detailed charts/recent-sales panel below the work
-// hub; cashiers see only the clean work hub.
-const showDetails = computed(() => authStore.hasPermission('reports:read_profit'));
+const userName = computed(() => authStore.user?.fullName || authStore.user?.username || 'مرحباً');
 
-const loading = ref(false);
-const stats = ref({
-  totalSales: 0,
-  totalCustomers: 0,
-  totalProducts: 0,
-  lowStock: 0,
+const greeting = computed(() => {
+  const h = new Date().getHours();
+  if (h < 12) return 'صباح الخير';
+  if (h < 17) return 'طاب يومك';
+  return 'مساء الخير';
 });
-const recentSales = ref([]);
-const countSales = ref(0);
 
 const todayLabel = computed(() =>
   new Date().toLocaleDateString('ar-IQ', {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
+    year: 'numeric',
     numberingSystem: 'latn',
   })
 );
 
-const todayCompletedCount = computed(() => {
-  const today = new Date().toISOString().split('T')[0];
-  return recentSales.value.filter(
-    (s) => s.createdAt && s.createdAt.startsWith(today) && s.status === 'completed'
-  ).length;
-});
+const fmt = (v) => formatCurrency(Number(v) || 0);
 
-const recentSalesHeaders = [
-  { title: 'رقم الفاتورة', key: 'invoiceNumber' },
-  { title: 'العميل', key: 'customer' },
-  { title: 'المبلغ', key: 'total' },
-  { title: 'الحالة', key: 'status' },
-  { title: 'التاريخ', key: 'createdAt' },
-];
-
-const quickActions = [
-  {
-    title: 'بطاقة الاقساط',
-    icon: 'mdi-plus-circle',
-    to: '/sales/new',
-    permission: 'create:sales',
-    feature: 'installments',
-    capability: 'canUseInstallments',
-  },
-  {
-    title: 'عميل جديد',
-    icon: 'mdi-account-plus',
-    to: '/customers/new',
-    permission: 'create:customers',
-  },
-  {
-    title: 'منتج جديد',
-    icon: 'mdi-package-variant-plus',
-    to: '/products/new',
-    permission: 'create:products',
-  },
-  { title: 'التقارير', icon: 'mdi-chart-box', to: '/reports', permission: 'read:reports' },
-];
-
-const isActionAllowed = (action) => {
-  if (!action || !userRole.value) return false;
-  if (action.feature && !authStore.hasFeature(action.feature)) return false;
-  if (action.capability && !authStore.can(action.capability)) return false;
-  const perm = action.permission;
-  if (!perm) return true;
-  if (perm === 'create:sales') return uiAccess.canCreateSales(userRole.value);
-  if (perm === 'create:customers') return uiAccess.canManageCustomers(userRole.value);
-  if (perm === 'create:products') return uiAccess.canManageProducts(userRole.value);
-  if (perm === 'read:reports') return uiAccess.canViewReports(userRole.value);
-  return true;
-};
-
-const filteredQuickActions = computed(() =>
-  quickActions.filter((action) => isActionAllowed(action))
+const canSeeShift = computed(() => perm('view:sales'));
+const showPerformance = computed(
+  () => perm('view:sales') || perm('view:products') || perm('view:customers')
+);
+const showActivity = computed(
+  () =>
+    perm('view:sales') ||
+    perm('view:customers') ||
+    perm('view:products') ||
+    (perm('view:inventory') && authStore.hasFeature('inventory'))
 );
 
-const dynamicHint = computed(() => {
-  const today = new Date().toISOString().split('T')[0];
-  const todaySalesCount = recentSales.value.filter(
-    (s) => s.createdAt && s.createdAt.startsWith(today) && s.status === 'completed'
-  ).length;
-
-  const todaySales = recentSales.value.filter(
-    (s) => s.createdAt && s.createdAt.startsWith(today) && s.status === 'completed'
-  );
-
-  const todayRevenue = todaySales.reduce((sum, s) => {
-    const amount = parseFloat(s.total || 0);
-    const currency = s.currency || 'IQD';
-    const converted = convertAmountSync(amount, currency);
-    return sum + converted;
-  }, 0);
-
-  if (stats.value.lowStock > 0) {
-    return `لديك ${stats.value.lowStock} منتج بقليل المخزون. راجع المخزون وأضف الكميات المطلوبة.`;
-  }
-  if (todaySalesCount === 0 && stats.value.totalSales > 0) {
-    return `لم تسجل أي مبيعات اليوم. راجع منتجاتك وعروضك لجذب العملاء.`;
-  }
-  if (todaySalesCount > 0 && todaySalesCount <= 2 && stats.value.totalSales > 10) {
-    return `لديك ${todaySalesCount} عملية بيع اليوم. يمكنك تحسين الأداء بإضافة عروض خاصة.`;
-  }
-  if (todaySalesCount >= 5) {
-    return `أداء ممتاز: ${todaySalesCount} عملية بيع اليوم. استمر في العمل الجيد.`;
-  }
-  if (stats.value.totalProducts < 10) {
-    return `لديك ${stats.value.totalProducts} منتج فقط. أضف المزيد لزيادة المبيعات.`;
-  }
-  if (stats.value.totalCustomers < 5) {
-    return `لديك ${stats.value.totalCustomers} عميل. أضف المزيد لبناء قاعدة عملاء قوية.`;
-  }
-  if (stats.value.totalSales === 0) {
-    return `ابدأ رحلتك: أضف منتجاتك الأولى وأنشئ عملية بيع جديدة.`;
-  }
-  if (todayRevenue > 0 && todaySalesCount >= 3) {
-    return `إيرادات اليوم: ${formatCurrencyAmount(todayRevenue)}. راقب منتجاتك الأكثر مبيعاً.`;
-  }
-  return `راقب منتجاتك الأكثر مبيعاً هذا الأسبوع وحدّث مخزونك مبكراً.`;
-});
-
-const formatCurrency = (amount, curr) => {
-  if (!amount && amount !== 0) return '0';
-  if (curr === defaultCurrency.value) return formatCurrencyAmount(amount, curr);
-  const converted = convertAmountSync(amount, curr);
-  return formatCurrencyAmount(converted);
-};
-
-const formatDate = (date) =>
-  new Date(date).toLocaleDateString('ar-IQ', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    numberingSystem: 'latn',
-  });
-
-const getStatusColor = (status) =>
-  ({ completed: 'success', pending: 'warning', cancelled: 'error' }[status] || 'grey');
-
-const getStatusText = (status) =>
-  ({ completed: 'مكتمل', pending: 'قيد الانتظار', cancelled: 'ملغي' }[status] || status);
-
-const dashboardData = useAsyncData(async () => {
-  const salesResponse = await saleStore.fetch({ limit: 100 });
-  const filteredSales =
-    (salesResponse?.data && Array.isArray(salesResponse.data) ? salesResponse.data : []) || [];
-  const lowStockProducts = await productStore.fetchLowStock({ lowStock: true });
-  const products = await productStore.fetch();
-  const customers = await customerStore.fetch();
-  return {
-    recentSales: filteredSales,
-    stats: {
-      totalSales: salesResponse?.data?.length || 0,
-      totalCustomers: customers?.meta?.total || customers?.data?.length || 0,
-      totalProducts: products?.meta?.total || products?.data?.length || 0,
-      lowStock: lowStockProducts?.length || 0,
-    },
-  };
-});
-
-const formatTodayRevenue = () => {
-  const today = new Date().toISOString().split('T')[0];
-  const todaySales = recentSales.value.filter(
-    (s) => s.createdAt && s.createdAt.startsWith(today) && s.status === 'completed'
-  );
-  const total = todaySales.reduce((sum, s) => {
-    const amount = parseFloat(s.total || 0);
-    const currency = s.currency || 'IQD';
-    const converted = convertAmountSync(amount, currency);
-    return sum + converted;
-  }, 0);
-  return formatCurrencyAmount(total);
-};
-
-onMounted(async () => {
-  await initCurrency();
-  watchEffect(() => {
-    if (dashboardData.data.value) {
-      recentSales.value = dashboardData.data.value.recentSales;
-      stats.value = dashboardData.data.value.stats;
-      countSales.value = dashboardData.data.value.recentSales.length;
-    }
-    loading.value = dashboardData.isLoading.value;
-  });
+onMounted(() => {
+  refresh();
 });
 </script>
 
 <style scoped lang="scss">
-.sticky-sidebar {
-  position: sticky;
-  top: 1rem;
-  align-self: start;
-  z-index: 2;
-}
-
-.quick-actions {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 0.5rem;
-  padding: 0.75rem;
-
-  &__item {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    padding: 1rem 0.75rem;
-    min-height: 96px;
-    border-radius: 12px;
-    background-color: rgba(var(--v-theme-primary), 0.04);
-    transition: background-color 0.18s ease, transform 0.18s ease;
-
-    &:hover {
-      background-color: rgba(var(--v-theme-primary), 0.08);
-      transform: translateY(-1px);
-    }
-  }
-}
-
-.today-stat {
+.cc-command {
   display: flex;
   align-items: center;
-  gap: 0.625rem;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.cc-command__greet {
   min-width: 0;
+}
+
+.cc-command__hello {
+  font-size: 1.18rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+.cc-command__date {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  color: rgba(var(--v-theme-on-surface), 0.6);
+  margin-top: 2px;
+}
+
+.cc-command__tools {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+}
+
+.cc-shift {
+  font-weight: 600;
 }
 </style>

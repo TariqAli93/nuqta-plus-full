@@ -9,8 +9,18 @@
     </PageHeader>
 
     <div v-if="invoice" class="summary-grid page-section">
-      <StatCard label="الإجمالي" :value="formatCurrency(invoice.total, invoice.currency)" icon="mdi-sigma" icon-color="primary" />
-      <StatCard label="المدفوع" :value="formatCurrency(invoice.paidAmount, invoice.currency)" icon="mdi-cash-check" icon-color="success" />
+      <StatCard
+        label="الإجمالي"
+        :value="formatCurrency(invoice.total, invoice.currency)"
+        icon="mdi-sigma"
+        icon-color="primary"
+      />
+      <StatCard
+        label="المدفوع"
+        :value="formatCurrency(invoice.paidAmount, invoice.currency)"
+        icon="mdi-cash-check"
+        icon-color="success"
+      />
       <StatCard
         label="المتبقي (ذمة)"
         :value="formatCurrency(invoice.remainingAmount, invoice.currency)"
@@ -19,9 +29,9 @@
       />
       <StatCard
         label="الحالة"
-        :value="invoice.status === 'received' ? 'مستلمة' : 'ملغاة'"
+        :value="statusLabel"
         icon="mdi-information"
-        :icon-color="invoice.status === 'received' ? 'success' : 'grey'"
+        :icon-color="statusColor"
       />
     </div>
 
@@ -36,7 +46,7 @@
           دفعة للمورد
         </v-btn>
         <v-btn
-          v-if="invoice.status === 'received' && canReturn"
+          v-if="invoice.status === 'received' && canReturn && !fullyReturned"
           color="warning"
           prepend-icon="mdi-undo-variant"
           @click="openReturnDialog"
@@ -44,7 +54,7 @@
           مرتجع شراء
         </v-btn>
         <v-btn
-          v-if="invoice.status === 'received' && canCancel"
+          v-if="invoice.status === 'received' && canCancel && !hasReturns"
           color="error"
           variant="tonal"
           prepend-icon="mdi-cancel"
@@ -52,6 +62,12 @@
         >
           إلغاء الفاتورة
         </v-btn>
+      </div>
+      <div
+        v-if="invoice.status === 'received' && canCancel && hasReturns"
+        class="text-caption text-medium-emphasis mt-2"
+      >
+        لا يمكن إلغاء فاتورة عليها مرتجعات مباشرةً — عالجها بمرتجع شراء كامل لعكسها.
       </div>
     </v-card>
 
@@ -139,7 +155,11 @@
           <tr v-for="v in invoice.vouchers" :key="v.id">
             <td>{{ v.voucherNumber }}</td>
             <td>
-              <v-chip size="x-small" :color="v.voucherType === 'receipt' ? 'success' : 'error'" variant="tonal">
+              <v-chip
+                size="x-small"
+                :color="v.voucherType === 'receipt' ? 'success' : 'error'"
+                variant="tonal"
+              >
                 {{ v.voucherType === 'receipt' ? 'قبض' : 'صرف' }}
               </v-chip>
             </td>
@@ -242,6 +262,40 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- Cancel-invoice dialog (window.prompt is unsupported in Electron) -->
+    <v-dialog v-model="cancelDialog" max-width="460">
+      <v-card>
+        <v-card-title class="dialog-title">
+          <v-icon color="error">mdi-cancel</v-icon>
+          <span>إلغاء فاتورة الشراء</span>
+        </v-card-title>
+        <v-divider />
+        <v-card-text class="pt-4">
+          <v-alert
+            type="warning"
+            variant="tonal"
+            density="comfortable"
+            class="mb-3"
+            text="سيتم عكس أثر هذه الفاتورة على المخزون والذمة. لا يمكن التراجع بعد الإلغاء."
+          />
+          <v-textarea
+            v-model="cancelReason"
+            label="سبب الإلغاء (اختياري)"
+            variant="outlined"
+            density="comfortable"
+            rows="2"
+            auto-grow
+          />
+        </v-card-text>
+        <v-divider />
+        <v-card-actions class="pa-3">
+          <v-spacer />
+          <v-btn variant="text" @click="cancelDialog = false">تراجع</v-btn>
+          <v-btn color="error" :loading="saving" @click="doCancel">تأكيد الإلغاء</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -264,10 +318,47 @@ const invoice = computed(() => purchaseStore.current);
 const canPay = computed(() => authStore.hasPermission?.('vouchers:create_payment'));
 const canReturn = computed(() => authStore.hasPermission?.('purchases:return'));
 const canCancel = computed(() => authStore.hasPermission?.('purchases:cancel'));
+// Backend rule: an invoice that already has returns can't be cancelled directly
+// (it must be reversed with a full purchase return). Hide the cancel action then.
+const hasReturns = computed(() => (invoice.value?.returns?.length || 0) > 0);
+
+// Returned quantity per purchase line, and the total still returnable.
+const returnedByLine = computed(() => {
+  const map = {};
+  for (const r of invoice.value?.returns || []) {
+    for (const ri of r.items || []) {
+      map[ri.purchaseItemId] = (map[ri.purchaseItemId] || 0) + ri.quantity;
+    }
+  }
+  return map;
+});
+const returnableRemaining = computed(() =>
+  (invoice.value?.items || []).reduce(
+    (sum, it) => sum + (it.quantity - (returnedByLine.value[it.id] || 0)),
+    0
+  )
+);
+// Fully returned = it had returns AND nothing is left to return.
+const fullyReturned = computed(() => hasReturns.value && returnableRemaining.value <= 0);
+const isCancelled = computed(() => invoice.value?.status === 'cancelled');
+
+// Status shown in the summary: ملغاة (cancelled) / مرتجعة (fully returned) / مستلمة.
+const statusLabel = computed(() =>
+  isCancelled.value ? 'ملغاة' : fullyReturned.value ? 'مرتجعة' : 'مستلمة'
+);
+const statusColor = computed(() =>
+  isCancelled.value ? 'grey' : fullyReturned.value ? 'warning' : 'success'
+);
 
 const treasuryTargets = computed(() => [
-  ...(treasuryStore.cashboxes || []).map((c) => ({ key: `cashbox:${c.id}`, title: `صندوق: ${c.name}` })),
-  ...(treasuryStore.bankAccounts || []).map((b) => ({ key: `bank:${b.id}`, title: `حساب: ${b.name}` })),
+  ...(treasuryStore.cashboxes || []).map((c) => ({
+    key: `cashbox:${c.id}`,
+    title: `صندوق: ${c.name}`,
+  })),
+  ...(treasuryStore.bankAccounts || []).map((b) => ({
+    key: `bank:${b.id}`,
+    title: `حساب: ${b.name}`,
+  })),
 ]);
 
 const saving = ref(false);
@@ -277,6 +368,8 @@ const paymentTarget = ref(null);
 const returnDialog = ref(false);
 const returnLines = ref([]);
 const returnReason = ref('');
+const cancelDialog = ref(false);
+const cancelReason = ref('');
 
 async function reload() {
   await purchaseStore.fetchOne(route.params.id);
@@ -304,16 +397,10 @@ async function savePayment() {
 }
 
 function openReturnDialog() {
-  const returnedByLine = {};
-  for (const r of invoice.value.returns || []) {
-    for (const ri of r.items || []) {
-      returnedByLine[ri.purchaseItemId] = (returnedByLine[ri.purchaseItemId] || 0) + ri.quantity;
-    }
-  }
   returnLines.value = (invoice.value.items || []).map((it) => ({
     purchaseItemId: it.id,
     productName: it.productName,
-    maxQuantity: it.quantity - (returnedByLine[it.id] || 0),
+    maxQuantity: it.quantity - (returnedByLine.value[it.id] || 0),
     quantity: 0,
   }));
   returnReason.value = '';
@@ -327,7 +414,10 @@ async function saveReturn() {
   if (!items.length) return;
   saving.value = true;
   try {
-    await purchaseStore.createReturn(invoice.value.id, { items, reason: returnReason.value || null });
+    await purchaseStore.createReturn(invoice.value.id, {
+      items,
+      reason: returnReason.value || null,
+    });
     returnDialog.value = false;
     await reload();
   } catch (err) {
@@ -337,12 +427,16 @@ async function saveReturn() {
   }
 }
 
-async function confirmCancel() {
-  const reason = window.prompt('سبب إلغاء الفاتورة؟ (تُعكس حركة المخزون والذمة)');
-  if (reason === null) return;
+function confirmCancel() {
+  cancelReason.value = '';
+  cancelDialog.value = true;
+}
+
+async function doCancel() {
   saving.value = true;
   try {
-    await purchaseStore.cancel(invoice.value.id, reason || null);
+    await purchaseStore.cancel(invoice.value.id, cancelReason.value || null);
+    cancelDialog.value = false;
     await reload();
   } catch (err) {
     console.error('Failed to cancel purchase', err);

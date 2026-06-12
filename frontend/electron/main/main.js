@@ -32,6 +32,7 @@ import { setupAutoUpdater, checkForUpdates, startDownload, installUpdate } from 
 import { getServiceDiagnostics, repairService } from '../scripts/serviceController.js';
 import { createLockFile } from '../scripts/firstRun.js';
 import { generateReceiptHtml } from '../scripts/receiptBuilder.js';
+import { registerReportWindows } from './reportWindows.js';
 
 // --- المتغيرات العامة ---
 const isDev = !app.isPackaged;
@@ -56,6 +57,11 @@ let splashTimeout = null;
 let backendStatus = 'starting'; // 'starting' | 'ready' | 'error'
 
 const backendManager = new BackendManager();
+
+// Quick-question report windows: registers the `reports:open` IPC channel that
+// opens a standalone BrowserWindow per report (dedupe + focus). Lazily resolves
+// the main window so it can act as the parent.
+registerReportWindows(() => mainWindow);
 
 // ── Backend lifecycle event wiring ──────────────────────────────────────────
 // The manager emits crash / restart / failure events. We translate them into

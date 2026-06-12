@@ -33,6 +33,36 @@
           hide-details
           class="mt-3"
         />
+        <!-- الفرع: يظهر فقط عند تفعيل نظام الفروع.
+             - من يملك صلاحية تغيير الفرع (المدير العام) يختار من الفروع النشطة.
+             - غير ذلك يُعرض اسم فرعه فقط دون إمكانية التغيير.
+             - عند تعطيل نظام الفروع لا يظهر شيء ولا يُرسل branch_id. -->
+        <v-select
+          v-if="branchesEnabled && canSwitchBranch"
+          data-testid="open-shift-branch"
+          v-model="branchId"
+          :items="activeBranches"
+          item-title="name"
+          item-value="id"
+          label="الفرع"
+          variant="outlined"
+          density="comfortable"
+          hide-details
+          class="mt-3"
+          prepend-inner-icon="mdi-source-branch"
+        />
+        <v-text-field
+          v-else-if="branchesEnabled"
+          data-testid="open-shift-branch-readonly"
+          :model-value="assignedBranchName"
+          label="الفرع"
+          variant="outlined"
+          density="comfortable"
+          hide-details
+          readonly
+          class="mt-3"
+          prepend-inner-icon="mdi-source-branch"
+        />
         <!-- الخزينة: اختيار الصندوق الذي تعمل عليه الوردية -->
         <v-select
           v-if="treasuryOn && cashboxOptions.length > 1"
@@ -81,6 +111,7 @@
 import { computed, ref, watch } from 'vue';
 import { useAuthStore } from '@/stores/auth';
 import { useTreasuryStore } from '@/stores/treasury';
+import { useInventoryStore } from '@/stores/inventory';
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -93,6 +124,7 @@ const emit = defineEmits(['update:modelValue', 'confirm', 'cancel']);
 
 const authStore = useAuthStore();
 const treasuryStore = useTreasuryStore();
+const inventoryStore = useInventoryStore();
 
 const dialog = computed({
   get: () => props.modelValue,
@@ -102,6 +134,7 @@ const dialog = computed({
 const openingCash = ref(0);
 const currency = ref(props.defaultCurrency);
 const cashboxId = ref(null);
+const branchId = ref(null);
 const notes = ref('');
 const error = ref('');
 const currencies = [
@@ -111,6 +144,18 @@ const currencies = [
 
 const treasuryOn = computed(() => authStore.hasFeature('treasury'));
 const cashboxOptions = computed(() => treasuryStore.cashboxes || []);
+
+// ── Branch selection (نظام الفروع) ─────────────────────────────────────────
+const branchesEnabled = computed(() => authStore.branchFeatureEnabled);
+const canSwitchBranch = computed(() => authStore.canSwitchBranch);
+const activeBranches = computed(() =>
+  (inventoryStore.branches || []).filter((b) => b.isActive !== false)
+);
+const assignedBranchName = computed(() => {
+  const id = authStore.assignedBranchId;
+  const match = (inventoryStore.branches || []).find((b) => b.id === id);
+  return match?.name || inventoryStore.currentBranch?.name || 'الفرع الحالي';
+});
 
 const isValid = computed(
   () => Number.isFinite(Number(openingCash.value)) && Number(openingCash.value) >= 0
@@ -125,6 +170,17 @@ watch(
       notes.value = '';
       error.value = '';
       cashboxId.value = null;
+      // Default the branch picker (switchers only) to the active context branch,
+      // falling back to the first active branch.
+      if (branchesEnabled.value && canSwitchBranch.value) {
+        branchId.value =
+          inventoryStore.selectedBranchId ||
+          inventoryStore.currentBranch?.id ||
+          activeBranches.value[0]?.id ||
+          null;
+      } else {
+        branchId.value = null;
+      }
       if (treasuryOn.value && cashboxOptions.value.length === 0) {
         // Lazy-load the boxes so the picker has options; failure is non-fatal
         // (the backend falls back to the default cashbox).
@@ -150,6 +206,9 @@ const onConfirm = () => {
     currency: currency.value,
     notes: notes.value?.trim() || null,
     cashboxId: treasuryOn.value ? cashboxId.value || null : null,
+    // Only switchers send a branch; otherwise the backend binds the shift to
+    // the user's assigned branch (or the default branch when branches are off).
+    branchId: branchesEnabled.value && canSwitchBranch.value ? branchId.value || null : null,
   });
 };
 

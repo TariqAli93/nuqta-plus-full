@@ -153,14 +153,37 @@ test('full mode: full-only flags toggle freely', async () => {
   assert.equal(next.suppliers, true);
 });
 
-test('downgrade full → simple is rejected', async () => {
+test('downgrade full → simple hides the full-only suite but keeps both-mode flags', async () => {
+  // Precondition: previous tests left us in FULL with the suite enabled.
+  assert.equal(await featureFlagsService.getAppMode(), APP_MODES.FULL);
+  // Enable a both-mode flag so we can prove it is NOT cleared on downgrade.
+  await featureFlagsService.updateFeatureFlags({ treasury: true }, null);
+
+  const mode = await featureFlagsService.setAppMode(APP_MODES.SIMPLE, null);
+  assert.equal(mode, APP_MODES.SIMPLE);
+  assert.equal(await featureFlagsService.getAppMode(), APP_MODES.SIMPLE);
+
+  const flags = await featureFlagsService.getFeatureFlags();
+  // Full-only modules are turned OFF (hidden) on downgrade…
+  for (const f of FULL_MODE_ONLY_FLAGS) {
+    assert.equal(flags[f], false, `${f} must be hidden in simple mode`);
+  }
+  // …but flags allowed in both modes are left untouched (no data/UX break).
+  assert.equal(flags.treasury, true, 'treasury must survive the downgrade');
+});
+
+test('round trip full → simple → full re-enables module toggling', async () => {
+  // We are in SIMPLE (from the previous test). Enabling a full-only flag is blocked…
   await assert.rejects(
-    featureFlagsService.setAppMode(APP_MODES.SIMPLE, null),
-    (err) => {
-      assert.equal(err.code, 'MODE_DOWNGRADE_UNSUPPORTED');
-      return true;
-    }
+    featureFlagsService.updateFeatureFlags({ suppliers: true }, null),
+    (err) => err.code === 'MODE_UPGRADE_REQUIRED'
   );
+  // …upgrade back to full and it works again, with no data lost.
+  const mode = await featureFlagsService.setAppMode(APP_MODES.FULL, null);
+  assert.equal(mode, APP_MODES.FULL);
+  const next = await featureFlagsService.updateFeatureFlags({ suppliers: true }, null);
+  assert.equal(next.suppliers, true);
+  await featureFlagsService.updateFeatureFlags({ treasury: false }, null);
 });
 
 test('all setup presets only reference known flags', () => {

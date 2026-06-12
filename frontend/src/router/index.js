@@ -58,7 +58,16 @@ import JournalEntries from '@/views/gl/JournalEntries.vue';
 import SystemAccounts from '@/views/gl/SystemAccounts.vue';
 import PostingFailures from '@/views/gl/PostingFailures.vue';
 import FinancialReports from '@/views/reports/FinancialReports.vue';
+import InventoryValuation from '@/views/reports/InventoryValuation.vue';
 import OpeningBalances from '@/views/settings/OpeningBalances.vue';
+// Standalone "quick question" report windows (opened in their own Electron window).
+import SalesReportPage from '@/views/reports/SalesReportPage.vue';
+import ProfitReportPage from '@/views/reports/ProfitReportPage.vue';
+import TopProductsReportPage from '@/views/reports/TopProductsReportPage.vue';
+import DebtsReportPage from '@/views/reports/DebtsReportPage.vue';
+import CashBoxReportPage from '@/views/reports/CashBoxReportPage.vue';
+import ExpensesReportPage from '@/views/reports/ExpensesReportPage.vue';
+import CashMovementReportPage from '@/views/reports/CashMovementReportPage.vue';
 
 const routes = [
   {
@@ -291,6 +300,12 @@ const routes = [
         meta: { feature: 'financialReports', capability: 'canViewFinancialReports' },
       },
       {
+        path: 'reports/inventory-valuation',
+        name: 'InventoryValuation',
+        component: InventoryValuation,
+        meta: { feature: 'inventory', permission: 'view:inventory' },
+      },
+      {
         path: 'settings/opening-balances',
         name: 'OpeningBalances',
         component: OpeningBalances,
@@ -317,6 +332,17 @@ const routes = [
       { path: 'forbidden', name: 'Forbidden', component: Forbidden }, // 👈 صفحة 403
     ],
   },
+  // ── Standalone report windows (الأسئلة السريعة) ───────────────────────────
+  // Top-level (NOT under MainLayout) so each renders as a full, chrome-free
+  // desktop report inside its own Electron BrowserWindow. RBAC via meta.permission
+  // (guard → Forbidden) plus an in-component gate; backend authorizes too.
+  { path: '/reports/sales', name: 'Report_sales', component: SalesReportPage, meta: { requiresAuth: true, permission: 'sales:read', standaloneReport: true } },
+  { path: '/reports/profit', name: 'Report_profit', component: ProfitReportPage, meta: { requiresAuth: true, permission: 'reports:read_profit', standaloneReport: true } },
+  { path: '/reports/top-products', name: 'Report_top_products', component: TopProductsReportPage, meta: { requiresAuth: true, permission: 'reports:read_profit', standaloneReport: true } },
+  { path: '/reports/debts', name: 'Report_debts', component: DebtsReportPage, meta: { requiresAuth: true, permission: 'sales:read', standaloneReport: true } },
+  { path: '/reports/cash-box', name: 'Report_cash_box', component: CashBoxReportPage, meta: { requiresAuth: true, permission: 'reports:read_financial', standaloneReport: true } },
+  { path: '/reports/expenses', name: 'Report_expenses', component: ExpensesReportPage, meta: { requiresAuth: true, permission: 'view:expenses', standaloneReport: true } },
+  { path: '/reports/cash-movement', name: 'Report_cash_movement', component: CashMovementReportPage, meta: { requiresAuth: true, permission: 'reports:read_financial', standaloneReport: true } },
 ];
 
 const router = createRouter({
@@ -414,6 +440,12 @@ router.beforeEach(async (to, from, next) => {
     // page they previously could access (e.g. installments just got
     // disabled while they were drafting a sale).
     if (to.meta.capability && !authStore.can(to.meta.capability)) {
+      return next({ name: 'Forbidden' });
+    }
+
+    // Permission gate (RBAC matrix) — used by the standalone report windows so a
+    // user without the report's permission is blocked from deep-linking to it.
+    if (to.meta.permission && !authStore.hasPermission(to.meta.permission)) {
       return next({ name: 'Forbidden' });
     }
 

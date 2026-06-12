@@ -510,9 +510,29 @@ export const useAuthStore = defineStore('auth', {
      * Logout user and clear ALL session-bound state — including feature flags
      * and capabilities — so the next login can never inherit a stale "feature
      * X is on" assumption from the previous user/session.
+     *
+     * The server `/auth/logout` call runs FIRST and auto-closes any open shift
+     * for this user (records close time + closing balance). If that fails the
+     * shift could not be closed safely, so we surface a clear message and
+     * REJECT — local state is left intact and sign-out is blocked until the
+     * problem is resolved (e.g. the user closes the shift manually).
      */
-    logout() {
+    async logout() {
       const notificationStore = useNotificationStore();
+
+      if (this.token) {
+        try {
+          // `silent` so we own the error UX (no double toast from the
+          // interceptor) and receive the full axios error on reject.
+          await api.post('/auth/logout', null, { meta: { silent: true } });
+        } catch (err) {
+          const message =
+            err?.response?.data?.message ||
+            'تعذّر إغلاق الوردية المفتوحة. لا يمكن تسجيل الخروج حتى تتم معالجة المشكلة.';
+          notificationStore.error(message);
+          throw err;
+        }
+      }
 
       this.clearSessionState();
 
@@ -520,6 +540,13 @@ export const useAuthStore = defineStore('auth', {
       // Lazy-imported to avoid a circular dependency.
       import('@/stores/inventory')
         .then((mod) => mod.useInventoryStore().reset())
+        .catch(() => {});
+
+      // Drop the cached open-shift so the next user doesn't inherit it.
+      import('@/stores/cashSession')
+        .then((mod) => {
+          mod.useCashSessionStore().current = null;
+        })
         .catch(() => {});
 
       notificationStore.info('تم تسجيل الخروج بنجاح');

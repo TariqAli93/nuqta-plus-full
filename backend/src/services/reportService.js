@@ -13,11 +13,13 @@ import {
   stockMovements,
   expenses,
   branches,
+  categories,
 } from '../models/index.js';
-import { and, eq, gte, lte, sql, inArray, desc } from 'drizzle-orm';
+import { and, eq, ne, gte, lte, sql, inArray, desc } from 'drizzle-orm';
 import { branchFilterFor } from './scopeService.js';
 import { netAfterReturn } from './reportMath.js';
 import accountingPeriodService from './accountingPeriodService.js';
+import { isFeatureEnabled } from './featureFlagsService.js';
 
 
 function toNum(v) {
@@ -922,6 +924,161 @@ export class ReportService {
       .orderBy(installments.dueDate);
 
     return { salesOverTime, paymentsByMethod: paymentMethods, overdueInstallmentsTrend: overdueTrend };
+  }
+
+  /**
+   * Inventory valuation by price tier (قيمة المخزون حسب نوع التسعيرة).
+   *
+   * For every in-scope product the value is computed straight from the LIVE
+   * per-warehouse stock (`product_stock.quantity`, base units) × the product's
+   * tier price:
+   *   - retail    = selling_price                       (سعر المفرد)
+   *   - wholesale = COALESCE(wholesale_price, selling)   (سعر الجملة، يرجع للمفرد)
+   *   - agent     = COALESCE(agent_price, selling)       (سعر الوكيل، يرجع للمفرد)
+   *   - cost      = COALESCE(cost_price, 0)              (للمقارنة)
+   * All three tiers are returned at once so the screen can show them side by
+   * side. Money is grouped by `products.currency` (never summed across
+   * currencies). Service products and inactive products are excluded.
+   *
+   * Scope/feature-flags mirror getDashboard: when the multi-branch feature is
+   * off there is no branch filter; an explicit `warehouseId` filter is only
+   * honoured when the multi-warehouse feature is on, so a stale client param can
+   * never leak another warehouse's stock. A branch-bound user is always limited
+   * to their own branch regardless of the requested branchId.
+   *
+   * Filters: branchId, warehouseId, productId, categoryId. (priceType is a
+   * display concern — the report always returns every tier — but it is echoed
+   * back in `meta` so the UI can remember the highlighted column.)
+   */
+  async getInventoryValuation(filters = {}, actingUser = null) {
+    const db = await getDb();
+
+    const priceType = ['retail', 'wholesale', 'agent'].includes(filters.priceType)
+      ? filters.priceType
+      : 'retail';
+    const multiBranch = await isFeatureEnabled('multiBranch');
+    const multiWarehouse = await isFeatureEnabled('multiWarehouse');
+
+    const branchScoped = await accountingPeriodService.isBranchScoped();
+    const branchId = branchScoped ? applyBranchScope(filters, actingUser) : null;
+
+    const meta = {
+      priceType,
+      branchId: branchId && branchId !== -1 ? branchId : null,
+      warehouseId: null,
+      productId: filters.productId ? Number(filters.productId) : null,
+      categoryId: filters.categoryId ? Number(filters.categoryId) : null,
+      multiBranch,
+      multiWarehouse,
+      generatedAt: new Date().toISOString(),
+    };
+    const empty = { totalsByCurrency: {}, rows: [], meta };
+
+    // Branch-bound user with no allowed branch → nothing to show.
+    if (branchId === -1) return empty;
+
+    // Warehouses in scope (branch filter applied when multi-branch is on).
+    const whRows = await db
+      .select({ id: warehouses.id })
+      .from(warehouses)
+      .where(branchId ? eq(warehouses.branchId, branchId) : sql`1=1`);
+    let warehouseIds = whRows.map((w) => w.id);
+
+    // Explicit warehouse filter — only honoured when multi-warehouse is enabled.
+    if (filters.warehouseId && multiWarehouse) {
+      const wid = Number(filters.warehouseId);
+      warehouseIds = warehouseIds.filter((id) => id === wid);
+      meta.warehouseId = wid;
+    }
+    if (warehouseIds.length === 0) return empty;
+
+    // Shared predicates + tier-price expressions (NULL-safe fallback to retail).
+    const conds = [
+      inArray(productStock.warehouseId, warehouseIds),
+      ne(products.productType, 'service'),
+      eq(products.isActive, true),
+    ];
+    if (filters.productId) conds.push(eq(productStock.productId, Number(filters.productId)));
+    if (filters.categoryId) conds.push(eq(products.categoryId, Number(filters.categoryId)));
+
+    const QTY = sql`${productStock.quantity}`;
+    const RETAIL = sql`${products.sellingPrice}::numeric`;
+    const WHOLESALE = sql`COALESCE(${products.wholesalePrice}::numeric, ${products.sellingPrice}::numeric)`;
+    const AGENT = sql`COALESCE(${products.agentPrice}::numeric, ${products.sellingPrice}::numeric)`;
+    const COST = sql`COALESCE(${products.costPrice}::numeric, 0)`;
+
+    // Per-currency totals (the headline figures).
+    const totalsRows = await db
+      .select({
+        currency: products.currency,
+        totalQty: sql`COALESCE(SUM(${QTY}), 0)`,
+        retailValue: sql`COALESCE(SUM(${QTY} * ${RETAIL}), 0)`,
+        wholesaleValue: sql`COALESCE(SUM(${QTY} * ${WHOLESALE}), 0)`,
+        agentValue: sql`COALESCE(SUM(${QTY} * ${AGENT}), 0)`,
+        costValue: sql`COALESCE(SUM(${QTY} * ${COST}), 0)`,
+      })
+      .from(productStock)
+      .leftJoin(products, eq(productStock.productId, products.id))
+      .where(and(...conds))
+      .groupBy(products.currency);
+
+    // Per-product breakdown (aggregated across the in-scope warehouses).
+    const productRows = await db
+      .select({
+        productId: products.id,
+        productName: products.name,
+        sku: products.sku,
+        categoryId: products.categoryId,
+        categoryName: categories.name,
+        currency: products.currency,
+        sellingPrice: products.sellingPrice,
+        wholesalePrice: products.wholesalePrice,
+        agentPrice: products.agentPrice,
+        costPrice: products.costPrice,
+        quantity: sql`COALESCE(SUM(${QTY}), 0)`,
+        retailValue: sql`COALESCE(SUM(${QTY} * ${RETAIL}), 0)`,
+        wholesaleValue: sql`COALESCE(SUM(${QTY} * ${WHOLESALE}), 0)`,
+        agentValue: sql`COALESCE(SUM(${QTY} * ${AGENT}), 0)`,
+        costValue: sql`COALESCE(SUM(${QTY} * ${COST}), 0)`,
+      })
+      .from(productStock)
+      .leftJoin(products, eq(productStock.productId, products.id))
+      .leftJoin(categories, eq(products.categoryId, categories.id))
+      .where(and(...conds))
+      .groupBy(products.id, categories.name)
+      .orderBy(desc(sql`COALESCE(SUM(${QTY} * ${RETAIL}), 0)`));
+
+    const totalsByCurrency = {};
+    for (const r of totalsRows) {
+      const cur = r.currency || 'USD';
+      totalsByCurrency[cur] = {
+        totalQty: toNum(r.totalQty),
+        retailValue: toNum(r.retailValue),
+        wholesaleValue: toNum(r.wholesaleValue),
+        agentValue: toNum(r.agentValue),
+        costValue: toNum(r.costValue),
+      };
+    }
+
+    const rows = productRows.map((r) => ({
+      productId: r.productId,
+      productName: r.productName,
+      sku: r.sku || null,
+      categoryId: r.categoryId || null,
+      categoryName: r.categoryName || null,
+      currency: r.currency || 'USD',
+      quantity: toNum(r.quantity),
+      sellingPrice: toNum(r.sellingPrice),
+      wholesalePrice: r.wholesalePrice == null ? null : toNum(r.wholesalePrice),
+      agentPrice: r.agentPrice == null ? null : toNum(r.agentPrice),
+      costPrice: toNum(r.costPrice),
+      retailValue: toNum(r.retailValue),
+      wholesaleValue: toNum(r.wholesaleValue),
+      agentValue: toNum(r.agentValue),
+      costValue: toNum(r.costValue),
+    }));
+
+    return { totalsByCurrency, rows, meta };
   }
 }
 

@@ -7,6 +7,7 @@ export const useReportStore = defineStore('report', {
     data: null,
     aging: null,
     profit: null,
+    inventoryValuation: null,
   }),
   actions: {
     async fetchDashboard(params = {}) {
@@ -28,6 +29,16 @@ export const useReportStore = defineStore('report', {
       const res = await api.get('/reports/profit', { params });
       this.profit = res?.data || null;
       return this.profit;
+    },
+    async fetchInventoryValuation(params = {}) {
+      this.loading = true;
+      try {
+        const res = await api.get('/reports/inventory-valuation', { params });
+        this.inventoryValuation = res?.data || null;
+        return this.inventoryValuation;
+      } finally {
+        this.loading = false;
+      }
     },
     async exportExcel(params = {}) {
       const blob = await api.get('/reports/export/excel', { params, responseType: 'blob' });

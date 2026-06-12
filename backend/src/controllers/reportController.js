@@ -12,6 +12,12 @@ const querySchema = z.object({
   // figures are restricted to rows stamped with this period id.
   accountingPeriodId: z.coerce.number().int().positive().optional(),
   reportType: z.string().optional().default('dashboard'),
+  // Inventory-valuation filters (تقرير قيمة المخزون). All optional so other
+  // report endpoints sharing this schema ignore them.
+  warehouseId: z.coerce.number().int().positive().optional(),
+  productId: z.coerce.number().int().positive().optional(),
+  categoryId: z.coerce.number().int().positive().optional(),
+  priceType: z.enum(['retail', 'wholesale', 'agent']).optional(),
 });
 
 function contentDispositionFilename({ reportType, branchLabel, dateFrom, dateTo, currency, ext }) {
@@ -179,6 +185,20 @@ export class ReportController {
       delete parsed.branchId;
     }
     const data = await reportService.getProfitReport(parsed, request.user);
+    return reply.send({ success: true, data });
+  }
+
+  /**
+   * Inventory valuation by price tier (قيمة المخزون حسب نوع التسعيرة) — stock
+   * value at retail/wholesale/agent (+ cost) grouped by currency, plus a
+   * per-product breakdown. Filters: branch/warehouse/product/category.
+   */
+  async inventoryValuation(request, reply) {
+    const parsed = querySchema.parse(request.query || {});
+    if (!isGlobalAdmin(request.user)) {
+      delete parsed.branchId;
+    }
+    const data = await reportService.getInventoryValuation(parsed, request.user);
     return reply.send({ success: true, data });
   }
 }

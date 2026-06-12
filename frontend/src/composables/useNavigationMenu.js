@@ -256,12 +256,12 @@ export function useNavigationMenu() {
       to: '#reports',
       group: {
         items: [
-          {
-            title: 'التقارير السريعة',
-            icon: 'mdi-view-dashboard-variant',
-            to: '/reports/simple',
-            permission: 'view:reports',
-          },
+          // {
+          //   title: 'التقارير السريعة',
+          //   icon: 'mdi-view-dashboard-variant',
+          //   to: '/reports/simple',
+          //   permission: 'view:reports',
+          // },
           {
             title: 'تقارير مفصّلة',
             icon: 'mdi-chart-box-outline',
@@ -275,6 +275,13 @@ export function useNavigationMenu() {
             permission: 'reports:read_financial',
             feature: 'financialReports',
             capability: 'canViewFinancialReports',
+          },
+          {
+            title: 'قيمة المخزون حسب السعر',
+            icon: 'mdi-cash-multiple',
+            to: '/reports/inventory-valuation',
+            permission: 'view:inventory',
+            feature: 'inventory',
           },
         ],
       },
@@ -448,9 +455,7 @@ export function useNavigationMenu() {
     // swallows unrelated routes such as '/profile' or '/notifications'.
     const allItems = sections.flatMap((s) => (s.group ? s.group.items : [s]));
     const match = allItems
-      .filter(
-        (i) => i.to && i.to !== '/' && (path === i.to || path.startsWith(`${i.to}/`))
-      )
+      .filter((i) => i.to && i.to !== '/' && (path === i.to || path.startsWith(`${i.to}/`)))
       .sort((a, b) => b.to.length - a.to.length)[0];
     return match?.title || 'نقطة بلس';
   };

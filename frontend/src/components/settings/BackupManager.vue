@@ -147,7 +147,9 @@ const confirmClearDatabase = async () => {
       notification.info('جارٍ إعادة تحميل التطبيق...');
       // إعادة تحميل التطبيق بعد التصفير
       setTimeout(() => {
-        authStore.logout();
+        // DB was just wiped — there is no shift left to auto-close and the
+        // token is now invalid, so force-clear local state directly instead of
+        // the (async, shift-closing) logout() flow.
         authStore.resetAuth();
 
         window.location.reload();

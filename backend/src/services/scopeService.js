@@ -1,6 +1,6 @@
 import { getDb } from '../db.js';
 import { warehouses, branches } from '../models/index.js';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, asc } from 'drizzle-orm';
 import { AuthorizationError, ValidationError } from '../utils/errors.js';
 import featureFlagsService from './featureFlagsService.js';
 import { ensureDefaultBranch, getDefaultBranchId } from './systemDefaultsService.js';
@@ -171,56 +171,140 @@ export async function resolveUserScope(user) {
 }
 
 /**
- * THE central resolver for "which branch does a financial operation belong to".
- * Accounting periods, cash sessions/shifts and (indirectly) sales all go
- * through this so a period and the shift under it ALWAYS share one branch id.
+ * Whether a user may target a branch OTHER than the one assigned to their
+ * account. Today only global admins switch branch context; branch-bound users
+ * (branch_admin / branch_manager / manager / cashier / viewer) are always
+ * pinned to `assignedBranchId`. Kept as a named helper so the rule lives in one
+ * place and can be widened later (e.g. a "regional manager" capability).
+ */
+export function canSwitchBranch(user) {
+  return isGlobalAdmin(user);
+}
+
+/**
+ * Pick a usable DEFAULT *active* branch, in precedence order:
+ *   1. the system default (oldest) branch, if it's active;
+ *   2. otherwise the first active branch (lowest id);
+ *   3. otherwise (ensure only) create the main branch "الفرع الرئيسي".
+ * Returns null when nothing active exists and `ensure` is false.
+ */
+async function resolveDefaultActiveBranchId(db, { ensure = true } = {}) {
+  const defId = await getDefaultBranchId(db);
+  if (defId) {
+    const [row] = await db
+      .select({ id: branches.id, isActive: branches.isActive })
+      .from(branches)
+      .where(eq(branches.id, defId))
+      .limit(1);
+    if (row && row.isActive !== false) return row.id;
+  }
+
+  const [active] = await db
+    .select({ id: branches.id })
+    .from(branches)
+    .where(eq(branches.isActive, true))
+    .orderBy(asc(branches.id))
+    .limit(1);
+  if (active) return active.id;
+
+  if (ensure) return ensureDefaultBranch(db);
+  return null;
+}
+
+/**
+ * THE single source of truth for "which branch does a new operation bind to".
  *
- *   multiBranch ON:
- *     - global admin → requestedBranchId (or their assigned branch); throws if
- *       neither is set, and validates a branch-bound user can't target another.
- *     - branch-bound  → their assigned branch; a mismatched requestedBranchId is
- *       rejected.
+ * Use this for opening shifts, sales, returns, expenses, inventory moves,
+ * transfers and report scoping — NEVER re-derive branch selection inside a
+ * controller. It both RESOLVES and VALIDATES the branch so callers can `insert`
+ * with confidence (a bad/inactive/foreign branch surfaces a clear localized
+ * error instead of a downstream FK `DatabaseError`).
+ *
+ * Rules (see the shift-permissions / branch-selection spec):
  *   multiBranch OFF:
- *     - Disabling branches only HIDES branch selection from the user; the
- *       internal branch context is preserved. We IGNORE requestedBranchId and
- *       use the system default branch. `ensure:true` creates it on demand (the
- *       open-period / open-shift path); read/lookup callers pass `ensure:false`
- *       and get null when none exists yet (so a report just reads "no period").
+ *     - Branch selection is hidden; the system default branch ("الفرع الرئيسي")
+ *       is used for EVERYTHING. Any requested/assigned/localStorage branch is
+ *       ignored. `ensure:true` creates the default on demand.
+ *   multiBranch ON:
+ *     - User CAN switch branch (global admin) → requested branch (must exist &
+ *       be active) → otherwise the default active branch.
+ *     - User CANNOT switch (branch-bound) → their assigned branch (must exist &
+ *       be active). A mismatched explicit request is rejected.
  *
- * Throws `NO_EFFECTIVE_BRANCH` (422) only on the ensure path when a default
- * branch can't be resolved/created.
+ * @param {object|null} user            acting user (reads role + assignedBranchId)
+ * @param {number|string|null} requestedBranchId  branch sent by the client (only honored for switchers)
+ * @param {{ensure?: boolean}} options  ensure:true (default) creates the default branch when needed
+ * @returns {Promise<number|null>} a validated branch id (null only when ensure:false and none exists)
+ */
+export async function resolveBranchIdForOperation(user, requestedBranchId = null, { ensure = true } = {}) {
+  const db = await getDb();
+  const flags = await featureFlagsService.getFeatureFlags();
+  const branchesEnabled = flags.multiBranch !== false;
+
+  // ── Branches OFF: always the internal default; ignore requested/assigned. ──
+  if (!branchesEnabled) {
+    let id = await getDefaultBranchId(db);
+    if (!id && ensure) id = await ensureDefaultBranch(db);
+    if (!id) {
+      if (!ensure) return null;
+      const err = new ValidationError('لا يوجد فرع افتراضي للنظام. يرجى إعداد فرع افتراضي أولاً.');
+      err.code = 'NO_EFFECTIVE_BRANCH';
+      err.statusCode = 422;
+      throw err;
+    }
+    return id;
+  }
+
+  // ── Branches ON, user may switch branch (global admin) ─────────────────────
+  if (canSwitchBranch(user)) {
+    if (!requestedBranchId) {
+      const def = await resolveDefaultActiveBranchId(db, { ensure });
+      if (!def) {
+        if (!ensure) return null;
+        const err = new ValidationError('لا يوجد فرع نشط في النظام. يرجى إنشاء فرع أولاً.');
+        err.code = 'NO_EFFECTIVE_BRANCH';
+        err.statusCode = 422;
+        throw err;
+      }
+      return def;
+    }
+    const [row] = await db
+      .select({ id: branches.id, isActive: branches.isActive })
+      .from(branches)
+      .where(eq(branches.id, Number(requestedBranchId)))
+      .limit(1);
+    if (!row) throw new ValidationError('الفرع المحدد غير موجود');
+    if (row.isActive === false) throw new ValidationError('الفرع المحدد غير نشط');
+    return row.id;
+  }
+
+  // ── Branches ON, branch-bound user → their assigned branch only ────────────
+  const assigned = user?.assignedBranchId ? Number(user.assignedBranchId) : null;
+  if (!assigned) {
+    throw new AuthorizationError('لا يوجد فرع صالح مرتبط بحسابك. يرجى مراجعة المدير.');
+  }
+  if (requestedBranchId && Number(requestedBranchId) !== assigned) {
+    throw new AuthorizationError('لا يمكنك تنفيذ العملية على فرع آخر');
+  }
+  const [row] = await db
+    .select({ id: branches.id, isActive: branches.isActive })
+    .from(branches)
+    .where(eq(branches.id, assigned))
+    .limit(1);
+  if (!row || row.isActive === false) {
+    throw new AuthorizationError('لا يوجد فرع صالح مرتبط بحسابك. يرجى مراجعة المدير.');
+  }
+  return row.id;
+}
+
+/**
+ * Backward-compatible shim around {@link resolveBranchIdForOperation}. Existing
+ * callers (accounting periods, cash sessions) keep the `{ user, requestedBranchId,
+ * ensure }` object signature; new code should call resolveBranchIdForOperation
+ * directly.
  */
 export async function resolveEffectiveBranchId({ user = null, requestedBranchId = null, ensure = false } = {}) {
-  const flags = await featureFlagsService.getFeatureFlags();
-  const branchScoped = flags.multiBranch !== false;
-
-  if (branchScoped) {
-    if (isGlobalAdmin(user)) {
-      const bid = requestedBranchId
-        ? Number(requestedBranchId)
-        : (user?.assignedBranchId ? Number(user.assignedBranchId) : null);
-      if (!bid) throw new ValidationError('يجب اختيار الفرع عند تفعيل نظام الفروع');
-      return bid;
-    }
-    const bid = user?.assignedBranchId ? Number(user.assignedBranchId) : null;
-    if (!bid) throw new AuthorizationError('المستخدم غير مرتبط بأي فرع');
-    if (requestedBranchId && Number(requestedBranchId) !== bid) {
-      throw new AuthorizationError('لا يمكنك تنفيذ العملية على فرع آخر');
-    }
-    return bid;
-  }
-
-  // multiBranch OFF — internal default branch, ignoring any requestedBranchId.
-  let id = await getDefaultBranchId();
-  if (!id && ensure) id = await ensureDefaultBranch();
-  if (!id) {
-    if (!ensure) return null;
-    const err = new ValidationError('لا يوجد فرع افتراضي للنظام. يرجى إعداد فرع افتراضي أولاً.');
-    err.code = 'NO_EFFECTIVE_BRANCH';
-    err.statusCode = 422;
-    throw err;
-  }
-  return id;
+  return resolveBranchIdForOperation(user, requestedBranchId, { ensure });
 }
 
 /**
@@ -312,6 +396,8 @@ export default {
   isBranchAdmin,
   isBranchManager,
   resolveUserScope,
+  canSwitchBranch,
+  resolveBranchIdForOperation,
   resolveEffectiveBranchId,
   enforceBranchScope,
   enforceWarehouseScope,

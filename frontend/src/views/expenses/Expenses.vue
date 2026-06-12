@@ -418,6 +418,7 @@ async function save() {
   } catch (err) {
     // axios interceptor surfaces the toast — keep dialog open for fixes.
     console.error('Failed to save expense', err);
+    notify.error(err.message || 'فشل حفظ المصروف');
   } finally {
     saving.value = false;
   }

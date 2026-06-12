@@ -96,12 +96,8 @@
           </span>
         </template>
         <template #[`item.status`]="{ item }">
-          <v-chip
-            size="x-small"
-            :color="item.status === 'received' ? 'success' : 'grey'"
-            variant="tonal"
-          >
-            {{ item.status === 'received' ? 'مستلمة' : 'ملغاة' }}
+          <v-chip size="x-small" :color="statusColor(item)" variant="tonal">
+            {{ statusLabel(item) }}
           </v-chip>
           <v-chip v-if="item.isOpeningBalance" size="x-small" color="info" variant="tonal" class="ms-1">
             افتتاحي
@@ -156,6 +152,19 @@ const headers = [
   { title: 'الحالة', key: 'status' },
   { title: 'بواسطة', key: 'createdByName' },
 ];
+
+// Status chip: ملغاة (cancelled) / مرتجعة (fully returned) / مستلمة. A full
+// return keeps the DB status 'received', so the list flags it via fullyReturned.
+function statusLabel(item) {
+  if (item.status === 'cancelled') return 'ملغاة';
+  if (item.fullyReturned) return 'مرتجعة';
+  return 'مستلمة';
+}
+function statusColor(item) {
+  if (item.status === 'cancelled') return 'grey';
+  if (item.fullyReturned) return 'warning';
+  return 'success';
+}
 
 async function reload() {
   const params = {};

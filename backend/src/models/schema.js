@@ -430,6 +430,10 @@ export const sales = pgTable('sales', {
   // ── v2 source/type fields ────────────────────────────────────────────────
   saleSource: text('sale_source'), // 'POS' | 'NEW_SALE'
   saleType: text('sale_type'),     // 'CASH' | 'INSTALLMENT'
+  // Pricing tier chosen for this invoice (تسعير الوكلاء): 'retail' | 'wholesale'
+  // | 'agent' (مفرد | جملة | وكيل). NULL on legacy rows → treated as 'retail'.
+  // Audit only — the per-line price already lives in sale_items.unitPrice.
+  priceType: text('price_type'),
   // ────────────────────────────────────────────────────────────────────────
   paidAmount: numeric('paid_amount', { precision: 18, scale: 4 }).default('0'),
   remainingAmount: numeric('remaining_amount', { precision: 18, scale: 4 }).default('0'),
@@ -507,6 +511,9 @@ export const saleItems = pgTable('sale_items', {
   // Per-selected-unit cost frozen at sale time. NULL on legacy rows; reports
   // fall back to `products.cost_price * base_quantity` in that case.
   unitCostPrice: numeric('unit_cost_price', { precision: 18, scale: 4 }),
+  // Pricing tier this line was sold at (snapshot of the invoice's price_type):
+  // 'retail' | 'wholesale' | 'agent'. NULL on legacy rows → treated as 'retail'.
+  priceType: text('price_type'),
   createdAt: timestamp('created_at').defaultNow(),
 });
 

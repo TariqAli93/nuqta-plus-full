@@ -313,6 +313,12 @@
           {{ getPaymentTypeText(item.paymentType) }}
         </template>
 
+        <template #[`item.priceType`]="{ item }">
+          <v-chip size="x-small" variant="tonal" color="indigo">
+            {{ priceTierLabel(item.priceType) }}
+          </v-chip>
+        </template>
+
         <template #[`item.actions`]="{ item }">
           <!-- أزرار المسودات -->
           <template v-if="item.status === 'draft'">
@@ -400,6 +406,7 @@ import { useCustomerStore } from '@/stores/customer';
 import { useAuthStore } from '../../stores/auth';
 import EmptyState from '@/components/EmptyState.vue';
 import TableSkeleton from '@/components/TableSkeleton.vue';
+import { priceTierLabel } from '@/utils/productUnits';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import PaginationControls from '@/components/PaginationControls.vue';
 import PageHeader from '@/components/PageHeader.vue';
@@ -492,6 +499,8 @@ const dismissError = () => {
 };
 const isAdmin = computed(() => authStore.hasPermission(['sales:delete', 'manage:sales']));
 const canDelete = computed(() => isAdmin.value);
+// Wholesale/agent price tiers (تسعير الوكلاء) — adds a "نوع السعر" column.
+const agentPricingOn = computed(() => authStore.hasFeature?.('agentPricing') === true);
 
 // Draft-related actions: visible when the user holds the capability; the
 // button renders disabled with an explanation tooltip when the feature flag
@@ -557,17 +566,19 @@ const filterChips = computed(() => {
 
 const hasActiveQuery = computed(() => !!query.value.trim() || filterChips.value.length > 0);
 
-const headers = [
+const headers = computed(() => [
   { title: 'رقم الفاتورة', key: 'invoiceNumber' },
   { title: 'العميل', key: 'customer' },
   { title: 'رقم الهاتف', key: 'customerPhone' },
   { title: 'المبلغ الإجمالي', key: 'total' },
   { title: 'نوع الدفع', key: 'paymentType' },
+  // Price tier used on the invoice — only when the agentPricing feature is on.
+  ...(agentPricingOn.value ? [{ title: 'نوع السعر', key: 'priceType', sortable: false }] : []),
   { title: 'الحالة', key: 'status' },
   { title: 'التاريخ', key: 'createdAt' },
   { title: 'بواسطة', key: 'createdBy', sortable: false },
   { title: 'الاجرائات', key: 'actions', sortable: false },
-];
+]);
 
 const toYmd = (date) => {
   const d = new Date(date);
@@ -691,13 +702,14 @@ const completeDraft = async (id) => {
 
 const handleExport = () => {
   try {
-    const exportHeaders = headers.map((h) => ({
+    const exportHeaders = headers.value.map((h) => ({
       title: h.title,
       key: h.key,
       value: (item) => {
         if (h.key === 'total') return formatCurrency(item.total, item.currency);
         if (h.key === 'status') return getStatusText(item.status);
         if (h.key === 'paymentType') return getPaymentTypeText(item.paymentType);
+        if (h.key === 'priceType') return priceTierLabel(item.priceType);
         if (h.key === 'createdAt') return toYmd(item.createdAt);
         return item[h.key] || '';
       },

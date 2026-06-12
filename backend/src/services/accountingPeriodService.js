@@ -13,7 +13,7 @@ import {
   AuthorizationError,
 } from '../utils/errors.js';
 import featureFlagsService from './featureFlagsService.js';
-import { isGlobalAdmin, branchFilterFor, resolveEffectiveBranchId } from './scopeService.js';
+import { isGlobalAdmin, branchFilterFor, resolveBranchIdForOperation } from './scopeService.js';
 import { getDefaultBranchId } from './systemDefaultsService.js';
 import auditService from './auditService.js';
 
@@ -59,7 +59,7 @@ export class AccountingPeriodService {
     // (multiBranch off) we still bind the period to the internal default branch
     // — never branch_id = null — so the shift (which always carries a branch)
     // matches its period's branch. scope_type stays 'global' off / 'branch' on.
-    const branchId = await resolveEffectiveBranchId({ user, requestedBranchId, ensure: true });
+    const branchId = await resolveBranchIdForOperation(user, requestedBranchId, { ensure: true });
     return { scopeType: branchScoped ? 'branch' : 'global', branchId };
   }
 

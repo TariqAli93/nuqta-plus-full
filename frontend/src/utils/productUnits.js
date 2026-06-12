@@ -73,6 +73,45 @@ export function getUnitSalePrice(product, unit) {
   return base * getUnitConversionFactor(unit);
 }
 
+/**
+ * Per-unit price for a pricing tier (تسعير الوكلاء): مفرد / جملة / وكيل.
+ * Resolution chain (first non-null wins), mirroring the backend resolver:
+ *   1. unit-level tier price    (unit.wholesalePrice / unit.agentPrice)
+ *   2. product-level tier price (product.wholesalePrice / product.agentPrice)
+ *   3. the normal sale price    (getUnitSalePrice — unit override or base×factor)
+ * `priceType` 'retail' (or anything else) skips the tier steps → retail price,
+ * so products without wholesale/agent prices stay on سعر المفرد safely.
+ */
+export function resolveTierUnitPrice(product, unit, priceType = 'retail') {
+  const tierKey =
+    priceType === 'wholesale'
+      ? 'wholesalePrice'
+      : priceType === 'agent'
+        ? 'agentPrice'
+        : null;
+  if (tierKey) {
+    const num = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
+    const unitTier = unit ? num(unit[tierKey]) : null;
+    if (unitTier != null) return unitTier;
+    const productTier = num(product?.[tierKey]);
+    if (productTier != null) return productTier;
+  }
+  return getUnitSalePrice(product, unit);
+}
+
+/** The three sellable pricing tiers, with Arabic labels for selectors. */
+export const PRICE_TIERS = [
+  { value: 'retail', label: 'مفرد' },
+  { value: 'wholesale', label: 'جملة' },
+  { value: 'agent', label: 'وكيل' },
+];
+
+/** Arabic label for a stored price_type (null/legacy → مفرد). */
+export function priceTierLabel(priceType) {
+  const found = PRICE_TIERS.find((t) => t.value === priceType);
+  return found ? found.label : 'مفرد';
+}
+
 /** Per-unit cost (override → base × factor). */
 export function getUnitCostPrice(product, unit) {
   if (unit && unit.costPrice != null && unit.costPrice !== '') {

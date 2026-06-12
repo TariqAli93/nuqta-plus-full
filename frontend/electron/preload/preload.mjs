@@ -89,6 +89,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ---- LAN server discovery (mDNS / Bonjour, client mode) ----
   discoverServers: (options) => ipcRenderer.invoke('mdns:discover', options || {}),
 
+  // ---- Quick-question report windows ----
+  // Opens (or focuses) a standalone report window for `type`, passing initial
+  // filters as `params`. Returns { opened } or { focused }.
+  openReportWindow: (type, params) => ipcRenderer.invoke('reports:open', { type, params: params || {} }),
+  // A report window subscribes to receive fresh filters when the user re-clicks
+  // the same dashboard card (the window is focused, not duplicated).
+  onReportParams(callback) {
+    const handler = (_event, params) => callback(params || {});
+    ipcRenderer.on('reports:params', handler);
+    return () => ipcRenderer.removeListener('reports:params', handler);
+  },
+
   // ---- fallback invoke ----
   invoke: (channel, data) => ipcRenderer.invoke(channel, data),
 });

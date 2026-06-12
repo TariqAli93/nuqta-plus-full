@@ -780,6 +780,10 @@ export class PurchaseService {
         invoiceDate: purchaseInvoices.invoiceDate,
         createdAt: purchaseInvoices.createdAt,
         createdByName: users.fullName,
+        // Returned vs purchased quantity → lets the list flag a fully-returned
+        // invoice (status stays 'received' after a full return).
+        purchasedQty: sql`COALESCE((SELECT SUM(pi2.quantity) FROM purchase_items pi2 WHERE pi2.purchase_invoice_id = ${purchaseInvoices.id}), 0)`,
+        returnedQty: sql`COALESCE((SELECT SUM(pri.quantity) FROM purchase_return_items pri JOIN purchase_returns pr ON pr.id = pri.return_id WHERE pr.purchase_invoice_id = ${purchaseInvoices.id}), 0)`,
       })
       .from(purchaseInvoices)
       .leftJoin(suppliers, eq(purchaseInvoices.supplierId, suppliers.id))
@@ -792,7 +796,17 @@ export class PurchaseService {
       .offset((page - 1) * limit);
 
     return {
-      data: rows.map((r) => this.serializeInvoice(r)),
+      data: rows.map((r) => {
+        const purchasedQty = n(r.purchasedQty);
+        const returnedQty = n(r.returnedQty);
+        return {
+          ...this.serializeInvoice(r),
+          purchasedQty,
+          returnedQty,
+          // Fully returned = something was returned and nothing is left to return.
+          fullyReturned: returnedQty > 0 && returnedQty >= purchasedQty,
+        };
+      }),
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }

@@ -300,6 +300,10 @@ export class ProductService {
           barcode: u.barcode || null,
           salePrice: u.salePrice == null ? null : Number(u.salePrice),
           costPrice: u.costPrice == null ? null : Number(u.costPrice),
+          // Per-unit tier prices (تسعير الوكلاء) — needed so the sale screens can
+          // resolve wholesale/agent prices straight from the catalogue payload.
+          wholesalePrice: u.wholesalePrice == null ? null : Number(u.wholesalePrice),
+          agentPrice: u.agentPrice == null ? null : Number(u.agentPrice),
           isActive: u.isActive !== false,
         });
         unitsByProduct.set(u.productId, list);
