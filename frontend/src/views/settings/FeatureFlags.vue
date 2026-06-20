@@ -312,6 +312,27 @@ const groups = [
     ],
   },
   {
+    title: 'التجارة الأونلاين',
+    icon: 'mdi-shopping-outline',
+    color: 'blue',
+    items: [
+      {
+        key: 'onlineOrders',
+        title: 'الطلبات الأونلاين',
+        description:
+          'استقبال طلبات قنوات البيع (فيسبوك، إنستغرام، واتساب…)، إدارتها، وتحويلها إلى فواتير، مع تقارير الطلبات الأونلاين.',
+        icon: 'mdi-cart-outline',
+      },
+      {
+        key: 'shipping',
+        title: 'الشحن',
+        description:
+          'إدارة الشحنات وتتبعها، شركات النقل، وتقارير الشحن.',
+        icon: 'mdi-truck-fast-outline',
+      },
+    ],
+  },
+  {
     title: 'التنبيهات والمتابعة',
     icon: 'mdi-bell',
     color: 'warning',

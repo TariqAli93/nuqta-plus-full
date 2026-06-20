@@ -15,6 +15,10 @@ export const useOnlineCommerceReportStore = defineStore('onlineCommerceReport', 
       dateTo: null,
       channelId: null,
       currency: null,
+      // Branch scope (الفرع). The backend onlineCommerceReportService already
+      // honours `branchId` (resolveBranch) and clamps it to the user's allowed
+      // branches, so this is a safe, scope-aware narrow.
+      branchId: null,
     },
   }),
 
@@ -26,6 +30,7 @@ export const useOnlineCommerceReportStore = defineStore('onlineCommerceReport', 
         ...(f.dateTo ? { dateTo: f.dateTo } : {}),
         ...(f.channelId ? { channelId: f.channelId } : {}),
         ...(f.currency ? { currency: f.currency } : {}),
+        ...(f.branchId ? { branchId: f.branchId } : {}),
       };
     },
 

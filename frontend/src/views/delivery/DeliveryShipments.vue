@@ -1,11 +1,13 @@
 <template>
   <div class="page-shell">
     <PageHeader
-      title="الشحنات"
-      subtitle="جميع شحنات شركات التوصيل"
-      icon="mdi-package-variant-closed"
+      title="الشحنات والتتبع"
+      subtitle="إدارة جميع الشحنات وتتبّع حالتها لدى شركات النقل"
+      icon="mdi-truck-fast"
     >
-      <v-btn variant="tonal" prepend-icon="mdi-refresh" :loading="store.loading" @click="reload">تحديث</v-btn>
+      <v-btn variant="tonal" prepend-icon="mdi-refresh" :loading="store.loading" @click="reload"
+        >تحديث</v-btn
+      >
     </PageHeader>
 
     <!-- Filters -->
@@ -29,7 +31,7 @@
             :items="providerItems"
             item-title="name"
             item-value="id"
-            label="المزوّد"
+            label="شركة التوصيل"
             variant="outlined"
             density="comfortable"
             hide-details
@@ -101,11 +103,20 @@
       >
         <template #[`item.createdAt`]="{ item }">{{ fmtDate(item.createdAt) }}</template>
         <template #[`item.providerName`]="{ item }">{{ item.providerName || '—' }}</template>
+        <template #[`item.trackingNumber`]="{ item }">
+          <span v-if="item.trackingNumber" class="text-caption font-weight-medium">{{
+            item.trackingNumber
+          }}</span>
+          <span v-else class="text-disabled">—</span>
+        </template>
+        <template #[`item.lastSyncedAt`]="{ item }">{{ fmtDate(item.lastSyncedAt) }}</template>
 
         <template #[`item.orderInvoice`]="{ item }">
           <div class="d-flex flex-column">
             <span v-if="item.orderNumber" class="text-caption">طلب: {{ item.orderNumber }}</span>
-            <span v-if="item.invoiceNumber" class="text-caption">فاتورة: {{ item.invoiceNumber }}</span>
+            <span v-if="item.invoiceNumber" class="text-caption"
+              >فاتورة: {{ item.invoiceNumber }}</span
+            >
             <span v-if="!item.orderNumber && !item.invoiceNumber" class="text-disabled">—</span>
           </div>
         </template>
@@ -117,17 +128,36 @@
           </v-chip>
         </template>
 
-        <template #[`item.codAmount`]="{ item }">{{ fmtMoney(item.codAmount, item.currency) }}</template>
-        <template #[`item.deliveryFee`]="{ item }">{{ fmtMoney(item.deliveryFee, item.currency) }}</template>
+        <template #[`item.codAmount`]="{ item }">{{
+          fmtMoney(item.codAmount, item.currency)
+        }}</template>
+        <template #[`item.deliveryFee`]="{ item }">{{
+          fmtMoney(item.deliveryFee, item.currency)
+        }}</template>
 
         <template #[`item.actions`]="{ item }">
-          <v-btn icon="mdi-eye-outline" size="small" variant="text" title="التفاصيل" @click="goDetail(item)" />
+          <v-btn
+            icon="mdi-eye-outline"
+            size="small"
+            variant="text"
+            title="عرض التفاصيل وسجل الحالات"
+            @click="goDetail(item)"
+          />
+          <v-btn
+            icon="mdi-map-marker-path"
+            size="small"
+            variant="text"
+            color="info"
+            title="تتبّع الشحنة"
+            :disabled="!item.trackingUrl"
+            @click="openTracking(item)"
+          />
           <v-btn
             icon="mdi-cloud-sync-outline"
             size="small"
             variant="text"
             color="primary"
-            title="مزامنة"
+            title="تحديث الحالة"
             :disabled="isTerminalStatus(item.status) || !!busyId"
             :loading="busyId === item.id"
             @click="doSync(item)"
@@ -200,12 +230,14 @@ const busyId = ref(null);
 
 const headers = [
   { title: 'التاريخ', key: 'createdAt' },
-  { title: 'المزوّد', key: 'providerName', sortable: false },
+  { title: 'شركة النقل', key: 'providerName', sortable: false },
+  { title: 'رقم التتبّع', key: 'trackingNumber', sortable: false },
   { title: 'الطلب/الفاتورة', key: 'orderInvoice', sortable: false },
   { title: 'العميل', key: 'recipientName', sortable: false },
   { title: 'الهاتف', key: 'recipientPhone', sortable: false },
   { title: 'المحافظة', key: 'province', sortable: false },
   { title: 'الحالة', key: 'status', sortable: false },
+  { title: 'آخر تحديث', key: 'lastSyncedAt', sortable: false },
   { title: 'الدفع عند الاستلام', key: 'codAmount', sortable: false },
   { title: 'الرسوم', key: 'deliveryFee', sortable: false },
   { title: 'إجراءات', key: 'actions', sortable: false },
@@ -216,7 +248,9 @@ const providerItems = computed(() => providerStore.providers);
 const channelItems = computed(() => channelStore.channels);
 
 const fmtMoney = (v, cur) =>
-  v == null ? '—' : `${new Intl.NumberFormat('en-US').format(Number(v) || 0)}${cur ? ' ' + cur : ''}`;
+  v == null
+    ? '—'
+    : `${new Intl.NumberFormat('en-US').format(Number(v) || 0)}${cur ? ' ' + cur : ''}`;
 const fmtDate = (v) => {
   if (!v) return '—';
   const d = new Date(v);
@@ -257,6 +291,13 @@ const changeItemsPerPage = (limit) => {
 };
 
 const goDetail = (row) => router.push(`/delivery/shipments/${row.id}`);
+
+// Open the carrier's tracking page in a new window. Tracking is part of the
+// shipment record (trackingUrl) — no separate tracking entity. The full status
+// history lives in the shipment details («مسار الحالة»).
+const openTracking = (row) => {
+  if (row.trackingUrl) window.open(row.trackingUrl, '_blank', 'noopener');
+};
 
 const doSync = async (row) => {
   busyId.value = row.id;

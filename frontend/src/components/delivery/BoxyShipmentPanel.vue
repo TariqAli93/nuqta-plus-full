@@ -95,6 +95,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { useDeliveryShipmentStore } from '@/stores/deliveryShipment';
 import { useNotificationStore } from '@/stores/notification';
+import { useAuthStore } from '@/stores/auth';
 import { statusMeta, isTerminalStatus } from '@/constants/delivery';
 
 const props = defineProps({
@@ -104,6 +105,10 @@ const props = defineProps({
 
 const store = useDeliveryShipmentStore();
 const notify = useNotificationStore();
+const authStore = useAuthStore();
+// Shipping feature off → never fetch a shipment, so the panel stays hidden and
+// no delivery API call is made from the order/invoice page.
+const shipOn = computed(() => authStore.hasFeature('shipping'));
 
 const shipment = ref(null);
 const busy = ref(null); // 'sync' | 'cancel' | 'label' | null — disables all actions
@@ -141,7 +146,7 @@ const fields = computed(() => {
 });
 
 async function load() {
-  if (!entityId.value) return;
+  if (!shipOn.value || !entityId.value) return;
   const list = await store.fetchForEntity(
     props.order ? { onlineOrderId: entityId.value } : { saleId: entityId.value }
   );

@@ -4,6 +4,9 @@ const c = new OnlineCommerceReportController();
 
 export default async function onlineCommerceReportRoutes(fastify) {
   fastify.addHook('onRequest', fastify.authenticate);
+  // Online-commerce reports belong to the online-orders feature (الطلبات
+  // الأونلاين). When it's off, these endpoints reject with 403 FEATURE_DISABLED.
+  fastify.addHook('onRequest', fastify.requireFeature('onlineOrders'));
 
   // Compact dashboard widgets (top channel / revenue / profit + rates).
   fastify.get('/widgets', {

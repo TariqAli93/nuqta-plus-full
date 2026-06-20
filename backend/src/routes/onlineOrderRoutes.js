@@ -4,6 +4,10 @@ const onlineOrderController = new OnlineOrderController();
 
 export default async function onlineOrderRoutes(fastify) {
   fastify.addHook('onRequest', fastify.authenticate);
+  // Whole router is gated by the online-orders feature flag (الطلبات الأونلاين).
+  // When the feature is off the API rejects with 403 FEATURE_DISABLED, so a
+  // disabled module can't be reached by calling the endpoints directly.
+  fastify.addHook('onRequest', fastify.requireFeature('onlineOrders'));
 
   fastify.post('/', {
     onRequest: [fastify.authenticate, fastify.authorize('online_orders:create')],

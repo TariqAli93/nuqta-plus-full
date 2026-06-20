@@ -20,11 +20,14 @@ import ProductForm from '@/views/products/ProductForm.vue';
 import Categories from '@/views/categories/Categories.vue';
 import SalesChannels from '@/views/sales-channels/SalesChannels.vue';
 import OnlineOrders from '@/views/online-orders/OnlineOrders.vue';
-import DeliveryTracking from '@/views/delivery/DeliveryTracking.vue';
+// Unified "الشحنات والتتبع" page (built on the richer shipments view); the old
+// /delivery-tracking route now redirects here.
 import DeliveryShipments from '@/views/delivery/DeliveryShipments.vue';
 import ShipmentDetails from '@/views/delivery/ShipmentDetails.vue';
-import OnlineCommerceReports from '@/views/reports/OnlineCommerceReports.vue';
-import DeliveryReports from '@/views/reports/DeliveryReports.vue';
+// Unified "تقارير التجارة الأونلاين والشحن" page; the old per-domain report
+// routes now redirect here. It reuses the existing online-commerce + delivery
+// report stores/endpoints (no duplicated calculations).
+import OnlineCommerceShippingReports from '@/views/reports/OnlineCommerceShippingReports.vue';
 import DeliveryProviders from '@/views/settings/DeliveryProviders.vue';
 import BoxySettings from '@/views/settings/BoxySettings.vue';
 import GenericProviderSettings from '@/views/settings/GenericProviderSettings.vue';
@@ -163,61 +166,63 @@ const routes = [
         path: 'sales-channels',
         name: 'SalesChannels',
         component: SalesChannels,
-        meta: { permission: 'sales_channels:read' },
+        meta: { permission: 'sales_channels:read', feature: 'onlineOrders' },
       },
       {
         path: 'online-orders',
         name: 'OnlineOrders',
         component: OnlineOrders,
-        meta: { permission: 'online_orders:read' },
+        meta: { permission: 'online_orders:read', feature: 'onlineOrders' },
       },
       {
+        // Legacy tracking route → folded into the unified shipments + tracking
+        // page (الشحنات والتتبع).
         path: 'delivery-tracking',
-        name: 'DeliveryTracking',
-        component: DeliveryTracking,
-        meta: { permission: 'delivery_shipments:read' },
+        redirect: { name: 'DeliveryShipments' },
       },
       {
         path: 'delivery/shipments',
         name: 'DeliveryShipments',
         component: DeliveryShipments,
-        meta: { permission: 'delivery_shipments:read' },
+        meta: { permission: 'delivery_shipments:read', feature: 'shipping' },
       },
       {
         path: 'delivery/shipments/:id',
         name: 'ShipmentDetails',
         component: ShipmentDetails,
-        meta: { permission: 'delivery_shipments:read' },
+        meta: { permission: 'delivery_shipments:read', feature: 'shipping' },
       },
       {
-        path: 'reports/online-commerce',
-        name: 'OnlineCommerceReports',
-        component: OnlineCommerceReports,
-        meta: { permission: 'online_commerce_reports:read' },
+        // Unified "تقارير التجارة الأونلاين والشحن" — visible if EITHER the
+        // online-orders OR the shipping feature is on; each tab self-gates.
+        path: 'reports/online-commerce-shipping',
+        name: 'OnlineCommerceShippingReports',
+        component: OnlineCommerceShippingReports,
+        meta: {
+          permissions: ['online_commerce_reports:read', 'delivery_reports:view'],
+          anyFeature: ['onlineOrders', 'shipping'],
+        },
       },
-      {
-        path: 'reports/delivery',
-        name: 'DeliveryReports',
-        component: DeliveryReports,
-        meta: { permission: 'delivery_reports:view' },
-      },
+      // Legacy report routes → unified page.
+      { path: 'reports/online-commerce', redirect: { name: 'OnlineCommerceShippingReports' } },
+      { path: 'reports/delivery', redirect: { name: 'OnlineCommerceShippingReports' } },
       {
         path: 'settings/integrations/delivery-providers',
         name: 'DeliveryProviders',
         component: DeliveryProviders,
-        meta: { permission: 'delivery_providers:read' },
+        meta: { permission: 'delivery_providers:read', feature: 'shipping' },
       },
       {
         path: 'settings/integrations/delivery-providers/boxy',
         name: 'BoxySettings',
         component: BoxySettings,
-        meta: { permission: 'delivery_providers:manage' },
+        meta: { permission: 'delivery_providers:manage', feature: 'shipping' },
       },
       {
         path: 'settings/integrations/delivery-providers/boxy/webhook-logs',
         name: 'BoxyWebhookLogs',
         component: BoxyWebhookLogs,
-        meta: { permission: 'delivery_webhooks:view' },
+        meta: { permission: 'delivery_webhooks:view', feature: 'shipping' },
       },
       {
         // Generic settings for any non-Boxy provider, keyed by code. Declared
@@ -225,7 +230,7 @@ const routes = [
         path: 'settings/integrations/delivery-providers/:code',
         name: 'GenericProviderSettings',
         component: GenericProviderSettings,
-        meta: { permission: 'delivery_providers:manage' },
+        meta: { permission: 'delivery_providers:manage', feature: 'shipping' },
       },
       { path: 'sales', name: 'Sales', component: Sales, meta: { permission: 'view:sales' } },
       {
@@ -584,20 +589,27 @@ router.beforeEach(async (to, from, next) => {
   // a page never mounts unless the user is allowed in. Sub-actions
   // (add/edit/delete/export) stay gated individually inside each page.
   if (authStore.isAuthenticated) {
-    // Feature-flag gate: hide entire pages when the optional module is off.
+    // Feature-flag gate: block entire pages when the optional module is off.
     // Uses the alias-aware `hasFeature` getter so route meta can use either
     // canonical (warehouseTransfers) or spec (inventoryTransfers) names. A
-    // disabled feature returns the user to the dashboard (the page does not
-    // exist for them), not to /forbidden.
+    // disabled feature routes to /forbidden with `disabledFeature` so the page
+    // explains, in Arabic, that the module is turned off in system settings —
+    // instead of silently bouncing the user to the dashboard.
     if (to.meta.feature && !authStore.hasFeature(to.meta.feature)) {
-      return next({ name: 'Dashboard' });
+      return next({
+        name: 'Forbidden',
+        query: { disabledFeature: to.meta.feature, from: to.fullPath },
+      });
     }
     if (
       Array.isArray(to.meta.anyFeature) &&
       to.meta.anyFeature.length > 0 &&
       !to.meta.anyFeature.some((f) => authStore.hasFeature(f))
     ) {
-      return next({ name: 'Dashboard' });
+      return next({
+        name: 'Forbidden',
+        query: { disabledFeature: to.meta.anyFeature.join(','), from: to.fullPath },
+      });
     }
 
     // Capability gate: backend-issued flag folding in role + scope + feature

@@ -5,7 +5,7 @@
         <v-icon icon="mdi-storefront-outline" size="20" color="primary" />
         <span>التجارة الأونلاين</span>
       </div>
-      <RouterLink to="/reports/online-commerce" class="cc-panel__hint">التقارير ←</RouterLink>
+      <RouterLink to="/reports/online-commerce-shipping" class="cc-panel__hint">التقارير ←</RouterLink>
     </header>
 
     <div class="oc-widgets">
@@ -77,14 +77,18 @@ import { computed, onMounted } from 'vue';
 import { RouterLink } from 'vue-router';
 import { useOnlineCommerceReportStore } from '@/stores/onlineCommerceReport';
 import { usePermissions } from '@/composables/usePermissions';
+import { useAuthStore } from '@/stores/auth';
 
 const store = useOnlineCommerceReportStore();
 const { canFeature } = usePermissions();
+const authStore = useAuthStore();
 
-// Optional dashboard widget: only render (and only fetch) when the user may
-// read online-commerce reports. No permission → the panel is hidden silently
-// and its API is never called.
-const canView = computed(() => canFeature('onlineCommerceWidgets'));
+// Optional dashboard widget: only render (and only fetch) when the online-orders
+// feature is ON and the user may read online-commerce reports. Either gate off →
+// the panel is hidden silently and its API is never called.
+const canView = computed(
+  () => authStore.hasFeature('onlineOrders') && canFeature('onlineCommerceWidgets')
+);
 
 const w = computed(() => store.widgets);
 const hasData = computed(

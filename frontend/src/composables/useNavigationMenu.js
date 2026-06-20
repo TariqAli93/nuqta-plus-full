@@ -69,28 +69,6 @@ export function useNavigationMenu() {
       permission: 'view:sales',
     },
 
-    // ── الطلبات الأونلاين ──────────────────────────────────────────────────
-    {
-      title: 'الطلبات الأونلاين',
-      icon: 'mdi-cart-arrow-down',
-      to: '/online-orders',
-      permission: 'view:online_orders',
-    },
-
-    // ── الشحنات / التوصيل ──────────────────────────────────────────────────
-    {
-      title: 'الشحنات',
-      icon: 'mdi-truck-fast',
-      to: '/delivery/shipments',
-      permission: 'view:delivery',
-    },
-    {
-      title: 'تتبع الشحنات',
-      icon: 'mdi-map-marker-path',
-      to: '/delivery-tracking',
-      permission: 'view:delivery',
-    },
-
     // ── العملاء والديون ────────────────────────────────────────────────────
     {
       title: 'العملاء والديون',
@@ -180,6 +158,58 @@ export function useNavigationMenu() {
       },
     },
 
+    // ── التجارة الأونلاين ──────────────────────────────────────────────────
+    // Visible only when the online-orders OR shipping feature is enabled. Each
+    // item self-gates by its own feature, so the whole group hides when both
+    // features are off (no sub-item survives `checkVisibility`). Permission keys
+    // match the backend route guards so "visible ⟺ accessible".
+    {
+      title: 'التجارة الأونلاين',
+      icon: 'mdi-storefront-outline',
+      to: '#online-commerce',
+      group: {
+        items: [
+          {
+            title: 'الطلبات الأونلاين',
+            icon: 'mdi-cart-arrow-down',
+            to: '/online-orders',
+            permission: 'online_orders:read',
+            feature: 'onlineOrders',
+          },
+          {
+            title: 'قنوات البيع',
+            icon: 'mdi-bullhorn-variant',
+            to: '/sales-channels',
+            permission: 'sales_channels:read',
+            feature: 'onlineOrders',
+          },
+          {
+            title: 'الشحنات والتتبع',
+            icon: 'mdi-truck-fast',
+            to: '/delivery/shipments',
+            permission: 'delivery_shipments:read',
+            feature: 'shipping',
+          },
+          {
+            title: 'شركات النقل',
+            icon: 'mdi-truck-outline',
+            to: '/settings/integrations/delivery-providers',
+            permission: 'delivery_providers:read',
+            feature: 'shipping',
+          },
+          {
+            title: 'تقارير التجارة الأونلاين والشحن',
+            icon: 'mdi-chart-areaspline',
+            to: '/reports/online-commerce-shipping',
+            // ANY of the two report permissions opens the page; each tab inside
+            // self-gates by its feature.
+            permission: ['online_commerce_reports:read', 'delivery_reports:view'],
+            anyFeature: ['onlineOrders', 'shipping'],
+          },
+        ],
+      },
+    },
+
     // ── المشتريات والموردين (only when purchases/suppliers are enabled) ─────
     {
       title: 'المشتريات والموردين',
@@ -208,12 +238,12 @@ export function useNavigationMenu() {
       },
     },
 
-    // ── الصندوق ────────────────────────────────────────────────────────────
+    // ── المالية ────────────────────────────────────────────────────────────
     // No group-level feature gate: each item carries its own gate.
     {
-      title: 'الصندوق',
+      title: 'المالية',
       icon: 'mdi-safe-square-outline',
-      to: '#cash',
+      to: '#finance',
       group: {
         items: [
           {
@@ -275,18 +305,8 @@ export function useNavigationMenu() {
             to: '/reports',
             permission: 'view:reports',
           },
-          {
-            title: 'تقارير التجارة الأونلاين',
-            icon: 'mdi-storefront-outline',
-            to: '/reports/online-commerce',
-            permission: 'view:online_commerce_reports',
-          },
-          {
-            title: 'تقارير الشحن',
-            icon: 'mdi-truck-check-outline',
-            to: '/reports/delivery',
-            permission: 'view:delivery_reports',
-          },
+          // Online-commerce + shipping reports moved to the «التجارة الأونلاين»
+          // group as a single unified page.
           {
             title: 'الربح والخسارة والوضع المالي',
             icon: 'mdi-finance',
@@ -306,11 +326,12 @@ export function useNavigationMenu() {
       },
     },
 
-    // ── الإعدادات ──────────────────────────────────────────────────────────
+    // ── الإدارة ────────────────────────────────────────────────────────────
+    // قنوات البيع + شركات النقل moved to «التجارة الأونلاين».
     {
-      title: 'الإعدادات',
+      title: 'الإدارة',
       icon: 'mdi-cog',
-      to: '#settings',
+      to: '#admin',
       group: {
         items: [
           { title: 'الموظفون', icon: 'mdi-account-cog', to: '/users', permission: 'view:users' },
@@ -334,19 +355,7 @@ export function useNavigationMenu() {
             permission: 'view:settings',
           },
           {
-            title: 'قنوات البيع',
-            icon: 'mdi-bullhorn-variant',
-            to: '/sales-channels',
-            permission: 'view:sales_channels',
-          },
-          {
-            title: 'شركات التوصيل',
-            icon: 'mdi-truck-outline',
-            to: '/settings/integrations/delivery-providers',
-            permission: 'delivery_providers:manage',
-          },
-          {
-            title: 'الميزات والنمط',
+            title: 'إعدادات الميزات والنمط',
             icon: 'mdi-toggle-switch',
             to: '/settings/feature-flags',
             permission: 'manage_feature_toggles',

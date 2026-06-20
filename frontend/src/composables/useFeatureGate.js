@@ -1,14 +1,6 @@
 import { computed } from 'vue';
 import { useAuthStore } from '@/stores/auth';
-
-const FEATURE_LABELS = {
-  installments: 'الأقساط',
-  draftInvoices: 'فواتير المسودة',
-  multiBranch: 'تعدد الفروع',
-  multiWarehouse: 'تعدد المخازن',
-  inventoryTransfers: 'تحويلات المخزون',
-  warehouseTransfers: 'تحويلات المخازن',
-};
+import { featureLabel } from '@/auth/featureFlags';
 
 /**
  * Resolves the visibility/disabled/reason triplet for a feature-gated UI
@@ -34,7 +26,7 @@ export function useFeatureGate(feature, capability) {
   const reason = computed(() => {
     if (!hasCapability.value) return 'لا تملك صلاحية استخدام هذه الميزة';
     if (!featureOn.value) {
-      const label = FEATURE_LABELS[feature] || feature;
+      const label = featureLabel(feature);
       return `ميزة "${label}" معطّلة من إعدادات الميزات. اطلب من المدير تفعيلها.`;
     }
     return '';

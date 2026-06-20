@@ -6,7 +6,7 @@
     size="small"
     variant="tonal"
     prepend-icon="mdi-truck-fast"
-    to="/delivery-tracking"
+    to="/delivery/shipments"
   >
     شحنة Boxy: {{ shipStatus(activeShipment.status) }}
   </v-chip>
@@ -197,9 +197,12 @@ const isCancelled = computed(() =>
   props.order ? entity.value.status === 'CANCELLED' : entity.value.status === 'cancelled'
 );
 const canCreate = computed(() => authStore.hasPermission('delivery_shipments:create'));
+// The whole shipment sub-feature is gated by the shipping flag (الشحن). When it
+// is off, the button hides and NO delivery API call is made from this page.
+const shipOn = computed(() => authStore.hasFeature('shipping'));
 const boxyActive = computed(() => !!(boxy.value && boxy.value.isActive && boxy.value.isImplemented));
 const showButton = computed(
-  () => !!entityId.value && canCreate.value && boxyActive.value && !isCancelled.value
+  () => shipOn.value && !!entityId.value && canCreate.value && boxyActive.value && !isCancelled.value
 );
 
 const products = computed(() => entity.value.items || []);
@@ -311,6 +314,8 @@ async function send() {
 }
 
 onMounted(async () => {
+  // Shipping feature off → no probing, no shipment chip, no delivery API calls.
+  if (!shipOn.value) return;
   // This button is an OPTIONAL sub-feature embedded in the invoice/order page.
   // Only probe provider config / existing shipments when the user actually
   // holds the relevant read permissions — otherwise the button hides silently

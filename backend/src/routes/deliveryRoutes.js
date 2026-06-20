@@ -24,8 +24,12 @@ export default async function deliveryRoutes(fastify) {
     }
   });
 
+  // Every authenticated delivery endpoint is also gated by the shipping feature
+  // flag (الشحن). The inbound webhook below deliberately does NOT use this helper
+  // so providers can still deliver status updates even while the merchant has the
+  // shipping UI toggled off (we must not lose delivery events).
   const auth = (perm) => ({
-    onRequest: [fastify.authenticate, fastify.authorize(perm)],
+    onRequest: [fastify.authenticate, fastify.requireFeature('shipping'), fastify.authorize(perm)],
   });
   const tag = { tags: ['delivery'], security: [{ bearerAuth: [] }] };
 

@@ -7,10 +7,16 @@
 
           <h1 class="text-h2 font-weight-bold mb-2">403</h1>
 
-          <h2 class="text-h5 mb-3 font-weight-medium">غير مسموح بالوصول</h2>
+          <h2 class="text-h5 mb-3 font-weight-medium">
+            {{ isDisabledFeature ? 'ميزة غير مفعّلة' : 'غير مسموح بالوصول' }}
+          </h2>
 
           <p class="text-body-1 text-medium-emphasis mb-2">
-            ليس لديك الصلاحية للوصول إلى هذه الصفحة.
+            {{
+              isDisabledFeature
+                ? disabledFeatureMessage
+                : 'ليس لديك الصلاحية للوصول إلى هذه الصفحة.'
+            }}
           </p>
 
           <!-- Structured details (when the guard passed them) -->
@@ -52,10 +58,27 @@
 import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useNavigationMenu } from '@/composables/useNavigationMenu';
+import { featureLabels } from '@/auth/featureFlags';
+import { useAuthStore } from '@/stores/auth';
 
 const router = useRouter();
 const route = useRoute();
 const { getPageTitle } = useNavigationMenu();
+const authStore = useAuthStore();
+
+// A disabled OPTIONAL MODULE (feature flag off) is distinct from a missing
+// permission: the page exists but the whole module is turned off in system
+// settings. The guard forwards the offending flag(s) as `disabledFeature`.
+const disabledFeatures = computed(() =>
+  route.query.disabledFeature
+    ? String(route.query.disabledFeature).split(',').filter(Boolean)
+    : []
+);
+const isDisabledFeature = computed(() => disabledFeatures.value.length > 0);
+const disabledFeatureMessage = computed(() => {
+  const labels = featureLabels(disabledFeatures.value);
+  return `ميزة "${labels}" غير مفعّلة من إعدادات النظام.`;
+});
 
 // The router guard forwards the denial context via query params:
 //   permission           — required permission key(s), comma-separated
@@ -75,6 +98,19 @@ const pageName = computed(() => (fromPath.value ? getPageTitle(fromPath.value) :
 const detailRows = computed(() => {
   const rows = [];
   if (pageName.value) rows.push({ label: 'الصفحة', value: pageName.value });
+
+  // Disabled optional module: explain it's off and how to turn it on.
+  if (isDisabledFeature.value) {
+    rows.push({ label: 'الميزة', value: featureLabels(disabledFeatures.value) });
+    rows.push({ label: 'السبب', value: 'هذه الميزة معطّلة من إعدادات الميزات والنمط.' });
+    rows.push({
+      label: 'الحل',
+      value: authStore.isGlobalAdmin
+        ? 'فعّلها من: الإعدادات ← إعدادات الميزات والنمط.'
+        : 'اطلب من المدير تفعيلها من إعدادات الميزات والنمط.',
+    });
+    return rows;
+  }
 
   if (requiresGlobalAdmin.value) {
     rows.push({ label: 'الصلاحية المطلوبة', value: 'صلاحية المدير العام' });

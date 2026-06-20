@@ -4,6 +4,9 @@ const salesChannelController = new SalesChannelController();
 
 export default async function salesChannelRoutes(fastify) {
   fastify.addHook('onRequest', fastify.authenticate);
+  // Sales channels (قنوات البيع) are an online-orders concept — gate the whole
+  // router by the online-orders feature flag.
+  fastify.addHook('onRequest', fastify.requireFeature('onlineOrders'));
 
   fastify.post('/', {
     onRequest: [fastify.authenticate, fastify.authorize('sales_channels:create')],

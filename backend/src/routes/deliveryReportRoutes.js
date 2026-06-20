@@ -5,6 +5,9 @@ const c = new DeliveryReportController();
 /** Delivery / shipping reports — all gated by `delivery_reports:view`. */
 export default async function deliveryReportRoutes(fastify) {
   fastify.addHook('onRequest', fastify.authenticate);
+  // Shipping reports belong to the shipping feature (الشحن). When it's off, these
+  // endpoints reject with 403 FEATURE_DISABLED.
+  fastify.addHook('onRequest', fastify.requireFeature('shipping'));
   const auth = (perm) => ({ onRequest: [fastify.authenticate, fastify.authorize(perm)] });
   const tag = { tags: ['reports'], security: [{ bearerAuth: [] }] };
 

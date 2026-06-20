@@ -118,6 +118,8 @@ export const SETUP_PRESETS = Object.freeze({
     manualJournal: true,
     agentPricing: true,
     financialReports: true,
+    onlineOrders: true,
+    shipping: true,
   },
 });
 
@@ -164,6 +166,15 @@ export const DEFAULT_FLAGS = Object.freeze({
   agentPricing: false,
   // Financial statements: trial balance, P&L, balance sheet... — full mode only.
   financialReports: false,
+  // ── Online commerce (التجارة الأونلاين) — OFF by default so existing installs
+  // keep their exact behavior after auto-update; an admin enables them from the
+  // feature settings. Allowed in BOTH app modes (independent of each other). ──
+  // Online order intake from sales channels (الطلبات الأونلاين): the
+  // /online-orders page, its reports, and conversion to invoices.
+  onlineOrders: false,
+  // Shipping & delivery tracking (الشحن): shipments + tracking, carriers
+  // (delivery providers), and shipping reports.
+  shipping: false,
 });
 
 const ALLOWED_KEYS = new Set([...Object.keys(DEFAULT_FLAGS), ...Object.keys(FLAG_ALIASES)]);
