@@ -11,6 +11,52 @@
     <div class="oc-widgets">
       <div class="oc-tile">
         <div class="oc-tile__label">
+          <v-icon icon="mdi-inbox-arrow-down" size="15" color="blue-grey" /> طلبات جديدة
+        </div>
+        <div class="oc-tile__value oc-tile__value--num">{{ fmt(w?.totals?.newCount) }}</div>
+      </div>
+
+      <div class="oc-tile">
+        <div class="oc-tile__label">
+          <v-icon icon="mdi-truck-check" size="15" color="success" /> مكتملة
+        </div>
+        <div class="oc-tile__value oc-tile__value--num">{{ fmt(w?.totals?.completed) }}</div>
+      </div>
+
+      <div class="oc-tile">
+        <div class="oc-tile__label">
+          <v-icon icon="mdi-close-circle-outline" size="15" color="error" /> ملغاة
+        </div>
+        <div class="oc-tile__value oc-tile__value--num">{{ fmt(w?.totals?.cancelled) }}</div>
+      </div>
+
+      <div class="oc-tile">
+        <div class="oc-tile__label">
+          <v-icon icon="mdi-keyboard-return" size="15" color="orange-darken-3" /> مرتجعة
+        </div>
+        <div class="oc-tile__value oc-tile__value--num">{{ fmt(w?.totals?.returned) }}</div>
+      </div>
+
+      <div class="oc-tile">
+        <div class="oc-tile__label">
+          <v-icon icon="mdi-cash-multiple" size="15" color="success" /> إجمالي المبيعات
+        </div>
+        <div class="oc-tile__value oc-tile__value--num">
+          {{ fmt(w?.totals?.totalSales) }} {{ w?.totals?.currency || '' }}
+        </div>
+      </div>
+
+      <div v-if="w?.profitVisible" class="oc-tile">
+        <div class="oc-tile__label">
+          <v-icon icon="mdi-finance" size="15" color="teal" /> صافي الأرباح
+        </div>
+        <div class="oc-tile__value oc-tile__value--num">
+          {{ fmt(w?.totals?.netProfit) }} {{ w?.totals?.currency || '' }}
+        </div>
+      </div>
+
+      <div class="oc-tile">
+        <div class="oc-tile__label">
           <v-icon icon="mdi-bullhorn-variant" size="15" color="primary" /> القناة الأنشط
         </div>
         <div class="oc-tile__value">{{ w?.topChannel?.channelName || '—' }}</div>

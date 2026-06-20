@@ -20,22 +20,17 @@ import {
 } from '../utils/errors.js';
 import {
   ORDER_STATUS_DEFAULT,
-  ORDER_STATUS_CONFIRMED,
-  ORDER_STATUS_PROCESSING,
   ORDER_STATUS_DELIVERED,
   ORDER_STATUS_RETURNED,
   ORDER_STATUS_CANCELLED,
   ORDER_EDITABLE_STATUSES,
+  ORDER_TERMINAL_STATUSES,
   isValidOrderStatus,
   canTransition,
+  isSaleBacked,
+  statusCommitsSale,
+  orderStatusLabel,
 } from '../constants/orders.js';
-
-// Order states that can't be transitioned away from by an automated sync.
-const ORDER_TERMINAL_STATUSES = [
-  ORDER_STATUS_DELIVERED,
-  ORDER_STATUS_RETURNED,
-  ORDER_STATUS_CANCELLED,
-];
 import { normalizeIraqPhone } from '../utils/phone.js';
 import { SaleService } from './saleService.js';
 import { CustomerService } from './customerService.js';
@@ -44,11 +39,20 @@ import { createLogger } from '../utils/logger.js';
 const saleService = new SaleService();
 const customerService = new CustomerService();
 
-// An order can be turned into an invoice only while it is CONFIRMED or
-// PROCESSING — before it ships and after it's been verified.
-const CONVERTIBLE_STATUSES = [ORDER_STATUS_CONFIRMED, ORDER_STATUS_PROCESSING];
-
 const log = createLogger('OnlineOrderService');
+
+/** Derive the order's payment status (الدفع) from its linked sale totals. */
+function derivePaymentStatus(row) {
+  // No linked sale yet → nothing to pay against.
+  if (!row || row.saleId == null) return 'UNPAID';
+  // A fully-returned order shows as refunded regardless of original payment.
+  if (row.status === ORDER_STATUS_RETURNED) return 'REFUNDED';
+  const total = Number(row.saleTotal) || 0;
+  const paid = Number(row.salePaidAmount) || 0;
+  if (paid <= 0) return 'UNPAID';
+  if (paid + 0.0001 >= total) return 'PAID';
+  return 'PARTIAL';
+}
 
 async function withTransaction(callback) {
   const pool = await getPool();
@@ -107,11 +111,14 @@ export class OnlineOrderService {
         .insert(onlineOrders)
         .values({
           channelId: orderData.channelId,
+          customerId: orderData.customerId ?? null,
           customerName: orderData.customerName,
           customerPhone: orderData.customerPhone ?? null,
           customerAddress: orderData.customerAddress ?? null,
           province: orderData.province ?? null,
           notes: orderData.notes ?? null,
+          branchId: orderData.branchId ?? null,
+          warehouseId: orderData.warehouseId ?? null,
           totalAmount: money(total),
           createdBy: userId ?? null,
         })
@@ -141,7 +148,8 @@ export class OnlineOrderService {
 
   async getAll(filters = {}) {
     const db = await getDb();
-    const { page = 1, limit = 20, search, status, channelId, dateFrom, dateTo } = filters;
+    const { page = 1, limit = 20, search, status, channelId, dateFrom, dateTo, branchId, createdBy } =
+      filters;
 
     const conditions = [];
     if (status && isValidOrderStatus(status)) {
@@ -149,6 +157,12 @@ export class OnlineOrderService {
     }
     if (channelId) {
       conditions.push(eq(onlineOrders.channelId, Number(channelId)));
+    }
+    if (branchId) {
+      conditions.push(eq(onlineOrders.branchId, Number(branchId)));
+    }
+    if (createdBy) {
+      conditions.push(eq(onlineOrders.createdBy, Number(createdBy)));
     }
     if (search) {
       const term = `%${search}%`;
@@ -180,11 +194,14 @@ export class OnlineOrderService {
         channelName: salesChannels.name,
         channelColor: salesChannels.color,
         channelIcon: salesChannels.icon,
+        customerId: onlineOrders.customerId,
         customerName: onlineOrders.customerName,
         customerPhone: onlineOrders.customerPhone,
         customerAddress: onlineOrders.customerAddress,
         province: onlineOrders.province,
         notes: onlineOrders.notes,
+        branchId: onlineOrders.branchId,
+        warehouseId: onlineOrders.warehouseId,
         status: onlineOrders.status,
         totalAmount: onlineOrders.totalAmount,
         createdBy: onlineOrders.createdBy,
@@ -192,6 +209,12 @@ export class OnlineOrderService {
         updatedAt: onlineOrders.updatedAt,
         convertedSaleId: sales.id,
         convertedInvoiceNumber: sales.invoiceNumber,
+        // Payment snapshot from the linked sale → drives the order's payment
+        // status badge (غير مدفوع / جزئي / مدفوع / مسترجع).
+        saleId: sales.id,
+        saleTotal: sales.total,
+        salePaidAmount: sales.paidAmount,
+        saleStatus: sales.status,
       })
       .from(onlineOrders)
       .leftJoin(salesChannels, eq(onlineOrders.channelId, salesChannels.id))
@@ -209,7 +232,7 @@ export class OnlineOrderService {
       .offset((page - 1) * limit);
 
     return {
-      data: results,
+      data: results.map((row) => ({ ...row, paymentStatus: derivePaymentStatus(row) })),
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
   }
@@ -225,11 +248,14 @@ export class OnlineOrderService {
         channelName: salesChannels.name,
         channelColor: salesChannels.color,
         channelIcon: salesChannels.icon,
+        customerId: onlineOrders.customerId,
         customerName: onlineOrders.customerName,
         customerPhone: onlineOrders.customerPhone,
         customerAddress: onlineOrders.customerAddress,
         province: onlineOrders.province,
         notes: onlineOrders.notes,
+        branchId: onlineOrders.branchId,
+        warehouseId: onlineOrders.warehouseId,
         status: onlineOrders.status,
         totalAmount: onlineOrders.totalAmount,
         createdBy: onlineOrders.createdBy,
@@ -238,6 +264,12 @@ export class OnlineOrderService {
         updatedAt: onlineOrders.updatedAt,
         convertedSaleId: sales.id,
         convertedInvoiceNumber: sales.invoiceNumber,
+        // Payment snapshot from the linked sale.
+        saleId: sales.id,
+        saleTotal: sales.total,
+        salePaidAmount: sales.paidAmount,
+        saleRemainingAmount: sales.remainingAmount,
+        saleStatus: sales.status,
       })
       .from(onlineOrders)
       .leftJoin(salesChannels, eq(onlineOrders.channelId, salesChannels.id))
@@ -249,6 +281,7 @@ export class OnlineOrderService {
     if (!order) {
       throw new NotFoundError('Online order');
     }
+    order.paymentStatus = derivePaymentStatus(order);
 
     const items = await db
       .select()
@@ -309,11 +342,14 @@ export class OnlineOrderService {
       const setPayload = { updatedAt: new Date() };
       for (const field of [
         'channelId',
+        'customerId',
         'customerName',
         'customerPhone',
         'customerAddress',
         'province',
         'notes',
+        'branchId',
+        'warehouseId',
       ]) {
         if (Object.prototype.hasOwnProperty.call(orderData, field)) {
           setPayload[field] = orderData[field] ?? null;
@@ -366,32 +402,61 @@ export class OnlineOrderService {
    * never drift from the order's status. An invalid transition is rejected
    * with a 409 and nothing is written.
    */
-  async updateStatus(id, nextStatus, changedBy = null, note = null) {
+  async updateStatus(id, nextStatus, actingUser = null, note = null, options = {}) {
     const orderId = Number(id);
+    const userId = typeof actingUser === 'object' && actingUser !== null ? actingUser.id : actingUser;
 
     if (!isValidOrderStatus(nextStatus)) {
       throw new ValidationError(`Unknown order status: ${nextStatus}`);
     }
 
+    // Load the full order (items + linked-sale link + branch/warehouse). The
+    // financial/stock side effects below run through the proven sales engine in
+    // their OWN transactions, so we don't wrap them in the order tx — we sequence
+    // them: do the money/stock op first, then flip the order status.
+    const order = await this.getById(orderId);
+
+    // Same status → no-op (no history noise).
+    if (order.status === nextStatus) return order;
+    if (!canTransition(order.status, nextStatus)) {
+      throw new ConflictError(
+        `لا يمكن نقل الطلب من "${orderStatusLabel(order.status)}" إلى "${orderStatusLabel(nextStatus)}".`
+      );
+    }
+
+    // ── Side effects via the sales engine ────────────────────────────────────
+    let sideNote = null;
+    if (statusCommitsSale(nextStatus)) {
+      // CONFIRM (مؤكد): create the linked sale → deducts stock (FIFO) with an
+      // oversell guard. Idempotent if a sale somehow already exists.
+      if (!order.convertedSaleId) {
+        const sale = await this._buildAndCreateSale(order, options, actingUser);
+        sideNote = `تم تأكيد الطلب وإنشاء الفاتورة ${sale.invoiceNumber} وخصم المخزون`;
+      }
+    } else if (nextStatus === ORDER_STATUS_CANCELLED && isSaleBacked(order.status)) {
+      // CANCEL a confirmed (sale-backed, not yet delivered) order → cancel the
+      // linked sale, which restores the deducted stock.
+      if (order.convertedSaleId) {
+        await saleService.cancel(order.convertedSaleId, userId);
+        sideNote = 'تم إلغاء الطلب وإرجاع الكميات إلى المخزون';
+      }
+    } else if (nextStatus === ORDER_STATUS_RETURNED && order.convertedSaleId) {
+      // RETURN (full) → create a sale return for every line, restoring stock and
+      // reducing revenue/profit. Partial returns go through returnOrder().
+      await this._returnLinkedSaleFull(order.convertedSaleId, actingUser, note);
+      sideNote = 'تم إرجاع الطلب بالكامل وإعادة الكميات إلى المخزون';
+    }
+
+    // ── Flip the order status + append history (single small transaction) ─────
     await withTransaction(async (tx) => {
-      const [existing] = await tx
+      // Re-read inside the tx to guard against a concurrent change.
+      const [fresh] = await tx
         .select({ status: onlineOrders.status })
         .from(onlineOrders)
         .where(eq(onlineOrders.id, orderId))
         .limit(1);
-      if (!existing) {
-        throw new NotFoundError('Online order');
-      }
-
-      // Same status → no-op (and no history noise).
-      if (existing.status === nextStatus) {
-        return;
-      }
-      if (!canTransition(existing.status, nextStatus)) {
-        throw new ConflictError(
-          `لا يمكن نقل الطلب من "${existing.status}" إلى "${nextStatus}".`
-        );
-      }
+      if (!fresh) throw new NotFoundError('Online order');
+      if (fresh.status === nextStatus) return; // someone else already moved it
 
       await tx
         .update(onlineOrders)
@@ -400,12 +465,11 @@ export class OnlineOrderService {
 
       await tx.insert(onlineOrderStatusHistory).values({
         orderId,
-        fromStatus: existing.status,
+        fromStatus: order.status,
         toStatus: nextStatus,
-        note: note ?? null,
-        changedBy: changedBy ?? null,
+        note: note ?? sideNote ?? null,
+        changedBy: userId ?? null,
       });
-
       saveDatabase();
     });
 
@@ -504,43 +568,42 @@ export class OnlineOrderService {
    * @param {object} options   optional payment/branch overrides for the sale
    * @param {object} user      acting user
    */
-  async convertToSale(id, options = {}, user) {
-    const orderId = Number(id);
+  /**
+   * Build the linked sale for an order and create it via SaleService.create()
+   * — so the invoice, sale items, FIFO stock deduction (with oversell guard),
+   * payment, treasury and GL postings all happen inside the sales engine's own
+   * transaction. The sale carries `channelId` (channel origin) and
+   * `onlineOrderId` (sale → order link). Double creation is prevented by a
+   * pre-check AND the UNIQUE index on sales.online_order_id (race-safe).
+   *
+   * Shared by the CONFIRM transition (updateStatus) and the legacy convert API.
+   * Throws Arabic ValidationError on insufficient stock (oversell guard).
+   */
+  async _buildAndCreateSale(order, options = {}, user) {
     const userId = typeof user === 'object' && user !== null ? user.id : user;
-    const db = await getDb();
 
-    const order = await this.getById(orderId); // includes items + converted link
-
-    // ── Guards ──────────────────────────────────────────────────────────────
     if (order.convertedSaleId) {
       const err = new ConflictError(
-        `تم تحويل هذا الطلب مسبقاً إلى الفاتورة ${order.convertedInvoiceNumber}.`
+        `تم تأكيد هذا الطلب مسبقاً وأُنشئت له الفاتورة ${order.convertedInvoiceNumber}.`
       );
       err.code = 'ORDER_ALREADY_CONVERTED';
       throw err;
     }
-    if (!CONVERTIBLE_STATUSES.includes(order.status)) {
-      throw new ConflictError(
-        `لا يمكن إنشاء فاتورة لطلب حالته "${order.status}" — يجب أن يكون الطلب مؤكداً أو قيد التجهيز.`
-      );
-    }
     if (!order.items || order.items.length === 0) {
-      throw new ValidationError('لا يمكن تحويل طلب لا يحتوي على أي منتجات.');
+      throw new ValidationError('لا يمكن تأكيد طلب لا يحتوي على أي منتجات.');
     }
     // Sales deduct stock per product, so every line must map to a real product.
     const orphan = order.items.find((it) => !it.productId);
     if (orphan) {
       throw new ValidationError(
-        `الصنف "${orphan.productName}" غير مرتبط بمنتج في الكتالوج — لا يمكن تحويله.`
+        `الصنف "${orphan.productName}" غير مرتبط بمنتج في الكتالوج — اربطه بمنتج قبل التأكيد.`
       );
     }
 
-    // Preserve customer information by linking/creating a customer (req #5).
-    const customerId = await this._resolveCustomerId(order, userId);
+    // Link/create the customer so the invoice + debts carry real customer info.
+    // Prefer the explicitly-chosen customer; fall back to phone-based resolve.
+    const customerId = order.customerId || (await this._resolveCustomerId(order, userId));
 
-    // Build the sale payload from the order. The channel + order link are
-    // stamped on the sale; payment defaults to unpaid unless the caller passes
-    // payment details. saleSource stays null so the POS feature gate is skipped.
     const saleData = {
       customerId,
       channelId: order.channelId || null,
@@ -557,42 +620,136 @@ export class OnlineOrderService {
       paidAmount: Number(options.paidAmount) || 0,
       paymentMethod: options.paymentMethod || 'cash',
       paymentReference: options.paymentReference || null,
-      branchId: options.branchId,
-      warehouseId: options.warehouseId,
-      notes: `محوّل من الطلب الأونلاين ${order.orderNumber}`,
+      // Prefer the order's stored branch/warehouse; allow an explicit override.
+      branchId: options.branchId ?? order.branchId ?? undefined,
+      warehouseId: options.warehouseId ?? order.warehouseId ?? undefined,
+      notes: `طلب أونلاين ${order.orderNumber}`,
     };
 
-    let sale;
     try {
-      sale = await saleService.create(saleData, user);
+      return await saleService.create(saleData, user);
     } catch (err) {
-      // Race-safe backstop: a concurrent conversion already linked this order.
+      // Race-safe backstop: a concurrent confirm already linked this order.
       if (err?.code === '23505') {
-        const conflict = new ConflictError('تم تحويل هذا الطلب مسبقاً إلى فاتورة.');
+        const conflict = new ConflictError('تم تأكيد هذا الطلب مسبقاً وأُنشئت له فاتورة.');
         conflict.code = 'ORDER_ALREADY_CONVERTED';
         throw conflict;
       }
-      throw err;
+      throw err; // oversell ValidationError (Arabic) and others bubble up
     }
+  }
 
-    // Audit the conversion in the order's status history (status itself is left
-    // to the delivery workflow — conversion is an orthogonal event).
+  /** Create a FULL sale return for every line of the linked sale (restores stock). */
+  async _returnLinkedSaleFull(saleId, user, reason = null) {
+    const sale = await saleService.getById(saleId);
+    const items = (sale.items || [])
+      .filter((it) => Number(it.quantity) > 0)
+      .map((it) => ({ saleItemId: it.id, quantity: Number(it.quantity) }));
+    if (items.length === 0) return null;
+    return saleService.createReturn(saleId, { items, reason: reason || 'إرجاع طلب أونلاين' }, user);
+  }
+
+  /**
+   * Legacy convert-to-invoice endpoint. Kept for backward compatibility; with
+   * the confirm-creates-sale flow this simply ensures a sale exists for an
+   * already-confirmed order. Prefer moving the order to CONFIRMED instead.
+   */
+  async convertToSale(id, options = {}, user) {
+    const orderId = Number(id);
+    const userId = typeof user === 'object' && user !== null ? user.id : user;
+    const db = await getDb();
+
+    const order = await this.getById(orderId);
+    const sale = await this._buildAndCreateSale(order, options, user);
+
     try {
       await db.insert(onlineOrderStatusHistory).values({
         orderId,
         fromStatus: order.status,
         toStatus: order.status,
-        note: `تم التحويل إلى الفاتورة ${sale.invoiceNumber}`,
+        note: `تم إنشاء الفاتورة ${sale.invoiceNumber}`,
         changedBy: userId ?? null,
       });
       saveDatabase();
     } catch (err) {
-      // The sale (and its link) already committed — a history-note failure must
-      // not fail the conversion. Log and move on.
-      log.warn('Conversion succeeded but status-history note failed', err);
+      log.warn('Sale created but status-history note failed', err);
     }
 
     return { sale, order: await this.getById(orderId) };
+  }
+
+  /**
+   * Partial (or full) return against a confirmed/delivered online order. Maps
+   * the requested items onto the linked sale and delegates to
+   * SaleService.createReturn — which restores stock and reduces revenue/profit.
+   * When the whole order is returned, the order status moves to RETURNED.
+   */
+  async returnOrder(id, returnData, user) {
+    const orderId = Number(id);
+    const userId = typeof user === 'object' && user !== null ? user.id : user;
+    const order = await this.getById(orderId);
+
+    if (!order.convertedSaleId) {
+      throw new ConflictError('لا يمكن إرجاع طلب لم يُؤكَّد بعد (لا توجد فاتورة مرتبطة).');
+    }
+    if (!isSaleBacked(order.status)) {
+      throw new ConflictError('لا يمكن إرجاع الطلب في حالته الحالية.');
+    }
+    if (!Array.isArray(returnData.items) || returnData.items.length === 0) {
+      throw new ValidationError('يجب تحديد صنف واحد على الأقل للإرجاع.');
+    }
+
+    const result = await saleService.createReturn(
+      order.convertedSaleId,
+      {
+        items: returnData.items.map((it) => ({
+          saleItemId: it.saleItemId ?? undefined,
+          productId: it.productId ?? undefined,
+          quantity: Number(it.quantity),
+        })),
+        reason: returnData.reason || 'إرجاع طلب أونلاين',
+        refundAmount: returnData.refundAmount,
+      },
+      user
+    );
+
+    // If everything sold has now been returned, flip the order to RETURNED.
+    // Returned-per-line is summed from the sale's return records (getById →
+    // `returns[].items[]`), so we don't depend on a derived per-item field.
+    const sale = await saleService.getById(order.convertedSaleId);
+    const returnedByItem = {};
+    for (const ret of sale.returns || []) {
+      for (const it of ret.items || []) {
+        if (it.saleItemId == null) continue;
+        returnedByItem[it.saleItemId] =
+          (returnedByItem[it.saleItemId] || 0) + Number(it.quantity || 0);
+      }
+    }
+    const fullyReturned =
+      Array.isArray(sale.items) &&
+      sale.items.length > 0 &&
+      sale.items.every(
+        (it) => (returnedByItem[it.id] || 0) >= Number(it.quantity || 0)
+      );
+
+    if (fullyReturned && order.status !== ORDER_STATUS_RETURNED) {
+      await withTransaction(async (tx) => {
+        await tx
+          .update(onlineOrders)
+          .set({ status: ORDER_STATUS_RETURNED, updatedAt: new Date() })
+          .where(eq(onlineOrders.id, orderId));
+        await tx.insert(onlineOrderStatusHistory).values({
+          orderId,
+          fromStatus: order.status,
+          toStatus: ORDER_STATUS_RETURNED,
+          note: 'إرجاع كامل للطلب',
+          changedBy: userId ?? null,
+        });
+        saveDatabase();
+      });
+    }
+
+    return { return: result, order: await this.getById(orderId) };
   }
 
   async delete(id) {

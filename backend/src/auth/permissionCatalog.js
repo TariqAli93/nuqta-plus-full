@@ -69,13 +69,18 @@ export const PERMISSION_CATALOG = Object.freeze({
   'view:sales_channels': { ar: 'الوصول إلى صفحة قنوات البيع', group: G.ONLINE, active: false },
 
   // ── Online orders ──
-  'online_orders:create': { ar: 'إضافة طلب أونلاين', group: G.ONLINE },
-  'online_orders:read': { ar: 'عرض الطلبات الأونلاين', group: G.ONLINE },
+  'online_orders:create': { ar: 'إنشاء طلب أونلاين', group: G.ONLINE },
+  'online_orders:read': { ar: 'عرض طلبات الأونلاين', group: G.ONLINE },
   'online_orders:update': { ar: 'تعديل طلب أونلاين', group: G.ONLINE },
-  'online_orders:update_status': { ar: 'تغيير حالة الطلب الأونلاين', group: G.ONLINE },
+  'online_orders:update_status': { ar: 'بدء معالجة الطلب الأونلاين', group: G.ONLINE },
+  'online_orders:confirm': { ar: 'تأكيد طلب أونلاين', group: G.ONLINE },
+  'online_orders:prepare': { ar: 'تجهيز طلب أونلاين', group: G.ONLINE },
+  'online_orders:deliver': { ar: 'تسليم طلب أونلاين', group: G.ONLINE },
+  'online_orders:cancel': { ar: 'إلغاء طلب أونلاين', group: G.ONLINE },
+  'online_orders:return': { ar: 'إرجاع طلب أونلاين', group: G.ONLINE },
   'online_orders:convert': { ar: 'تحويل الطلب إلى فاتورة', group: G.ONLINE },
   'online_orders:delete': { ar: 'حذف طلب أونلاين', group: G.ONLINE },
-  'view:online_orders': { ar: 'الوصول إلى صفحة الطلبات الأونلاين', group: G.ONLINE, active: false },
+  'view:online_orders': { ar: 'الوصول إلى صفحة طلبات الأونلاين', group: G.ONLINE, active: false },
 
   // ── Delivery ──
   'delivery_providers:read': { ar: 'عرض شركات التوصيل', group: G.DELIVERY },

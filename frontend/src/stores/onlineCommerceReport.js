@@ -19,6 +19,9 @@ export const useOnlineCommerceReportStore = defineStore('onlineCommerceReport', 
       // honours `branchId` (resolveBranch) and clamps it to the user's allowed
       // branches, so this is a safe, scope-aware narrow.
       branchId: null,
+      // Order-status + creator filters (apply to the orders funnel).
+      status: null,
+      userId: null,
     },
   }),
 
@@ -31,6 +34,8 @@ export const useOnlineCommerceReportStore = defineStore('onlineCommerceReport', 
         ...(f.channelId ? { channelId: f.channelId } : {}),
         ...(f.currency ? { currency: f.currency } : {}),
         ...(f.branchId ? { branchId: f.branchId } : {}),
+        ...(f.status ? { status: f.status } : {}),
+        ...(f.userId ? { userId: f.userId } : {}),
       };
     },
 

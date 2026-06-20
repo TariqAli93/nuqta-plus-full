@@ -1556,11 +1556,22 @@ export const onlineOrders = pgTable(
     // Originating sales channel. SET NULL on channel delete so an order is
     // never lost; the create path requires a channel at the validation layer.
     channelId: integer('channel_id').references(() => salesChannels.id, { onDelete: 'set null' }),
+    // Optional link to a catalog customer (اختيار عميل موجود). The name/phone/
+    // address fields below remain a snapshot for display and for item-less or
+    // walk-in intake; when customerId is set the linked sale (on confirm) and
+    // the customer's debts attach to this customer. SET NULL on customer delete.
+    customerId: integer('customer_id').references(() => customers.id, { onDelete: 'set null' }),
     customerName: text('customer_name').notNull(),
     customerPhone: text('customer_phone'),
     customerAddress: text('customer_address'),
     province: text('province'),
     notes: text('notes'),
+    // Branch / warehouse the order belongs to. Stored at intake so the linked
+    // sale created on confirmation deducts stock from the right warehouse and
+    // the order can be filtered/scoped by branch. NULL → resolved to defaults
+    // at confirm time. (Migration backfills existing rows as NULL.)
+    branchId: integer('branch_id').references(() => branches.id, { onDelete: 'set null' }),
+    warehouseId: integer('warehouse_id').references(() => warehouses.id, { onDelete: 'set null' }),
     // Workflow state — see src/constants/orders.js. Validated at the app layer.
     status: text('status').notNull().default('NEW'),
     // Authoritative total = Σ item.subtotal when items exist (computed by the
@@ -1575,6 +1586,9 @@ export const onlineOrders = pgTable(
     channelIdx: index('online_orders_channel_idx').on(t.channelId),
     createdAtIdx: index('online_orders_created_at_idx').on(t.createdAt),
     phoneIdx: index('online_orders_phone_idx').on(t.customerPhone),
+    customerIdx: index('online_orders_customer_idx').on(t.customerId),
+    branchIdx: index('online_orders_branch_idx').on(t.branchId),
+    createdByIdx: index('online_orders_created_by_idx').on(t.createdBy),
   })
 );
 

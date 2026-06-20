@@ -86,6 +86,32 @@
             style="max-width: 200px"
             @update:model-value="load"
           />
+          <v-select
+            v-if="onlineOn"
+            v-model="filters.orderStatus"
+            :items="orderStatusItems"
+            label="حالة الطلب"
+            variant="outlined"
+            density="comfortable"
+            hide-details
+            clearable
+            style="max-width: 200px"
+            @update:model-value="load"
+          />
+          <v-select
+            v-if="onlineOn && userItems.length"
+            v-model="filters.userId"
+            :items="userItems"
+            item-title="title"
+            item-value="value"
+            label="المستخدم"
+            variant="outlined"
+            density="comfortable"
+            hide-details
+            clearable
+            style="max-width: 200px"
+            @update:model-value="load"
+          />
         </div>
       </v-card-text>
     </v-card>
@@ -342,8 +368,10 @@ import { useDeliveryReportStore } from '@/stores/deliveryReport';
 import { useSalesChannelStore } from '@/stores/salesChannel';
 import { useDeliveryProviderStore } from '@/stores/deliveryProvider';
 import { useInventoryStore } from '@/stores';
+import { useUsersStore } from '@/stores/users';
 import { useAuthStore } from '@/stores/auth';
 import { statusMeta, DELIVERY_STATUS_META } from '@/constants/delivery';
+import { ORDER_STATUSES, statusMeta as orderStatusMeta } from '@/constants/orders';
 import PageHeader from '@/components/PageHeader.vue';
 
 const ocStore = useOnlineCommerceReportStore();
@@ -351,6 +379,7 @@ const delStore = useDeliveryReportStore();
 const channelStore = useSalesChannelStore();
 const providerStore = useDeliveryProviderStore();
 const inventoryStore = useInventoryStore();
+const usersStore = useUsersStore();
 const authStore = useAuthStore();
 
 // Per-feature gating: a tab — and its API call — only exists when its feature
@@ -370,7 +399,9 @@ const filters = reactive({
   branchId: null,
   channelId: null,
   providerId: null,
-  status: null,
+  status: null, // shipment status
+  orderStatus: null, // online-order status
+  userId: null,
 });
 
 const tab = ref('orders');
@@ -391,6 +422,10 @@ const channelItems = computed(() => channelStore.channels);
 const providerItems = computed(() => providerStore.providers.map((p) => ({ title: p.name, value: p.id })));
 const branchItems = computed(() => inventoryStore.branches || []);
 const statusItems = Object.entries(DELIVERY_STATUS_META).map(([value, m]) => ({ title: m.label, value }));
+const orderStatusItems = ORDER_STATUSES.map((s) => ({ title: orderStatusMeta(s).label, value: s }));
+const userItems = computed(() =>
+  (usersStore.list || []).map((u) => ({ title: u.fullName || u.username, value: u.id }))
+);
 
 // ── tabs (feature-aware) ─────────────────────────────────────────────────────
 const tabs = computed(() => {
@@ -521,6 +556,8 @@ function syncFilters() {
     dateTo: filters.dateTo,
     channelId: filters.channelId,
     branchId: filters.branchId,
+    status: filters.orderStatus,
+    userId: filters.userId,
   });
   Object.assign(delStore.filters, {
     dateFrom: filters.dateFrom,
@@ -548,5 +585,9 @@ onMounted(() => {
   if (shipOn.value) providerStore.fetchProviders({ optional: true });
   // Best-effort: populate the branch picker (no-op / silent if unavailable).
   if (!branchItems.value.length) inventoryStore.fetchBranches?.().catch(() => {});
+  // User filter (online tabs) — only when the viewer may read users.
+  if (onlineOn.value && authStore.hasPermission('users:read') && !usersStore.list.length) {
+    usersStore.fetch().catch(() => {});
+  }
 });
 </script>

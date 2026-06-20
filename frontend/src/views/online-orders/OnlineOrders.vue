@@ -103,7 +103,12 @@
         hide-default-footer
       >
         <template #[`item.channelName`]="{ item }">
-          <v-chip v-if="item.channelName" size="small" variant="tonal" :color="item.channelColor || undefined">
+          <v-chip
+            v-if="item.channelName"
+            size="small"
+            variant="tonal"
+            :color="item.channelColor || undefined"
+          >
             <v-icon start size="14">{{ item.channelIcon || 'mdi-bullhorn-variant' }}</v-icon>
             {{ item.channelName }}
           </v-chip>
@@ -124,7 +129,7 @@
         </template>
 
         <template #[`item.status`]="{ item }">
-          <v-menu v-if="can('online_orders:update_status')">
+          <v-menu v-if="allowedNext(item.status).length">
             <template #activator="{ props }">
               <v-chip
                 v-bind="props"
@@ -135,35 +140,40 @@
               >
                 <v-icon start size="14">{{ statusMeta(item.status).icon }}</v-icon>
                 {{ statusMeta(item.status).label }}
-                <v-icon v-if="nextStatuses(item.status).length" end size="14">mdi-chevron-down</v-icon>
+                <v-icon end size="14">mdi-chevron-down</v-icon>
               </v-chip>
             </template>
             <v-list density="compact">
-              <v-list-subheader v-if="nextStatuses(item.status).length">نقل الطلب إلى</v-list-subheader>
+              <v-list-subheader>نقل الطلب إلى</v-list-subheader>
               <v-list-item
-                v-for="s in nextStatuses(item.status)"
+                v-for="s in allowedNext(item.status)"
                 :key="s"
-                @click="changeStatus(item, s)"
+                @click="onStatusPick(item, s)"
               >
                 <template #prepend>
                   <v-icon :color="statusMeta(s).color" size="18">{{ statusMeta(s).icon }}</v-icon>
                 </template>
                 <v-list-item-title>{{ statusMeta(s).label }}</v-list-item-title>
               </v-list-item>
-              <v-list-item v-if="!nextStatuses(item.status).length" disabled>
-                <v-list-item-title class="text-caption">لا توجد حالات تالية</v-list-item-title>
-              </v-list-item>
             </v-list>
           </v-menu>
-          <v-chip
-            v-else
-            :color="statusMeta(item.status).color"
-            size="small"
-            variant="flat"
-          >
+          <v-chip v-else :color="statusMeta(item.status).color" size="small" variant="flat">
             <v-icon start size="14">{{ statusMeta(item.status).icon }}</v-icon>
             {{ statusMeta(item.status).label }}
           </v-chip>
+        </template>
+
+        <template #[`item.paymentStatus`]="{ item }">
+          <v-chip
+            v-if="isSaleBacked(item.status) || item.status === 'RETURNED'"
+            :color="paymentMeta(item.paymentStatus).color"
+            size="small"
+            variant="tonal"
+          >
+            <v-icon start size="14">{{ paymentMeta(item.paymentStatus).icon }}</v-icon>
+            {{ paymentMeta(item.paymentStatus).label }}
+          </v-chip>
+          <span v-else class="text-disabled">—</span>
         </template>
 
         <template #[`item.actions`]="{ item }">
@@ -173,19 +183,19 @@
             size="small"
             variant="tonal"
             class="me-1"
-            title="تم التحويل إلى فاتورة"
+            title="الفاتورة المرتبطة بالطلب"
           >
             <v-icon start size="14">mdi-receipt-text-check</v-icon>
             {{ item.convertedInvoiceNumber }}
           </v-chip>
           <v-btn
-            v-else-if="canConvert(item.status) && can('online_orders:convert')"
-            icon="mdi-file-document-plus-outline"
+            v-if="canReturn(item)"
+            icon="mdi-keyboard-return"
             size="small"
             variant="text"
-            color="success"
-            title="إنشاء فاتورة"
-            @click="confirmConvert(item)"
+            color="orange-darken-3"
+            title="إرجاع الطلب"
+            @click="openReturn(item)"
           />
           <BoxyShipmentButton :order="item" class="me-1" />
           <v-btn
@@ -205,7 +215,7 @@
             @click="openDialog(item)"
           />
           <v-btn
-            v-if="canCancel(item.status) && can('online_orders:update_status')"
+            v-if="canCancel(item.status)"
             icon="mdi-cancel"
             size="small"
             variant="text"
@@ -257,12 +267,18 @@
                 />
               </v-col>
               <v-col cols="12" md="6">
+                <CustomerSelector
+                  v-model="formData.customerId"
+                  @customer-selected="onCustomerSelected"
+                />
+              </v-col>
+              <v-col cols="12" md="6">
                 <v-text-field
                   v-model="formData.customerName"
-                  label="اسم العميل *"
+                  label="اسم المستلم *"
                   variant="outlined"
                   density="comfortable"
-                  :rules="[(v) => !!v || 'اسم العميل مطلوب']"
+                  :rules="[(v) => !!v || 'اسم المستلم مطلوب']"
                 />
               </v-col>
               <v-col cols="12" md="6">
@@ -287,6 +303,32 @@
                   label="العنوان"
                   variant="outlined"
                   density="comfortable"
+                />
+              </v-col>
+              <v-col cols="12" md="6">
+                <v-select
+                  v-model="formData.branchId"
+                  :items="branchItems"
+                  item-title="name"
+                  item-value="id"
+                  label="الفرع"
+                  variant="outlined"
+                  density="comfortable"
+                  clearable
+                  hint="يُخصم منه المخزون عند التأكيد"
+                  persistent-hint
+                />
+              </v-col>
+              <v-col cols="12" md="6">
+                <v-select
+                  v-model="formData.warehouseId"
+                  :items="warehouseItems"
+                  item-title="name"
+                  item-value="id"
+                  label="المخزن"
+                  variant="outlined"
+                  density="comfortable"
+                  clearable
                 />
               </v-col>
               <v-col cols="12">
@@ -329,16 +371,25 @@
                       :loading="productLoading"
                       no-filter
                       hide-details
-                      density="compact"
                       variant="plain"
                       placeholder="ابحث عن منتج"
                       :menu-props="{ maxHeight: 320 }"
                       @update:search="onProductSearch"
+                      @focus="onProductFocus"
                       @update:model-value="(val) => onProductSelected(item, val)"
                     >
                       <template #no-data>
                         <div class="px-3 py-2 text-caption text-medium-emphasis">
                           {{ productLoading ? 'جارٍ البحث…' : 'اكتب اسم المنتج للبحث' }}
+                        </div>
+                      </template>
+                      <template #append-item>
+                        <div
+                          v-if="productHasMore"
+                          v-intersect="onProductIntersect"
+                          class="px-3 py-2 text-center text-caption text-medium-emphasis"
+                        >
+                          {{ productLoading ? 'جارٍ التحميل…' : 'مرّر لتحميل المزيد' }}
                         </div>
                       </template>
                     </v-autocomplete>
@@ -367,7 +418,13 @@
                     {{ formatAmount(lineTotal(item)) }}
                   </td>
                   <td>
-                    <v-btn icon="mdi-close" size="x-small" variant="text" color="error" @click="removeItem(idx)" />
+                    <v-btn
+                      icon="mdi-close"
+                      size="x-small"
+                      variant="text"
+                      color="error"
+                      @click="removeItem(idx)"
+                    />
                   </td>
                 </tr>
               </tbody>
@@ -395,7 +452,9 @@
           </span>
           <v-spacer />
           <v-btn variant="text" @click="dialog = false">إلغاء</v-btn>
-          <v-btn color="primary" variant="elevated" :loading="saving" @click="handleSubmit">حفظ</v-btn>
+          <v-btn color="primary" variant="elevated" :loading="saving" @click="handleSubmit"
+            >حفظ</v-btn
+          >
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -421,7 +480,12 @@
           />
 
           <div v-if="!historyLoading" class="text-subtitle-2 mt-2 mb-2">سجل الحالات</div>
-          <v-timeline v-if="!historyLoading && historyItems.length" side="end" align="start" density="compact">
+          <v-timeline
+            v-if="!historyLoading && historyItems.length"
+            side="end"
+            align="start"
+            density="compact"
+          >
             <v-timeline-item
               v-for="h in historyItems"
               :key="h.id"
@@ -437,7 +501,9 @@
                   </span>
                   <strong>{{ statusMeta(h.toStatus).label }}</strong>
                 </div>
-                <span class="text-caption text-medium-emphasis">{{ formatDateTime(h.createdAt) }}</span>
+                <span class="text-caption text-medium-emphasis">{{
+                  formatDateTime(h.createdAt)
+                }}</span>
               </div>
               <div v-if="h.note" class="text-caption mt-1">{{ h.note }}</div>
               <div v-if="h.changedByName" class="text-caption text-medium-emphasis">
@@ -445,7 +511,9 @@
               </div>
             </v-timeline-item>
           </v-timeline>
-          <div v-else-if="!historyLoading" class="text-center text-medium-emphasis py-6">لا يوجد سجل</div>
+          <div v-else-if="!historyLoading" class="text-center text-medium-emphasis py-6">
+            لا يوجد سجل
+          </div>
         </v-card-text>
         <v-divider />
         <v-card-actions class="pa-3">
@@ -455,23 +523,128 @@
       </v-card>
     </v-dialog>
 
-    <ConfirmDialog
-      v-model="convertDialog"
-      title="إنشاء فاتورة"
-      message="سيتم إنشاء فاتورة بيع من هذا الطلب وخصم الكمية من المخزون. لا يمكن التراجع."
-      :details="selected ? `الطلب: ${selected.orderNumber} — الإجمالي: ${formatAmount(selected.totalAmount)}` : ''"
-      type="info"
-      confirm-text="إنشاء فاتورة"
-      cancel-text="إلغاء"
-      :loading="converting"
-      @confirm="handleConvert"
-      @cancel="convertDialog = false"
-    />
+    <!-- Confirm order → creates the linked sale, deducts stock, records payment -->
+    <v-dialog v-model="confirmDialog" max-width="480">
+      <v-card>
+        <v-card-title class="d-flex align-center gap-2">
+          <v-icon color="info">mdi-check-circle-outline</v-icon>
+          <span>تأكيد الطلب</span>
+        </v-card-title>
+        <v-divider />
+        <v-card-text class="pt-4">
+          <v-alert type="info" variant="tonal" density="comfortable" class="mb-3">
+            سيتم إنشاء فاتورة بيع وخصم الكميات من المخزون. تأكد من توفر الكمية.
+          </v-alert>
+          <div v-if="selected" class="text-body-2 mb-3">
+            الطلب: <strong>{{ selected.orderNumber }}</strong> — الإجمالي:
+            <strong>{{ formatAmount(selected.totalAmount) }}</strong>
+          </div>
+          <v-row dense>
+            <v-col cols="7">
+              <v-text-field
+                v-model.number="confirmPayment.paidAmount"
+                type="number"
+                min="0"
+                label="المبلغ المدفوع (اختياري)"
+                variant="outlined"
+                density="comfortable"
+                hide-details
+              />
+            </v-col>
+            <v-col cols="5">
+              <v-select
+                v-model="confirmPayment.paymentMethod"
+                :items="[
+                  { title: 'نقدي', value: 'cash' },
+                  { title: 'بطاقة', value: 'card' },
+                ]"
+                label="طريقة الدفع"
+                variant="outlined"
+                density="comfortable"
+                hide-details
+              />
+            </v-col>
+          </v-row>
+        </v-card-text>
+        <v-divider />
+        <v-card-actions class="pa-3">
+          <v-spacer />
+          <v-btn variant="text" @click="confirmDialog = false">إلغاء</v-btn>
+          <v-btn color="primary" variant="elevated" :loading="confirming" @click="handleConfirm">
+            تأكيد وخصم المخزون
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Return (full / partial) -->
+    <v-dialog v-model="returnDialog" max-width="560" scrollable>
+      <v-card>
+        <v-card-title class="d-flex align-center gap-2">
+          <v-icon color="orange-darken-3">mdi-keyboard-return</v-icon>
+          <span>إرجاع الطلب {{ selected?.orderNumber || '' }}</span>
+        </v-card-title>
+        <v-divider />
+        <v-card-text class="pt-4" style="max-height: 60vh">
+          <v-alert type="warning" variant="tonal" density="comfortable" class="mb-3">
+            حدّد الكميات المرتجعة. ستُعاد الكميات إلى المخزون وتُخصم من المبيعات والأرباح.
+          </v-alert>
+          <v-table v-if="returnLines.length" density="compact">
+            <thead>
+              <tr>
+                <th class="text-right">المنتج</th>
+                <th style="width: 90px">المُباع</th>
+                <th style="width: 120px">المرتجع</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(l, idx) in returnLines" :key="idx">
+                <td>{{ l.productName }}</td>
+                <td>{{ l.ordered }}</td>
+                <td>
+                  <v-text-field
+                    v-model.number="l.quantity"
+                    type="number"
+                    min="0"
+                    :max="l.ordered"
+                    variant="plain"
+                    density="compact"
+                    hide-details
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </v-table>
+          <div v-else class="text-center text-medium-emphasis py-4">
+            لا توجد أصناف قابلة للإرجاع.
+          </div>
+        </v-card-text>
+        <v-divider />
+        <v-card-actions class="pa-3">
+          <span class="text-caption ms-2">إجمالي المرتجع: {{ returnTotalQty }}</span>
+          <v-spacer />
+          <v-btn variant="text" @click="returnDialog = false">إلغاء</v-btn>
+          <v-btn
+            color="orange-darken-3"
+            variant="elevated"
+            :loading="returning"
+            :disabled="returnTotalQty <= 0"
+            @click="handleReturn"
+          >
+            تنفيذ الإرجاع
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
 
     <ConfirmDialog
       v-model="cancelDialog"
       title="إلغاء الطلب"
-      message="هل أنت متأكد من إلغاء هذا الطلب؟ لن يتم إنشاء أي فاتورة."
+      :message="
+        selected && isSaleBacked(selected.status)
+          ? 'سيتم إلغاء الطلب وإلغاء فاتورته وإعادة الكميات إلى المخزون. هل أنت متأكد؟'
+          : 'هل أنت متأكد من إلغاء هذا الطلب؟'
+      "
       :details="selected ? `الطلب: ${selected.orderNumber}` : ''"
       type="warning"
       confirm-text="إلغاء الطلب"
@@ -495,18 +668,22 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue';
+import { ref, reactive, onMounted, computed } from 'vue';
 import { useOnlineOrderStore } from '@/stores/onlineOrder';
 import { useSalesChannelStore } from '@/stores/salesChannel';
 import { useProductStore } from '@/stores/product';
+import { useInventoryStore } from '@/stores';
 import { usePermissions } from '@/composables/usePermissions';
 import {
+  ORDER_STATUS,
   ORDER_STATUSES,
   statusMeta,
   nextStatuses,
   isEditableStatus,
+  transitionPermission,
 } from '@/constants/orders';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
+import CustomerSelector from '@/components/CustomerSelector.vue';
 import PaginationControls from '@/components/PaginationControls.vue';
 import PageHeader from '@/components/PageHeader.vue';
 import BoxyShipmentButton from '@/components/delivery/BoxyShipmentButton.vue';
@@ -515,13 +692,46 @@ import BoxyShipmentPanel from '@/components/delivery/BoxyShipmentPanel.vue';
 const orderStore = useOnlineOrderStore();
 const channelStore = useSalesChannelStore();
 const productStore = useProductStore();
+const inventoryStore = useInventoryStore();
 const { can } = usePermissions();
+
+// Payment status (الدفع) display metadata — derived on the backend from the
+// linked sale's totals.
+const PAYMENT_STATUS_META = {
+  UNPAID: { label: 'غير مدفوع', color: 'error', icon: 'mdi-cash-remove' },
+  PARTIAL: { label: 'مدفوع جزئياً', color: 'warning', icon: 'mdi-cash-clock' },
+  PAID: { label: 'مدفوع بالكامل', color: 'success', icon: 'mdi-cash-check' },
+  REFUNDED: { label: 'مسترجع', color: 'orange-darken-3', icon: 'mdi-cash-refund' },
+};
+const paymentMeta = (s) =>
+  PAYMENT_STATUS_META[s] || { label: '—', color: 'grey', icon: 'mdi-cash' };
+
+// Statuses in which a linked sale exists → eligible for payment/return display.
+const SALE_BACKED = [
+  ORDER_STATUS.CONFIRMED,
+  ORDER_STATUS.READY_FOR_DELIVERY,
+  ORDER_STATUS.OUT_FOR_DELIVERY,
+  ORDER_STATUS.DELIVERED,
+];
+const isSaleBacked = (status) => SALE_BACKED.includes(status);
+
+// Per-transition permission gating for the status menu.
+const allowedNext = (status) => nextStatuses(status).filter((s) => can(transitionPermission(s)));
+
+const canReturn = (item) =>
+  !!item.convertedInvoiceNumber && isSaleBacked(item.status) && can('online_orders:return');
 
 const dialog = ref(false);
 const deleteDialog = ref(false);
 const cancelDialog = ref(false);
-const convertDialog = ref(false);
-const converting = ref(false);
+// Confirm-with-payment (creates the linked sale + deducts stock).
+const confirmDialog = ref(false);
+const confirming = ref(false);
+const confirmPayment = reactive({ paidAmount: 0, paymentMethod: 'cash' });
+// Return (full / partial) of a confirmed order.
+const returnDialog = ref(false);
+const returning = ref(false);
+const returnLines = ref([]); // [{ productId, productName, ordered, quantity }]
 const historyDialog = ref(false);
 const historyLoading = ref(false);
 const historyOrder = ref(null);
@@ -531,19 +741,21 @@ const selected = ref(null);
 
 const historyItems = computed(() => historyOrder.value?.history || []);
 
-// A non-terminal order (one whose workflow still allows CANCELLED) can be cancelled.
-const canCancel = (status) => nextStatuses(status).includes('CANCELLED');
-
-// "Create Invoice" is only offered for CONFIRMED or PROCESSING orders.
-const canConvert = (status) => ['CONFIRMED', 'PROCESSING'].includes(status);
+// A non-terminal order (one whose workflow still allows CANCELLED) can be
+// cancelled — and the user must hold the cancel permission.
+const canCancel = (status) =>
+  nextStatuses(status).includes(ORDER_STATUS.CANCELLED) && can('online_orders:cancel');
 
 const emptyForm = () => ({
   channelId: null,
+  customerId: null,
   customerName: '',
   customerPhone: '',
   customerAddress: '',
   province: '',
   notes: '',
+  branchId: inventoryStore.selectedBranchId || null,
+  warehouseId: inventoryStore.selectedWarehouseId || null,
   totalAmount: 0,
   items: [],
 });
@@ -556,8 +768,12 @@ const headers = [
   { title: 'المحافظة', key: 'province' },
   { title: 'الإجمالي', key: 'totalAmount' },
   { title: 'الحالة', key: 'status', sortable: false },
+  { title: 'الدفع', key: 'paymentStatus', sortable: false },
   { title: 'إجراءات', key: 'actions', sortable: false },
 ];
+
+const branchItems = computed(() => inventoryStore.branches || []);
+const warehouseItems = computed(() => inventoryStore.warehouses || []);
 
 const channelItems = computed(() => channelStore.channels.filter((c) => c.isActive !== false));
 const statusFilterItems = ORDER_STATUSES.map((s) => ({ title: statusMeta(s).label, value: s }));
@@ -582,9 +798,15 @@ const removeItem = (idx) => formData.value.items.splice(idx, 1);
 // ── Product autocomplete (server search over /products) ─────────────────────
 // `selectedProducts` keeps already-picked products in the option pool so their
 // labels survive subsequent searches; `searchResults` holds the live query.
+const PRODUCT_PAGE_SIZE = 20;
 const searchResults = ref([]);
 const selectedProducts = ref({}); // id → { id, name, sellingPrice, sku }
 const productLoading = ref(false);
+// Server-side pagination for the autocomplete (infinite scroll).
+const productQuery = ref('');
+const productPage = ref(1);
+const productTotalPages = ref(1);
+const productHasMore = computed(() => productPage.value < productTotalPages.value);
 
 const productOptions = computed(() => {
   const map = new Map();
@@ -593,28 +815,55 @@ const productOptions = computed(() => {
   return [...map.values()];
 });
 
+// Fetch a page of products. `append` keeps prior results (infinite scroll),
+// otherwise the list is reset for a fresh query. An empty query loads the
+// default first page so the menu shows options immediately on focus.
+const fetchProductList = async (q = '', { append = false } = {}) => {
+  if (productLoading.value) return;
+  const page = append ? productPage.value + 1 : 1;
+  productLoading.value = true;
+  try {
+    const params = { page, limit: PRODUCT_PAGE_SIZE };
+    if (q) params.search = q;
+    const res = await productStore.fetch(params, { silent: true });
+    const list = Array.isArray(res?.data) ? res.data : [];
+    const mapped = list.map((p) => ({
+      id: p.id,
+      name: p.name,
+      sellingPrice: p.sellingPrice,
+      sku: p.sku,
+    }));
+    searchResults.value = append ? [...searchResults.value, ...mapped] : mapped;
+    productQuery.value = q;
+    productPage.value = Number(res?.meta?.page) || page;
+    productTotalPages.value = Number(res?.meta?.totalPages) || productPage.value;
+  } catch {
+    // keep previous results
+  } finally {
+    productLoading.value = false;
+  }
+};
+
 let productSearchTimer = null;
 const onProductSearch = (term) => {
   clearTimeout(productSearchTimer);
   const q = (term || '').trim();
-  if (q.length < 1) return;
-  productSearchTimer = setTimeout(async () => {
-    productLoading.value = true;
-    try {
-      const res = await productStore.fetch({ search: q, limit: 20 }, { silent: true });
-      const list = Array.isArray(res?.data) ? res.data : [];
-      searchResults.value = list.map((p) => ({
-        id: p.id,
-        name: p.name,
-        sellingPrice: p.sellingPrice,
-        sku: p.sku,
-      }));
-    } catch {
-      // keep previous results
-    } finally {
-      productLoading.value = false;
-    }
-  }, 300);
+  // Ignore search events echoing the current query (e.g. after selection) to
+  // avoid clobbering the loaded pages.
+  if (q === productQuery.value && searchResults.value.length) return;
+  productSearchTimer = setTimeout(() => fetchProductList(q), 300);
+};
+
+// Preload a default list on focus so the dropdown isn't empty before typing.
+const onProductFocus = () => {
+  if (!searchResults.value.length) fetchProductList('');
+};
+
+// Infinite scroll: load the next page when the sentinel scrolls into view.
+const onProductIntersect = (isIntersecting) => {
+  if (isIntersecting && productHasMore.value && !productLoading.value) {
+    fetchProductList(productQuery.value, { append: true });
+  }
 };
 
 const onProductSelected = (item, productId) => {
@@ -647,6 +896,9 @@ const seedProductOptions = (items) => {
   }
   selectedProducts.value = seed;
   searchResults.value = [];
+  productQuery.value = '';
+  productPage.value = 1;
+  productTotalPages.value = 1;
 };
 
 const openDialog = (order = null) => {
@@ -656,11 +908,14 @@ const openDialog = (order = null) => {
     orderStore.fetchOrder(order.id).then((full) => {
       formData.value = {
         channelId: full.channelId,
+        customerId: full.customerId ?? null,
         customerName: full.customerName ?? '',
         customerPhone: full.customerPhone ?? '',
         customerAddress: full.customerAddress ?? '',
         province: full.province ?? '',
         notes: full.notes ?? '',
+        branchId: full.branchId ?? null,
+        warehouseId: full.warehouseId ?? null,
         totalAmount: Number(full.totalAmount) || 0,
         items: (full.items || []).map((it) => ({
           productId: it.productId,
@@ -684,11 +939,14 @@ const openDialog = (order = null) => {
 const buildPayload = () => {
   const payload = {
     channelId: formData.value.channelId,
+    customerId: formData.value.customerId || null,
     customerName: formData.value.customerName?.trim(),
     customerPhone: formData.value.customerPhone?.trim() || null,
     customerAddress: formData.value.customerAddress?.trim() || null,
     province: formData.value.province?.trim() || null,
     notes: formData.value.notes?.trim() || null,
+    branchId: formData.value.branchId || null,
+    warehouseId: formData.value.warehouseId || null,
   };
   if (formData.value.items.length) {
     payload.items = formData.value.items
@@ -723,11 +981,87 @@ const handleSubmit = async () => {
   }
 };
 
-const changeStatus = async (order, status) => {
+// Status menu dispatcher: CONFIRMED/CANCELLED/RETURNED open dedicated dialogs
+// (they have side effects — stock/payment/return); plain fulfilment steps apply
+// directly.
+const onStatusPick = (order, status) => {
+  selected.value = order;
+  if (status === ORDER_STATUS.CONFIRMED) {
+    confirmPayment.paidAmount = 0;
+    confirmPayment.paymentMethod = 'cash';
+    confirmDialog.value = true;
+  } else if (status === ORDER_STATUS.CANCELLED) {
+    cancelDialog.value = true;
+  } else if (status === ORDER_STATUS.RETURNED) {
+    openReturn(order);
+  } else {
+    changeStatus(order, status);
+  }
+};
+
+const changeStatus = async (order, status, options = {}) => {
   try {
-    await orderStore.changeStatus(order.id, status);
+    await orderStore.changeStatus(order.id, status, options);
+  } catch {
+    // surfaced via notification store (backend Arabic message, incl. oversell)
+  }
+};
+
+// Confirm an order → creates the linked sale, deducts stock, records payment.
+const handleConfirm = async () => {
+  confirming.value = true;
+  try {
+    await orderStore.changeStatus(selected.value.id, ORDER_STATUS.CONFIRMED, {
+      paidAmount: Number(confirmPayment.paidAmount) || 0,
+      paymentMethod: confirmPayment.paymentMethod || 'cash',
+    });
+    confirmDialog.value = false;
+    await orderStore.fetchOrders();
+  } catch {
+    // surfaced via notification store (e.g. الكمية غير كافية)
+  } finally {
+    confirming.value = false;
+  }
+};
+
+// ── Returns (full / partial) ────────────────────────────────────────────────
+const openReturn = async (order) => {
+  selected.value = order;
+  returnLines.value = [];
+  returnDialog.value = true;
+  try {
+    const full = await orderStore.fetchOrder(order.id);
+    returnLines.value = (full.items || [])
+      .filter((it) => it.productId)
+      .map((it) => ({
+        productId: it.productId,
+        productName: it.productName,
+        ordered: Number(it.quantity) || 0,
+        quantity: Number(it.quantity) || 0, // default to full return
+      }));
   } catch {
     // surfaced via notification store
+  }
+};
+
+const returnTotalQty = computed(() =>
+  returnLines.value.reduce((s, l) => s + (Number(l.quantity) || 0), 0)
+);
+
+const handleReturn = async () => {
+  const items = returnLines.value
+    .filter((l) => Number(l.quantity) > 0)
+    .map((l) => ({ productId: l.productId, quantity: Number(l.quantity) }));
+  if (!items.length) return;
+  returning.value = true;
+  try {
+    await orderStore.returnOrder(selected.value.id, { items });
+    returnDialog.value = false;
+    await orderStore.fetchOrders();
+  } catch {
+    // surfaced via notification store
+  } finally {
+    returning.value = false;
   }
 };
 
@@ -763,32 +1097,15 @@ const handleDelete = async () => {
   }
 };
 
-// Converting creates a real sale invoice from the order (and deducts stock).
-const confirmConvert = (order) => {
-  selected.value = order;
-  convertDialog.value = true;
-};
-const handleConvert = async () => {
-  converting.value = true;
-  try {
-    await orderStore.convertOrder(selected.value.id);
-    convertDialog.value = false;
-    await orderStore.fetchOrders();
-  } catch {
-    // surfaced via notification store
-  } finally {
-    converting.value = false;
-  }
-};
-
-// Cancelling sets the workflow status to CANCELLED — it never creates an invoice.
+// Cancelling a confirmed (sale-backed) order reverses the linked sale and
+// restores stock; a pre-confirm order is simply marked cancelled.
 const confirmCancel = (order) => {
   selected.value = order;
   cancelDialog.value = true;
 };
 const handleCancel = async () => {
   try {
-    await orderStore.changeStatus(selected.value.id, 'CANCELLED');
+    await orderStore.changeStatus(selected.value.id, ORDER_STATUS.CANCELLED);
     cancelDialog.value = false;
   } catch {
     // surfaced via notification store
@@ -830,6 +1147,16 @@ const changeItemsPerPage = (limit) => {
   orderStore.fetchOrders({ page: 1 });
 };
 
+// Fill the contact snapshot from a chosen/created customer (اختيار عميل موجود
+// أو إنشاء جديد). The fields stay editable for delivery-specific overrides.
+const onCustomerSelected = (customer) => {
+  if (!customer) return;
+  formData.value.customerName = customer.name || formData.value.customerName;
+  if (customer.phone) formData.value.customerPhone = customer.phone;
+  if (customer.address) formData.value.customerAddress = customer.address;
+  if (customer.city && !formData.value.province) formData.value.province = customer.city;
+};
+
 onMounted(() => {
   orderStore.fetchOrders();
   // Channels populate the filter + the new-order form's channel picker. This is
@@ -839,6 +1166,9 @@ onMounted(() => {
   if (can('sales_channels:read') && !channelStore.channels.length) {
     channelStore.fetchChannels({ page: 1, limit: 100 });
   }
+  // Branch / warehouse pickers for the create form (best-effort, silent).
+  if (!branchItems.value.length) inventoryStore.fetchBranches?.().catch(() => {});
+  if (!warehouseItems.value.length) inventoryStore.fetchWarehouses?.().catch(() => {});
 });
 </script>
 

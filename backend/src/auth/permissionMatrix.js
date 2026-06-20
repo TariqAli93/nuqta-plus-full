@@ -86,8 +86,18 @@ const PERMISSION_MATRIX = {
   'online_orders:create': CASHIER,
   'online_orders:read': ALL,
   'online_orders:update': CASHIER,
+  // Generic status moves (e.g. بدء المعالجة). Specific workflow actions below
+  // are governed by their own permissions, enforced per-transition.
   'online_orders:update_status': CASHIER,
-  // Converting an order creates a real invoice → same scope as sales:create.
+  // Confirming creates a real invoice + deducts stock → same scope as
+  // sales:create. Preparing/delivering are operational (cashier). Cancelling a
+  // confirmed order reverses stock, and returns reduce revenue → manager-level.
+  'online_orders:confirm': CASHIER,
+  'online_orders:prepare': CASHIER,
+  'online_orders:deliver': CASHIER,
+  'online_orders:cancel': MANAGER,
+  'online_orders:return': MANAGER,
+  // Legacy convert-to-invoice endpoint (kept for backward compat).
   'online_orders:convert': CASHIER,
   'online_orders:delete': MANAGER,
   'view:online_orders': ALL,

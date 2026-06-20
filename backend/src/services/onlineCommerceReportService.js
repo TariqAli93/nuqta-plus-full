@@ -11,6 +11,7 @@ import {
 } from '../models/index.js';
 import { and, eq, ne, gte, lte, sql } from 'drizzle-orm';
 import { branchFilterFor } from './scopeService.js';
+import { isValidOrderStatus } from '../constants/orders.js';
 
 /**
  * Online Commerce reports — analytics over the sales-channel dimension and the
@@ -133,21 +134,42 @@ export class OnlineCommerceReportService {
   }
 
   /** Reports 2, 3, 4, 5: orders / delivered / returned / return % by channel. */
-  async ordersByChannel(filters) {
+  async ordersByChannel(filters, actingUser) {
     const db = await getDb();
     const from = ymd(filters.dateFrom);
     const to = ymd(filters.dateTo);
 
+    // Branch scope (same resolver as the sales side). -1 → no access.
+    const branch = resolveBranch(filters, actingUser);
+    const emptySummary = {
+      totalOrders: 0,
+      newCount: 0,
+      delivered: 0,
+      returned: 0,
+      cancelled: 0,
+      totalOrderValue: 0,
+      returnPercentage: 0,
+    };
+    if (branch === -1) return { ordersByChannel: [], summary: emptySummary };
+
     const conds = [...dateConds(onlineOrders.createdAt, from, to)];
     if (filters.channelId) conds.push(eq(onlineOrders.channelId, Number(filters.channelId)));
+    if (branch !== null) conds.push(eq(onlineOrders.branchId, branch));
+    if (filters.status && isValidOrderStatus(filters.status)) {
+      conds.push(eq(onlineOrders.status, filters.status));
+    }
+    if (filters.userId) conds.push(eq(onlineOrders.createdBy, Number(filters.userId)));
 
     const rows = await db
       .select({
         channelId: onlineOrders.channelId,
         channelCode: salesChannels.code,
         channelName: salesChannels.name,
-        ordersCount: sql`COUNT(*)`,
-        totalOrderValue: sql`COALESCE(SUM(${onlineOrders.totalAmount}::numeric), 0)`,
+        // "عدد الطلبات" and value EXCLUDE cancelled orders — a cancelled order is
+        // never a real sale (spec: cancelled must not count as sales).
+        ordersCount: sql`COALESCE(SUM(CASE WHEN ${onlineOrders.status} <> 'CANCELLED' THEN 1 ELSE 0 END), 0)`,
+        totalOrderValue: sql`COALESCE(SUM(CASE WHEN ${onlineOrders.status} <> 'CANCELLED' THEN ${onlineOrders.totalAmount}::numeric ELSE 0 END), 0)`,
+        newCount: sql`COALESCE(SUM(CASE WHEN ${onlineOrders.status} = 'NEW' THEN 1 ELSE 0 END), 0)`,
         delivered: sql`COALESCE(SUM(CASE WHEN ${onlineOrders.status} = 'DELIVERED' THEN 1 ELSE 0 END), 0)`,
         returned: sql`COALESCE(SUM(CASE WHEN ${onlineOrders.status} = 'RETURNED' THEN 1 ELSE 0 END), 0)`,
         cancelled: sql`COALESCE(SUM(CASE WHEN ${onlineOrders.status} = 'CANCELLED' THEN 1 ELSE 0 END), 0)`,
@@ -173,6 +195,7 @@ export class OnlineCommerceReportService {
         channelName: r.channelName,
         ordersCount: num(r.ordersCount),
         totalOrderValue: num(r.totalOrderValue),
+        newCount: num(r.newCount),
         delivered,
         returned,
         cancelled: num(r.cancelled),
@@ -183,13 +206,14 @@ export class OnlineCommerceReportService {
     const summary = byChannel.reduce(
       (acc, c) => {
         acc.totalOrders += c.ordersCount;
+        acc.newCount += c.newCount;
         acc.delivered += c.delivered;
         acc.returned += c.returned;
         acc.cancelled += c.cancelled;
         acc.totalOrderValue += c.totalOrderValue;
         return acc;
       },
-      { totalOrders: 0, delivered: 0, returned: 0, cancelled: 0, totalOrderValue: 0 }
+      { ...emptySummary }
     );
     summary.returnPercentage = rate(summary.delivered, summary.returned);
 
@@ -284,7 +308,7 @@ export class OnlineCommerceReportService {
   async widgets(filters, actingUser, { includeProfit = true } = {}) {
     const [salesRev, orders] = await Promise.all([
       this._salesRevenueByChannel(filters, actingUser),
-      this.ordersByChannel(filters),
+      this.ordersByChannel(filters, actingUser),
     ]);
 
     const maxBy = (rows, field) =>
@@ -306,17 +330,27 @@ export class OnlineCommerceReportService {
     const topRev = maxBy(inCurrency(salesRev.revenueByChannel), 'netRevenue');
 
     let topProfitChannel = null;
+    let netProfit = 0;
     if (includeProfit) {
       const { profitByChannel } = await this.profitByChannel(filters, actingUser);
       const tp = maxBy(inCurrency(profitByChannel), 'grossProfit');
       topProfitChannel = tp
         ? { channelId: tp.channelId, channelName: tp.channelName, grossProfit: tp.grossProfit, currency: tp.currency }
         : null;
+      // Net online profit in the ranking currency (spec dashboard metric).
+      netProfit = inCurrency(profitByChannel).reduce((s, r) => s + (Number(r.grossProfit) || 0), 0);
     }
 
     const { delivered, returned } = orders.summary;
     const settled = delivered + returned;
     const round = (n) => Number(n.toFixed(2));
+
+    // Total online sales = net revenue in the ranking currency (excludes
+    // cancelled sales; returns already subtracted in revenueByChannel).
+    const totalSales = inCurrency(salesRev.revenueByChannel).reduce(
+      (s, r) => s + (Number(r.netRevenue) || 0),
+      0
+    );
 
     return {
       currency,
@@ -330,7 +364,14 @@ export class OnlineCommerceReportService {
       topProfitChannel,
       deliverySuccessRate: settled > 0 ? round((delivered / settled) * 100) : 0,
       returnRate: settled > 0 ? round((returned / settled) * 100) : 0,
-      totals: orders.summary,
+      // Headline counts + money for the dashboard. `completed` = delivered.
+      totals: {
+        ...orders.summary,
+        completed: orders.summary.delivered,
+        totalSales: round(totalSales),
+        netProfit: round(netProfit),
+        currency,
+      },
     };
   }
 
@@ -338,7 +379,7 @@ export class OnlineCommerceReportService {
   async getOverview(filters, actingUser) {
     const [salesRev, orders] = await Promise.all([
       this._salesRevenueByChannel(filters, actingUser),
-      this.ordersByChannel(filters),
+      this.ordersByChannel(filters, actingUser),
     ]);
     return {
       filters: {
@@ -346,6 +387,8 @@ export class OnlineCommerceReportService {
         dateTo: ymd(filters.dateTo),
         channelId: filters.channelId ? Number(filters.channelId) : null,
         currency: filters.currency || 'ALL',
+        status: filters.status || null,
+        userId: filters.userId ? Number(filters.userId) : null,
       },
       salesByChannel: salesRev.salesByChannel, // #1
       ordersByChannel: orders.ordersByChannel, // #2

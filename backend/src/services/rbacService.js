@@ -138,6 +138,13 @@ class RbacService {
       'delivery_shipments:change_provider',
       'delivery_logs:view',
       'delivery_reports:view',
+      // Granular online-order workflow permissions (added with the online-sales
+      // overhaul). Backfilled once to the matrix-assigned roles on upgrade.
+      'online_orders:confirm',
+      'online_orders:prepare',
+      'online_orders:deliver',
+      'online_orders:cancel',
+      'online_orders:return',
     ];
     for (const key of BACKFILL_KEYS) {
       const pid = permIdByKey.get(key);

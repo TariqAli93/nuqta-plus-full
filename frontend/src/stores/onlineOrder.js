@@ -11,6 +11,8 @@ export const useOnlineOrderStore = defineStore('onlineOrder', {
       search: '',
       status: null,
       channelId: null,
+      branchId: null,
+      createdBy: null,
       dateFrom: null,
       dateTo: null,
     },
@@ -33,6 +35,8 @@ export const useOnlineOrderStore = defineStore('onlineOrder', {
           ...(this.filters.search ? { search: this.filters.search } : {}),
           ...(this.filters.status ? { status: this.filters.status } : {}),
           ...(this.filters.channelId ? { channelId: this.filters.channelId } : {}),
+          ...(this.filters.branchId ? { branchId: this.filters.branchId } : {}),
+          ...(this.filters.createdBy ? { createdBy: this.filters.createdBy } : {}),
           ...(this.filters.dateFrom ? { dateFrom: this.filters.dateFrom } : {}),
           ...(this.filters.dateTo ? { dateTo: this.filters.dateTo } : {}),
           ...params,
@@ -110,19 +114,40 @@ export const useOnlineOrderStore = defineStore('onlineOrder', {
       }
     },
 
-    async changeStatus(id, status) {
+    async changeStatus(id, status, options = {}) {
       const notificationStore = useNotificationStore();
       try {
-        const response = await api.patch(`/online-orders/${id}/status`, { status });
+        const response = await api.patch(`/online-orders/${id}/status`, { status, ...options });
         const updated = response.data?.data || response.data;
+        // Replace the whole row so the payment badge / invoice number refresh too.
         const index = this.orders.findIndex((o) => o.id === id);
         if (index !== -1 && updated) {
-          this.orders[index] = { ...this.orders[index], status: updated.status };
+          this.orders[index] = { ...this.orders[index], ...updated };
         }
+        if (this.currentOrder?.id === id && updated) this.currentOrder = updated;
         notificationStore.success('تم تحديث حالة الطلب');
         return updated;
       } catch (error) {
         notificationStore.error(error?.message || 'فشل تحديث حالة الطلب');
+        throw error;
+      }
+    },
+
+    /** Full or partial return of a confirmed order — restores stock via the sale. */
+    async returnOrder(id, payload) {
+      const notificationStore = useNotificationStore();
+      try {
+        const response = await api.post(`/online-orders/${id}/return`, payload);
+        const data = response.data?.data || response.data;
+        const index = this.orders.findIndex((o) => o.id === id);
+        if (index !== -1 && data?.order) {
+          this.orders[index] = { ...this.orders[index], ...data.order };
+        }
+        if (this.currentOrder?.id === id && data?.order) this.currentOrder = data.order;
+        notificationStore.success('تم تسجيل الإرجاع بنجاح');
+        return data;
+      } catch (error) {
+        notificationStore.error(error?.message || 'فشل تسجيل إرجاع الطلب');
         throw error;
       }
     },

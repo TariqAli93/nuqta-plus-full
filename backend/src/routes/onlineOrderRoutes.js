@@ -50,10 +50,24 @@ export default async function onlineOrderRoutes(fastify) {
   });
 
   fastify.patch('/:id/status', {
-    onRequest: [fastify.authenticate, fastify.authorize('online_orders:update_status')],
+    // Coarse gate: must be able to access orders. The SPECIFIC action permission
+    // (confirm / prepare / deliver / cancel / return) is enforced in the
+    // controller via transitionPermission() so each transition is governed by
+    // its own Arabic permission.
+    onRequest: [fastify.authenticate, fastify.authorize('online_orders:read')],
     handler: onlineOrderController.updateStatus,
     schema: {
-      description: 'Change online order status',
+      description: 'Change online order status (per-action permission enforced in handler)',
+      tags: ['online-orders'],
+      security: [{ bearerAuth: [] }],
+    },
+  });
+
+  fastify.post('/:id/return', {
+    onRequest: [fastify.authenticate, fastify.authorize('online_orders:return')],
+    handler: onlineOrderController.returnOrder,
+    schema: {
+      description: 'Return (full or partial) a confirmed online order',
       tags: ['online-orders'],
       security: [{ bearerAuth: [] }],
     },

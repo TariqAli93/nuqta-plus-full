@@ -276,11 +276,17 @@ export const onlineOrderItemSchema = z.object({
 
 export const onlineOrderSchema = z.object({
   channelId: z.number().int().positive('A sales channel is required'),
+  // Optional link to an existing customer (اختيار عميل موجود). When omitted the
+  // name/phone snapshot still applies (walk-in/manual intake).
+  customerId: z.number().int().positive().nullable().optional(),
   customerName: z.string().trim().min(2, 'Customer name must be at least 2 characters'),
   customerPhone: z.string().trim().nullable().optional(),
   customerAddress: z.string().trim().nullable().optional(),
   province: z.string().trim().nullable().optional(),
   notes: z.string().trim().nullable().optional(),
+  // Branch / warehouse the order is fulfilled from (drives stock on confirm).
+  branchId: z.number().int().positive().nullable().optional(),
+  warehouseId: z.number().int().positive().nullable().optional(),
   // Used only when the order carries no line items (item-less intake).
   totalAmount: z.coerce.number().nonnegative().optional(),
   items: z.array(onlineOrderItemSchema).optional(),
@@ -289,6 +295,27 @@ export const onlineOrderSchema = z.object({
 export const onlineOrderStatusSchema = z.object({
   status: z.enum(ORDER_STATUSES),
   note: z.string().trim().max(500).nullable().optional(),
+  // Optional payment details applied when confirming (creating the sale).
+  paidAmount: z.coerce.number().nonnegative().optional(),
+  paymentMethod: z.enum(['cash', 'card']).optional(),
+  paymentReference: z.string().trim().nullable().optional(),
+  currency: z.enum(['USD', 'IQD']).optional(),
+});
+
+// Return (full or partial) of a confirmed/delivered online order. Mirrors the
+// sale-return item shape; the service maps these onto the linked sale's items.
+export const onlineOrderReturnSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        productId: z.number().int().positive().nullable().optional(),
+        saleItemId: z.number().int().positive().nullable().optional(),
+        quantity: z.coerce.number().int().positive('الكمية المرتجعة يجب أن تكون أكبر من صفر'),
+      })
+    )
+    .min(1, 'يجب تحديد صنف واحد على الأقل للإرجاع'),
+  reason: z.string().trim().max(500).nullable().optional(),
+  refundAmount: z.coerce.number().nonnegative().optional(),
 });
 
 // ── Delivery integration ─────────────────────────────────────────────────────
