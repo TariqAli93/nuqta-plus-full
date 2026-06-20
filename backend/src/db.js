@@ -409,6 +409,17 @@ async function initDB() {
       `RBAC seed encountered an error (continuing): ${rbacErr.message}`, { error: rbacErr });
   }
 
+  // ── Delivery providers (self-provision) ──────────────────────────────────
+  // Keep the carrier reference rows present even on migrate-only installs.
+  try {
+    const { ensureDeliveryProviders } = await import('./services/delivery/ensureProviders.js');
+    await ensureDeliveryProviders();
+    logBootstrapEvent('info', REASON.MIGRATIONS_DONE, 'Delivery providers ensured');
+  } catch (dpErr) {
+    logBootstrapEvent('warn', REASON.MIGRATIONS_DONE,
+      `Delivery providers ensure failed (continuing): ${dpErr.message}`, { error: dpErr });
+  }
+
   setReason(REASON.READY);
   logBootstrapEvent('info', REASON.READY,
     'Bootstrap complete — backend is ready to serve requests',

@@ -26,7 +26,7 @@
  * apiKey / webhookSecret are the DECRYPTED values, injected by the service.
  */
 
-import { httpJson, pick, buildStatusMapper, verifyHmacSignature } from './baseAdapter.js';
+import { httpJson, httpJsonWithRetry, pick, buildStatusMapper, verifyHmacSignature } from './baseAdapter.js';
 import { DELIVERY_STATUS, boxyBaseUrl } from '../../../constants/delivery.js';
 
 const DEFAULT_ENDPOINTS = {
@@ -121,7 +121,13 @@ export function createBoxyAdapter(provider = {}) {
         [config.codField || 'cod_amount']: Number(shipment.codAmount) || 0,
         notes: shipment.notes || undefined,
       };
-      const res = await httpJson(url(endpoints.create), { method: 'POST', headers: authHeaders(), body });
+      // Create is retried ONLY on connection-level failure (no response) so we
+      // never risk a duplicate shipment after the provider has already accepted.
+      const res = await httpJsonWithRetry(
+        url(endpoints.create),
+        { method: 'POST', headers: authHeaders(), body },
+        { retryOn: [0] }
+      );
       if (!res.ok) {
         return {
           ok: false,
@@ -145,7 +151,7 @@ export function createBoxyAdapter(provider = {}) {
     async getStatus(shipment) {
       requireConfig();
       const ref = shipment.providerShipmentId || shipment.trackingNumber;
-      const res = await httpJson(url(endpoints.status, ref), { method: 'GET', headers: authHeaders() });
+      const res = await httpJsonWithRetry(url(endpoints.status, ref), { method: 'GET', headers: authHeaders() });
       if (!res.ok) {
         return { ok: false, response: res, error: res.error || `HTTP ${res.httpStatus}` };
       }
@@ -156,7 +162,11 @@ export function createBoxyAdapter(provider = {}) {
     async cancelShipment(shipment) {
       requireConfig();
       const ref = shipment.providerShipmentId || shipment.trackingNumber;
-      const res = await httpJson(url(endpoints.cancel, ref), { method: 'POST', headers: authHeaders() });
+      const res = await httpJsonWithRetry(
+        url(endpoints.cancel, ref),
+        { method: 'POST', headers: authHeaders() },
+        { retryOn: [0] }
+      );
       return {
         ok: res.ok,
         response: res,

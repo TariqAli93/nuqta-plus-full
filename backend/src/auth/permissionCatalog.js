@@ -83,7 +83,13 @@ export const PERMISSION_CATALOG = Object.freeze({
   'delivery_webhooks:view': { ar: 'عرض سجل الويبهوك (تشخيص)', group: G.DELIVERY },
   'delivery_shipments:read': { ar: 'عرض الشحنات', group: G.DELIVERY },
   'delivery_shipments:create': { ar: 'إنشاء شحنة', group: G.DELIVERY },
-  'delivery_shipments:update': { ar: 'تحديث/إلغاء شحنة', group: G.DELIVERY },
+  // Legacy combined gate — hidden from the UI; replaced by the finer keys below.
+  'delivery_shipments:update': { ar: 'تحديث/إلغاء شحنة (عام)', group: G.DELIVERY, active: false },
+  'delivery_shipments:cancel': { ar: 'إلغاء شحنة', group: G.DELIVERY },
+  'delivery_shipments:sync': { ar: 'مزامنة حالة الشحنات', group: G.DELIVERY },
+  'delivery_shipments:print_label': { ar: 'طباعة ملصق الشحنة', group: G.DELIVERY },
+  'delivery_shipments:change_provider': { ar: 'تغيير شركة التوصيل', group: G.DELIVERY },
+  'delivery_logs:view': { ar: 'عرض سجل إجراءات التوصيل', group: G.DELIVERY },
   'view:delivery': { ar: 'الوصول إلى صفحة التوصيل', group: G.DELIVERY, active: false },
 
   // ── Inventory / branches ──
@@ -142,8 +148,10 @@ export const PERMISSION_CATALOG = Object.freeze({
   // only sees reports for the operations they personally performed.
   'reports:view_all_users': { ar: 'عرض تقارير جميع المستخدمين', group: G.REPORTS },
   'online_commerce_reports:read': { ar: 'عرض تقارير التجارة الأونلاين', group: G.REPORTS },
+  'delivery_reports:view': { ar: 'عرض تقارير الشحن', group: G.REPORTS },
   'view:reports': { ar: 'الوصول إلى صفحة التقارير', group: G.REPORTS },
   'view:online_commerce_reports': { ar: 'الوصول إلى تقارير التجارة الأونلاين', group: G.REPORTS, active: false },
+  'view:delivery_reports': { ar: 'الوصول إلى تقارير الشحن', group: G.REPORTS, active: false },
 
   // ── Users / roles ──
   'users:create': { ar: 'إضافة مستخدم', group: G.USERS },

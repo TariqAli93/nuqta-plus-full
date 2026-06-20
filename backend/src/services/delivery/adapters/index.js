@@ -19,6 +19,7 @@ const REGISTRY = {
   [DELIVERY_PROVIDER.ALZAEEM]: (p) => createUnsupportedAdapter('ALZAEEM', 'الزعيم', p),
   [DELIVERY_PROVIDER.ALWASEET]: (p) => createUnsupportedAdapter('ALWASEET', 'الوسيط', p),
   [DELIVERY_PROVIDER.HI_EXPRESS]: (p) => createUnsupportedAdapter('HI_EXPRESS', 'Hi Express', p),
+  [DELIVERY_PROVIDER.DHL]: (p) => createUnsupportedAdapter('DHL', 'DHL', p),
 };
 
 /** Adapter keys that have a real (non-stub) implementation. */
@@ -49,4 +50,13 @@ export function resolveAdapter(provider) {
     throw err;
   }
   return factory(provider);
+}
+
+/**
+ * Register or override an adapter factory at runtime. This is the single place
+ * a future real adapter is wired in (replacing its 501 stub) — and the TEST
+ * seam for injecting a fake in-memory adapter under a provider code.
+ */
+export function registerAdapter(key, factory) {
+  REGISTRY[key] = factory;
 }

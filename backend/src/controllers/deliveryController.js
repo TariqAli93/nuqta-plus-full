@@ -2,6 +2,7 @@ import deliveryService from '../services/delivery/deliveryService.js';
 import {
   deliveryProviderUpdateSchema,
   deliveryShipmentCreateSchema,
+  deliveryQuoteSchema,
 } from '../utils/validation.js';
 
 export class DeliveryController {
@@ -27,11 +28,23 @@ export class DeliveryController {
     return reply.send({ success: true, ...result });
   }
 
+  async setDefaultProvider(request, reply) {
+    const data = await deliveryService.setDefaultProvider(request.params.id);
+    return reply.send({ success: true, data, message: 'تم تعيين الشركة الافتراضية' });
+  }
+
   // ── Shipments ───────────────────────────────────────────────────────────────
   async createShipment(request, reply) {
     const validated = deliveryShipmentCreateSchema.parse(request.body);
     const data = await deliveryService.createShipment(validated, request.user);
     return reply.code(201).send({ success: true, data, message: 'Shipment created' });
+  }
+
+  /** Quote shipping cost (provider optional → falls back to the default). */
+  async quote(request, reply) {
+    const { providerId, providerCode, ...input } = deliveryQuoteSchema.parse(request.body);
+    const data = await deliveryService.calculateCost({ providerId, providerCode }, input, request.user);
+    return reply.send({ success: true, data });
   }
 
   async listShipments(request, reply) {
@@ -55,13 +68,19 @@ export class DeliveryController {
   }
 
   async shipmentLabel(request, reply) {
-    const data = await deliveryService.getLabel(request.params.id);
+    const data = await deliveryService.getLabel(request.params.id, request.user);
     return reply.send({ success: true, data });
   }
 
   /** Debugging: inbound webhook logs. */
   async webhookLogs(request, reply) {
     const result = await deliveryService.listWebhookLogs(request.query);
+    return reply.send({ success: true, data: result.data, meta: result.meta });
+  }
+
+  /** Audit: outbound action logs (create/cancel/sync/label/quote). */
+  async actionLogs(request, reply) {
+    const result = await deliveryService.listActionLogs(request.query);
     return reply.send({ success: true, data: result.data, meta: result.meta });
   }
 

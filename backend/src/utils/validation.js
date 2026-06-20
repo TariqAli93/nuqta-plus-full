@@ -298,12 +298,19 @@ export const deliveryProviderUpdateSchema = z.object({
   name: z.string().trim().min(1).optional(),
   adapterKey: z.string().trim().min(1).optional(),
   isActive: z.boolean().optional(),
-  // Selecting the environment drives the API base URL server-side.
+  isDefault: z.boolean().optional(),
+  // Boxy derives its base URL from the environment; generic providers set it
+  // directly ('' clears).
   environment: z.enum(['sandbox', 'production']).optional(),
+  baseUrl: z.string().trim().url().or(z.literal('')).nullable().optional(),
   config: z.any().optional(),
   // Secrets: a value sets/re-encrypts, '' clears, omitted leaves untouched.
+  // password → api-secret slot; username + accessToken → encrypted bag.
   apiKey: z.string().nullable().optional(),
   apiSecret: z.string().nullable().optional(),
+  password: z.string().nullable().optional(),
+  username: z.string().nullable().optional(),
+  accessToken: z.string().nullable().optional(),
   webhookSecret: z.string().nullable().optional(),
 });
 
@@ -336,11 +343,23 @@ export const deliveryShipmentCreateSchema = z
   .refine((d) => d.onlineOrderId || d.saleId, {
     message: 'onlineOrderId or saleId is required',
     path: ['onlineOrderId'],
-  })
-  .refine((d) => d.providerId || d.providerCode, {
-    message: 'providerId or providerCode is required',
-    path: ['providerId'],
   });
+// Provider is intentionally optional — when omitted the service falls back to
+// the default delivery provider.
+
+// Shipping-cost quote request. Provider is optional (falls back to default).
+export const deliveryQuoteSchema = z.object({
+  providerId: z.coerce.number().int().positive().optional(),
+  providerCode: z.string().trim().min(1).optional(),
+  province: z.string().trim().min(1, 'province is required'),
+  region: z.string().trim().nullable().optional(),
+  weight: z.coerce.number().nonnegative().optional(),
+  codAmount: z.coerce.number().nonnegative().optional(),
+  size: z.enum(['S', 'M', 'L', 'XL']).optional(),
+  paymentType: z.enum(['COLLECT_ON_DELIVERY', 'PREPAID']).optional(),
+  feeType: z.enum(['BY_MERCHANT', 'BY_CUSTOMER']).optional(),
+  currency: z.enum(['USD', 'IQD']).optional(),
+});
 
 // Optional overrides when converting an order to a sale invoice. Everything is
 // optional — the order itself supplies the items, channel and customer.

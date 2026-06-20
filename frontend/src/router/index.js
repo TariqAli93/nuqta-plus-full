@@ -24,8 +24,10 @@ import DeliveryTracking from '@/views/delivery/DeliveryTracking.vue';
 import DeliveryShipments from '@/views/delivery/DeliveryShipments.vue';
 import ShipmentDetails from '@/views/delivery/ShipmentDetails.vue';
 import OnlineCommerceReports from '@/views/reports/OnlineCommerceReports.vue';
+import DeliveryReports from '@/views/reports/DeliveryReports.vue';
 import DeliveryProviders from '@/views/settings/DeliveryProviders.vue';
 import BoxySettings from '@/views/settings/BoxySettings.vue';
+import GenericProviderSettings from '@/views/settings/GenericProviderSettings.vue';
 import BoxyWebhookLogs from '@/views/settings/BoxyWebhookLogs.vue';
 import Sales from '@/views/sales/Sales.vue';
 import NewSale from '@/views/sales/NewSale.vue';
@@ -194,6 +196,12 @@ const routes = [
         meta: { permission: 'online_commerce_reports:read' },
       },
       {
+        path: 'reports/delivery',
+        name: 'DeliveryReports',
+        component: DeliveryReports,
+        meta: { permission: 'delivery_reports:view' },
+      },
+      {
         path: 'settings/integrations/delivery-providers',
         name: 'DeliveryProviders',
         component: DeliveryProviders,
@@ -210,6 +218,14 @@ const routes = [
         name: 'BoxyWebhookLogs',
         component: BoxyWebhookLogs,
         meta: { permission: 'delivery_webhooks:view' },
+      },
+      {
+        // Generic settings for any non-Boxy provider, keyed by code. Declared
+        // after the static boxy routes so those win their exact paths.
+        path: 'settings/integrations/delivery-providers/:code',
+        name: 'GenericProviderSettings',
+        component: GenericProviderSettings,
+        meta: { permission: 'delivery_providers:manage' },
       },
       { path: 'sales', name: 'Sales', component: Sales, meta: { permission: 'view:sales' } },
       {

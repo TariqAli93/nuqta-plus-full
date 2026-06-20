@@ -9,30 +9,30 @@
     ║  permissions) is untouched — this is a presentation rebuild only.      ║
     ╚══════════════════════════════════════════════════════════════════════╝
   -->
+  <v-alert
+    v-if="!hasActivePeriod"
+    type="warning"
+    variant="tonal"
+    density="comfortable"
+    border="start"
+    class="mb-3"
+  >
+    <div class="d-flex align-center justify-space-between flex-wrap ga-3">
+      <div>
+        <div class="text-subtitle-2 font-weight-bold">{{ periodDialogTitle }}</div>
+        <div class="text-body-2">{{ shiftBlockReason }}</div>
+      </div>
+      <v-btn color="warning" variant="flat" size="small" :to="shiftBlockAction.to">
+        {{ shiftBlockAction.label }}
+      </v-btn>
+    </div>
+  </v-alert>
   <div class="pos" :class="{ 'pos--drawer': isMobile, 'pos--cart-open': cartOpen }" dir="rtl">
     <!-- ═══════════════════ Products zone ═══════════════════ -->
     <v-card class="pos__panel pos__products" flat aria-label="المنتجات">
       <!-- Accounting-period gate (القيد المحاسبي): selling needs a usable open
            period. The banner points the cashier at the fix; actions stay
            blocked by `hasActivePeriod` regardless. -->
-      <v-alert
-        v-if="!hasActivePeriod"
-        type="warning"
-        variant="tonal"
-        density="comfortable"
-        border="start"
-        class="ma-3 mb-0"
-      >
-        <div class="d-flex align-center justify-space-between flex-wrap ga-3">
-          <div>
-            <div class="text-subtitle-2 font-weight-bold">{{ periodDialogTitle }}</div>
-            <div class="text-body-2">{{ shiftBlockReason }}</div>
-          </div>
-          <v-btn color="warning" variant="flat" size="small" :to="shiftBlockAction.to">
-            {{ shiftBlockAction.label }}
-          </v-btn>
-        </div>
-      </v-alert>
 
       <!-- ── Toolbar: unified search/barcode + category + tier + filter ── -->
       <div class="pos__toolbar">

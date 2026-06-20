@@ -54,10 +54,12 @@ import {
   notificationSettings,
   notifications,
   auditLog,
+  deliveryProviders,
 } from './models/index.js';
 import { hashPassword } from './utils/helpers.js';
 import { normalizeIraqPhone } from './utils/phone.js';
 import { and, eq, sql } from 'drizzle-orm';
+import { DELIVERY_PROVIDER } from './constants/delivery.js';
 
 // ── CLI flags ─────────────────────────────────────────────────────────────
 const ARGS = new Set(process.argv.slice(2));
@@ -182,6 +184,29 @@ async function seedSettings(db) {
     inserted++;
   }
   log.ok(`settings (${inserted} new)`);
+}
+
+async function seedDeliveryProviders(db) {
+  // Carrier reference rows. Carriers start INACTIVE (the owner activates one
+  // after entering its API credentials in Settings); the manual CUSTOM courier
+  // is active; BOXY is the default carrier. Exactly one row may be is_default
+  // (a partial unique index enforces it). Idempotent find-or-create by code.
+  const data = [
+    { code: DELIVERY_PROVIDER.BOXY, name: 'Boxy', adapterKey: DELIVERY_PROVIDER.BOXY, isActive: false, isDefault: true },
+    { code: DELIVERY_PROVIDER.ALZAEEM, name: 'الزعيم', adapterKey: DELIVERY_PROVIDER.ALZAEEM, isActive: false, isDefault: false },
+    { code: DELIVERY_PROVIDER.ALWASEET, name: 'الوسيط', adapterKey: DELIVERY_PROVIDER.ALWASEET, isActive: false, isDefault: false },
+    { code: DELIVERY_PROVIDER.HI_EXPRESS, name: 'Hi Express', adapterKey: DELIVERY_PROVIDER.HI_EXPRESS, isActive: false, isDefault: false },
+    { code: DELIVERY_PROVIDER.DHL, name: 'DHL', adapterKey: DELIVERY_PROVIDER.DHL, isActive: false, isDefault: false },
+    { code: DELIVERY_PROVIDER.CUSTOM, name: 'شركة مخصّصة (يدوي)', adapterKey: DELIVERY_PROVIDER.CUSTOM, isActive: true, isDefault: false },
+  ];
+  let inserted = 0;
+  for (const row of data) {
+    const existing = await findOne(db, deliveryProviders, eq(deliveryProviders.code, row.code));
+    if (existing) continue;
+    await db.insert(deliveryProviders).values(row);
+    inserted++;
+  }
+  log.ok(`delivery providers (${inserted} new)`);
 }
 
 async function seedUsers(db) {
@@ -1793,6 +1818,7 @@ async function runSeed() {
   log.info('seeding foundation...');
   await seedCurrencies(db);
   await seedSettings(db);
+  await seedDeliveryProviders(db);
   await seedNotificationSettings(db);
   const userMap = await seedUsers(db);
   const branchMap = await seedBranches(db);

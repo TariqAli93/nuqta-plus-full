@@ -66,6 +66,18 @@ const REGISTRY = Object.freeze({
     type: FEATURE_TYPES.OPTIONAL,
     fallbackBehavior: FALLBACK.HIDE,
   },
+  deliveryReports: {
+    permission: 'delivery_reports:view',
+    label: 'تقارير الشحن',
+    type: FEATURE_TYPES.OPTIONAL,
+    fallbackBehavior: FALLBACK.HIDE,
+  },
+  deliveryActionLogs: {
+    permission: 'delivery_logs:view',
+    label: 'سجل إجراءات التوصيل',
+    type: FEATURE_TYPES.OPTIONAL,
+    fallbackBehavior: FALLBACK.HIDE,
+  },
   salesChannelsPicker: {
     permission: 'sales_channels:read',
     label: 'قنوات البيع',

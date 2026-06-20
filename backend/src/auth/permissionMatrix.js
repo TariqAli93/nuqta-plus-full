@@ -102,7 +102,16 @@ const PERMISSION_MATRIX = {
   'delivery_webhooks:view': BRANCH_ADMIN,
   'delivery_shipments:read': ALL,
   'delivery_shipments:create': CASHIER,
+  // Legacy combined gate (sync + cancel). Kept for backward compatibility; new
+  // finer permissions below are backfilled onto roles that hold this one.
   'delivery_shipments:update': CASHIER,
+  'delivery_shipments:cancel': CASHIER,
+  'delivery_shipments:sync': CASHIER,
+  'delivery_shipments:print_label': CASHIER,
+  // Choosing a non-default carrier on a shipment is a manager decision.
+  'delivery_shipments:change_provider': MANAGER,
+  // Outbound action log (request/response audit) → admin-level, like webhooks.
+  'delivery_logs:view': BRANCH_ADMIN,
   'view:delivery': MANAGER,
 
   // ── Online commerce reports (تقارير التجارة الأونلاين) ───────────────────
@@ -110,6 +119,10 @@ const PERMISSION_MATRIX = {
   // existing profit gate (reports:read_profit).
   'online_commerce_reports:read': MANAGER,
   'view:online_commerce_reports': MANAGER,
+
+  // ── Delivery reports (تقارير الشحن) ──────────────────────────────────────
+  'delivery_reports:view': MANAGER,
+  'view:delivery_reports': MANAGER,
 
   // ── Frontend view permissions ───────────────────────────────────────────
   'view:dashboard': ALL,

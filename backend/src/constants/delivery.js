@@ -13,6 +13,7 @@ export const DELIVERY_PROVIDER = Object.freeze({
   ALZAEEM: 'ALZAEEM',
   ALWASEET: 'ALWASEET',
   HI_EXPRESS: 'HI_EXPRESS',
+  DHL: 'DHL',
   CUSTOM: 'CUSTOM',
 });
 export const DELIVERY_PROVIDERS = Object.freeze(Object.values(DELIVERY_PROVIDER));
@@ -49,6 +50,20 @@ export const DELIVERY_EVENT_TYPE = Object.freeze({
   CANCELLED: 'CANCELLED',
   ERROR: 'ERROR',
 });
+
+// ── Action log types (delivery_action_logs.action) ───────────────────────────
+// Outbound provider calls we make (distinct from delivery_events, the canonical
+// status timeline, and delivery_webhook_logs, which is inbound-only). Each entry
+// records the request/response of one adapter call for audit/debugging.
+export const DELIVERY_ACTION = Object.freeze({
+  CREATE: 'CREATE',
+  CANCEL: 'CANCEL',
+  SYNC: 'SYNC',
+  LABEL: 'LABEL',
+  QUOTE: 'QUOTE',
+  STATUS: 'STATUS',
+});
+export const DELIVERY_ACTIONS = Object.freeze(Object.values(DELIVERY_ACTION));
 
 export const isValidDeliveryStatus = (s) => DELIVERY_STATUSES.includes(s);
 export const isTerminalDeliveryStatus = (s) => DELIVERY_TERMINAL_STATUSES.includes(s);

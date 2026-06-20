@@ -6,6 +6,7 @@ import {
   deliveryShipments,
   deliveryEvents,
   deliveryWebhookLogs,
+  deliveryActionLogs,
   sales,
   customers,
   onlineOrders,
@@ -14,7 +15,7 @@ import {
   salesChannels,
 } from '../../models/index.js';
 import * as schema from '../../models/index.js';
-import { and, eq, or, desc, sql, ilike, gte, lte } from 'drizzle-orm';
+import { and, eq, ne, or, desc, sql, ilike, gte, lte } from 'drizzle-orm';
 import {
   NotFoundError,
   ConflictError,
@@ -24,6 +25,7 @@ import {
 import {
   DELIVERY_STATUS,
   DELIVERY_EVENT_TYPE,
+  DELIVERY_ACTION,
   DELIVERY_TERMINAL_STATUSES,
   isValidDeliveryStatus,
   boxyBaseUrl,
@@ -88,7 +90,8 @@ export class DeliveryService {
    */
   _maskProvider(row) {
     if (!row) return row;
-    const { apiKeyEncrypted, apiSecretEncrypted, webhookSecretEncrypted, ...rest } = row;
+    const { apiKeyEncrypted, apiSecretEncrypted, webhookSecretEncrypted, credentialsEncrypted, ...rest } =
+      row;
     const cfg = row.config || {};
     const isBoxy = row.code === 'BOXY' || row.adapterKey === 'BOXY';
     const baseUrl = isBoxy ? boxyBaseUrl(cfg.environment) || cfg.baseUrl || null : cfg.baseUrl || null;
@@ -109,6 +112,7 @@ export class DeliveryService {
       hasApiSecret: !!apiSecretEncrypted,
       apiSecretMasked: apiSecretEncrypted ? '••••••••' : '',
       hasWebhookSecret: !!webhookSecretEncrypted,
+      hasCredentials: !!credentialsEncrypted,
       connectionStatus,
       lastTestAt: cfg.lastTestAt || null,
       lastTestStatus: cfg.lastTestStatus || null,
@@ -124,11 +128,28 @@ export class DeliveryService {
     const db = await getDb();
     const [row] = await db.select().from(deliveryProviders).where(where).limit(1);
     if (!row) throw new NotFoundError('Delivery provider');
+    // The extra credentials bag (username + access token) is an encrypted JSON
+    // blob — decode it defensively (a corrupt/legacy value must not break the
+    // adapter, which may not need these fields at all).
+    let username = null;
+    let accessToken = null;
+    if (row.credentialsEncrypted) {
+      try {
+        const bag = JSON.parse(decrypt(row.credentialsEncrypted) || '{}');
+        username = bag.username ?? null;
+        accessToken = bag.accessToken ?? null;
+      } catch {
+        /* ignore malformed credentials bag */
+      }
+    }
     return {
       ...row,
       apiKey: decrypt(row.apiKeyEncrypted),
       apiSecret: decrypt(row.apiSecretEncrypted),
       webhookSecret: decrypt(row.webhookSecretEncrypted),
+      baseUrl: (row.config && row.config.baseUrl) || null,
+      username,
+      accessToken,
     };
   }
 
@@ -159,6 +180,11 @@ export class DeliveryService {
     for (const f of ['name', 'adapterKey', 'isActive']) {
       if (Object.prototype.hasOwnProperty.call(data, f)) setPayload[f] = data[f];
     }
+    const makeDefault =
+      Object.prototype.hasOwnProperty.call(data, 'isDefault') && data.isDefault === true;
+    if (Object.prototype.hasOwnProperty.call(data, 'isDefault')) {
+      setPayload.isDefault = !!data.isDefault;
+    }
 
     // Merge config (preserve lastTest* and other keys); `environment` is a
     // first-class field that lands in config and drives the base URL.
@@ -169,6 +195,11 @@ export class DeliveryService {
     if (Object.prototype.hasOwnProperty.call(data, 'environment')) {
       nextConfig.environment = data.environment;
     }
+    // Generic providers set their API base URL directly (Boxy derives it from
+    // the environment instead).
+    if (Object.prototype.hasOwnProperty.call(data, 'baseUrl')) {
+      nextConfig.baseUrl = data.baseUrl || null;
+    }
     setPayload.config = nextConfig;
 
     // Secrets: empty string clears, undefined leaves untouched, a value re-encrypts.
@@ -177,18 +208,109 @@ export class DeliveryService {
     }
     if (Object.prototype.hasOwnProperty.call(data, 'apiSecret')) {
       setPayload.apiSecretEncrypted = data.apiSecret ? encrypt(data.apiSecret) : null;
+    } else if (Object.prototype.hasOwnProperty.call(data, 'password')) {
+      // Generic providers expose "Password" which maps onto the api-secret slot.
+      setPayload.apiSecretEncrypted = data.password ? encrypt(data.password) : null;
     }
     if (Object.prototype.hasOwnProperty.call(data, 'webhookSecret')) {
       setPayload.webhookSecretEncrypted = data.webhookSecret ? encrypt(data.webhookSecret) : null;
     }
-    const [row] = await db
-      .update(deliveryProviders)
-      .set(setPayload)
-      .where(eq(deliveryProviders.id, Number(id)))
-      .returning();
+    // Extra credentials (username + access token) → encrypted JSON bag, with the
+    // same empty=clear / undefined=keep semantics, per field.
+    if (
+      Object.prototype.hasOwnProperty.call(data, 'username') ||
+      Object.prototype.hasOwnProperty.call(data, 'accessToken')
+    ) {
+      let bag = {};
+      if (existing.credentialsEncrypted) {
+        try {
+          bag = JSON.parse(decrypt(existing.credentialsEncrypted) || '{}');
+        } catch {
+          bag = {};
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(data, 'username')) {
+        if (data.username) bag.username = data.username;
+        else delete bag.username;
+      }
+      if (Object.prototype.hasOwnProperty.call(data, 'accessToken')) {
+        if (data.accessToken) bag.accessToken = data.accessToken;
+        else delete bag.accessToken;
+      }
+      setPayload.credentialsEncrypted = Object.keys(bag).length ? encrypt(JSON.stringify(bag)) : null;
+    }
+    // Setting this provider as default must clear any other default in the same
+    // transaction (the partial unique index allows only one).
+    let row;
+    if (makeDefault) {
+      row = await withTransaction(async (tx) => {
+        await tx
+          .update(deliveryProviders)
+          .set({ isDefault: false, updatedAt: new Date() })
+          .where(and(ne(deliveryProviders.id, Number(id)), eq(deliveryProviders.isDefault, true)));
+        const [r] = await tx
+          .update(deliveryProviders)
+          .set(setPayload)
+          .where(eq(deliveryProviders.id, Number(id)))
+          .returning();
+        saveDatabase();
+        return r;
+      });
+    } else {
+      [row] = await db
+        .update(deliveryProviders)
+        .set(setPayload)
+        .where(eq(deliveryProviders.id, Number(id)))
+        .returning();
+      saveDatabase();
+    }
     if (!row) throw new NotFoundError('Delivery provider');
-    saveDatabase();
     return this._maskProvider(row);
+  }
+
+  /** Make a provider THE default, clearing any other default atomically. */
+  async setDefaultProvider(id) {
+    const pid = Number(id);
+    const row = await withTransaction(async (tx) => {
+      const [existing] = await tx
+        .select()
+        .from(deliveryProviders)
+        .where(eq(deliveryProviders.id, pid))
+        .limit(1);
+      if (!existing) throw new NotFoundError('Delivery provider');
+      await tx
+        .update(deliveryProviders)
+        .set({ isDefault: false, updatedAt: new Date() })
+        .where(and(ne(deliveryProviders.id, pid), eq(deliveryProviders.isDefault, true)));
+      const [r] = await tx
+        .update(deliveryProviders)
+        .set({ isDefault: true, updatedAt: new Date() })
+        .where(eq(deliveryProviders.id, pid))
+        .returning();
+      saveDatabase();
+      return r;
+    });
+    return this._maskProvider(row);
+  }
+
+  /**
+   * Resolve a provider (with decrypted credentials) from
+   * {providerId|providerCode}, falling back to the default when neither is
+   * given. Throws a friendly error when nothing matches and none was specified.
+   */
+  async _resolveProvider(ref = {}) {
+    let where;
+    if (ref.providerId) where = eq(deliveryProviders.id, Number(ref.providerId));
+    else if (ref.providerCode) where = eq(deliveryProviders.code, ref.providerCode);
+    else where = eq(deliveryProviders.isDefault, true);
+    try {
+      return await this._loadProviderForAdapter(where);
+    } catch (err) {
+      if (!ref.providerId && !ref.providerCode && err instanceof NotFoundError) {
+        throw new ValidationError('لم يتم تحديد شركة توصيل ولا توجد شركة افتراضية.');
+      }
+      throw err;
+    }
   }
 
   /**
@@ -295,11 +417,10 @@ export class DeliveryService {
       throw new ConflictError('توجد شحنة نشطة لهذا الطلب/الفاتورة بالفعل.');
     }
 
-    const provider = await this._loadProviderForAdapter(
-      input.providerId
-        ? eq(deliveryProviders.id, Number(input.providerId))
-        : eq(deliveryProviders.code, input.providerCode)
-    );
+    const provider = await this._resolveProvider({
+      providerId: input.providerId,
+      providerCode: input.providerCode,
+    });
     if (!provider.isActive) {
       throw new ConflictError(`شركة التوصيل "${provider.name}" غير مفعّلة.`);
     }
@@ -357,6 +478,14 @@ export class DeliveryService {
     try {
       result = await adapter.createShipment(shipment);
     } catch (err) {
+      await this._logAction({
+        action: DELIVERY_ACTION.CREATE,
+        shipmentId: shipment.id,
+        provider,
+        request: shipment,
+        result: { ok: false, error: err.message },
+        userId,
+      });
       await this._applyStatus(shipment.id, DELIVERY_STATUS.FAILED, {
         eventType: DELIVERY_EVENT_TYPE.ERROR,
         message: err.message,
@@ -364,6 +493,14 @@ export class DeliveryService {
       });
       throw err; // surfaces 501/400/etc. to the caller; shipment kept as FAILED
     }
+    await this._logAction({
+      action: DELIVERY_ACTION.CREATE,
+      shipmentId: shipment.id,
+      provider,
+      request: shipment,
+      result,
+      userId,
+    });
 
     if (!result.ok) {
       await this._applyStatus(shipment.id, DELIVERY_STATUS.FAILED, {
@@ -493,7 +630,8 @@ export class DeliveryService {
    * Fetch a printable label URL for a shipment, if the provider supports it.
    * (Boxy: not implemented yet → "not supported".) Server-side only.
    */
-  async getLabel(id) {
+  async getLabel(id, user) {
+    const userId = typeof user === 'object' && user !== null ? user.id : user;
     const shipment = await this.getShipmentById(id);
     const provider = await this._loadProviderForAdapter(eq(deliveryProviders.id, shipment.providerId));
     const adapter = resolveAdapter(provider);
@@ -501,10 +639,51 @@ export class DeliveryService {
       throw new ConflictError('طباعة الملصق غير مدعومة لهذا المزود.');
     }
     const result = await adapter.getLabel(shipment);
+    await this._logAction({
+      action: DELIVERY_ACTION.LABEL,
+      shipmentId: shipment.id,
+      provider,
+      request: { ref: shipment.providerShipmentId || shipment.trackingNumber },
+      result,
+      userId,
+    });
     if (!result?.ok || !result.url) {
       throw new AppError(result?.error || 'تعذّر جلب ملصق الشحنة', 502);
     }
     return { url: result.url };
+  }
+
+  /**
+   * Quote shipping cost for a provider (id | code | default). Optional adapter
+   * capability — unsupported providers raise a friendly 409, like getLabel.
+   */
+  async calculateCost(ref = {}, input = {}, user) {
+    const userId = typeof user === 'object' && user !== null ? user.id : user;
+    const provider = await this._resolveProvider(ref);
+    const adapter = resolveAdapter(provider);
+    if (typeof adapter.calculateCost !== 'function') {
+      throw new ConflictError('حساب تكلفة الشحن غير مدعوم لهذا المزود.');
+    }
+    let result;
+    try {
+      result = await adapter.calculateCost(input);
+    } catch (err) {
+      await this._logAction({
+        action: DELIVERY_ACTION.QUOTE,
+        provider,
+        request: input,
+        result: { ok: false, error: err.message },
+        userId,
+      });
+      throw err;
+    }
+    await this._logAction({ action: DELIVERY_ACTION.QUOTE, provider, request: input, result, userId });
+    if (!result?.ok) throw new AppError(result?.error || 'تعذّر حساب تكلفة الشحن', 502);
+    return {
+      cost: Number(result.cost) || 0,
+      currency: result.currency || input.currency || 'IQD',
+      breakdown: result.breakdown || null,
+    };
   }
 
   async listShipments(filters = {}) {
@@ -607,6 +786,14 @@ export class DeliveryService {
     const adapter = resolveAdapter(provider);
 
     const result = await adapter.getStatus(shipment);
+    await this._logAction({
+      action: DELIVERY_ACTION.SYNC,
+      shipmentId: shipment.id,
+      provider,
+      request: { ref: shipment.providerShipmentId || shipment.trackingNumber },
+      result,
+      userId,
+    });
     if (!result.ok) {
       await this._recordEvent(await getDb(), {
         shipmentId: shipment.id,
@@ -641,6 +828,14 @@ export class DeliveryService {
     const adapter = resolveAdapter(provider);
 
     const result = await adapter.cancelShipment(shipment);
+    await this._logAction({
+      action: DELIVERY_ACTION.CANCEL,
+      shipmentId: shipment.id,
+      provider,
+      request: { ref: shipment.providerShipmentId || shipment.trackingNumber },
+      result,
+      userId,
+    });
     if (!result.ok) {
       throw new AppError(result.error || 'تعذّر إلغاء الشحنة لدى شركة التوصيل', 502);
     }
@@ -785,6 +980,57 @@ export class DeliveryService {
     saveDatabase();
   }
 
+  /** Deep-clone a payload with sensitive keys redacted, for action logging. */
+  _sanitizeForLog(obj) {
+    const SECRET = new Set([
+      'authorization', 'apikey', 'api_key', 'apisecret', 'api_secret',
+      'password', 'accesstoken', 'access_token', 'webhooksecret', 'webhook_secret',
+      'x-api-key', 'x-api-secret', 'secret', 'token',
+    ]);
+    const seen = new WeakSet();
+    const walk = (val) => {
+      if (val == null || typeof val !== 'object') return val;
+      if (seen.has(val)) return undefined; // break cycles
+      seen.add(val);
+      if (Array.isArray(val)) return val.map(walk);
+      const out = {};
+      for (const [k, v] of Object.entries(val)) {
+        out[k] = SECRET.has(String(k).toLowerCase()) ? '[REDACTED]' : walk(v);
+      }
+      return out;
+    };
+    try {
+      return walk(obj);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Best-effort audit of one OUTBOUND provider call (create/cancel/sync/label/
+   * quote). Never throws — a logging failure must not mask the real operation
+   * outcome (mirrors _writeWebhookLog). Secrets are stripped before writing.
+   */
+  async _logAction({ action, shipmentId = null, provider = null, request = null, result = null, userId = null }) {
+    try {
+      const db = await getDb();
+      await db.insert(deliveryActionLogs).values({
+        shipmentId: shipmentId ?? null,
+        providerId: provider?.id ?? null,
+        providerCode: provider?.code ?? null,
+        action,
+        requestPayload: this._sanitizeForLog(request),
+        responsePayload: this._sanitizeForLog(result?.response ?? result ?? null),
+        success: !!result?.ok,
+        errorMessage: result?.ok ? null : (result?.error ?? null),
+        createdBy: userId ?? null,
+      });
+      saveDatabase();
+    } catch (err) {
+      log.warn(`Action log write failed (${action}): ${err.message}`);
+    }
+  }
+
   /** Debugging: list inbound webhook attempts (processed + failed). */
   async listWebhookLogs(filters = {}) {
     const db = await getDb();
@@ -826,6 +1072,50 @@ export class DeliveryService {
 
     const data = await query
       .orderBy(desc(deliveryWebhookLogs.createdAt), desc(deliveryWebhookLogs.id))
+      .limit(limit)
+      .offset((page - 1) * limit);
+
+    return { data, meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+  }
+
+  /** Audit list of OUTBOUND provider actions (create/cancel/sync/label/quote). */
+  async listActionLogs(filters = {}) {
+    const db = await getDb();
+    const { page = 1, limit = 20, shipmentId, providerId, providerCode, action, success } = filters;
+
+    const conditions = [];
+    if (shipmentId) conditions.push(eq(deliveryActionLogs.shipmentId, Number(shipmentId)));
+    if (providerId) conditions.push(eq(deliveryActionLogs.providerId, Number(providerId)));
+    if (providerCode) conditions.push(eq(deliveryActionLogs.providerCode, providerCode));
+    if (action) conditions.push(eq(deliveryActionLogs.action, action));
+    if (success === true || success === 'true') conditions.push(eq(deliveryActionLogs.success, true));
+    if (success === false || success === 'false') conditions.push(eq(deliveryActionLogs.success, false));
+    const where = conditions.length === 0 ? null : conditions.length === 1 ? conditions[0] : and(...conditions);
+
+    let query = db
+      .select({
+        id: deliveryActionLogs.id,
+        createdAt: deliveryActionLogs.createdAt,
+        action: deliveryActionLogs.action,
+        success: deliveryActionLogs.success,
+        providerCode: deliveryActionLogs.providerCode,
+        shipmentId: deliveryActionLogs.shipmentId,
+        shipmentNumber: deliveryShipments.shipmentNumber,
+        errorMessage: deliveryActionLogs.errorMessage,
+        requestPayload: deliveryActionLogs.requestPayload,
+        responsePayload: deliveryActionLogs.responsePayload,
+      })
+      .from(deliveryActionLogs)
+      .leftJoin(deliveryShipments, eq(deliveryActionLogs.shipmentId, deliveryShipments.id));
+    if (where) query = query.where(where);
+
+    let countQuery = db.select({ count: sql`count(*)` }).from(deliveryActionLogs);
+    if (where) countQuery = countQuery.where(where);
+    const [countResult] = await countQuery;
+    const total = Number(countResult?.count || 0);
+
+    const data = await query
+      .orderBy(desc(deliveryActionLogs.createdAt), desc(deliveryActionLogs.id))
       .limit(limit)
       .offset((page - 1) * limit);
 

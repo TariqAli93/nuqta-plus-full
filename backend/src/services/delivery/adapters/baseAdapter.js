@@ -25,6 +25,10 @@
  *
  *   async cancelShipment(shipment) -> { ok, response, error }
  *
+ *   // OPTIONAL: omit when the provider can't quote — the service then reports
+ *   // "not supported" (same pattern as getLabel/labelSupported).
+ *   async calculateCost(input) -> { ok, cost, currency, breakdown?, response?, error? }
+ *
  *   parseWebhook(payload, headers) -> {
  *     ok, providerShipmentId, trackingNumber,
  *     status, providerStatus, occurredAt, error
@@ -100,6 +104,39 @@ export async function httpJson(url, { method = 'POST', headers = {}, body, timeo
   }
 }
 
+/**
+ * httpJson with bounded retry + jittered exponential backoff for TRANSIENT
+ * failures. `httpJson` never throws, so we branch on its result: a connection-
+ * level failure (httpStatus 0 — timeout / DNS / refused) or a status listed in
+ * `retryOn` is retried; everything else (incl. 4xx) returns immediately.
+ *
+ * Idempotency is the CALLER's responsibility — choose `retryOn` per operation:
+ *   - getStatus (GET): safe to retry on anything transient → default retryOn.
+ *   - cancelShipment: retry only on connection-level failure → { retryOn: [0] }.
+ *   - createShipment: retry ONLY on connection-level failure ({ retryOn: [0] }) —
+ *     never after ANY response is received, since the shipment may already have
+ *     been created provider-side (avoids duplicate shipments).
+ *
+ * Env overrides: DELIVERY_HTTP_RETRIES, DELIVERY_HTTP_BACKOFF_MS.
+ */
+export async function httpJsonWithRetry(url, opts = {}, retryOpts = {}) {
+  const retries = Number(retryOpts.retries ?? process.env.DELIVERY_HTTP_RETRIES ?? 2);
+  const baseDelayMs = Number(retryOpts.baseDelayMs ?? process.env.DELIVERY_HTTP_BACKOFF_MS ?? 300);
+  const retryOn = retryOpts.retryOn || [0, 429, 500, 502, 503, 504];
+
+  let res;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    res = await httpJson(url, opts);
+    if (res.ok) return res;
+    const transient = retryOn.includes(res.httpStatus);
+    if (!transient || attempt === retries) return res;
+    // Exponential backoff with full jitter.
+    const delay = Math.round(baseDelayMs * 2 ** attempt * (0.5 + Math.random()));
+    await new Promise((r) => setTimeout(r, delay));
+  }
+  return res;
+}
+
 /** Read a value at a dotted path ("data.tracking.number") with a fallback. */
 export function pick(obj, path, fallback = null) {
   if (!obj || !path) return fallback;
@@ -141,6 +178,9 @@ export function createUnsupportedAdapter(code, label) {
       notImplemented();
     },
     async cancelShipment() {
+      notImplemented();
+    },
+    async calculateCost() {
       notImplemented();
     },
     parseWebhook() {

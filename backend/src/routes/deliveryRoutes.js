@@ -38,24 +38,30 @@ export default async function deliveryRoutes(fastify) {
     schema: { description: 'Update a delivery provider (settings + credentials)', ...tag } });
   fastify.post('/providers/:id/test', { ...auth('delivery_providers:manage'), handler: c.testConnection,
     schema: { description: 'Test a delivery provider connection (server-side)', ...tag } });
+  fastify.post('/providers/:id/default', { ...auth('delivery_providers:manage'), handler: c.setDefaultProvider,
+    schema: { description: 'Set a provider as the default carrier', ...tag } });
 
   // ── Shipments ───────────────────────────────────────────────────────────────
   fastify.post('/shipments', { ...auth('delivery_shipments:create'), handler: c.createShipment,
     schema: { description: 'Create + dispatch a shipment for an online order', ...tag } });
+  fastify.post('/quote', { ...auth('delivery_shipments:create'), handler: c.quote,
+    schema: { description: 'Quote shipping cost (provider optional → default)', ...tag } });
   fastify.get('/shipments', { ...auth('delivery_shipments:read'), handler: c.listShipments,
     schema: { description: 'List shipments', ...tag } });
   fastify.get('/shipments/:id', { ...auth('delivery_shipments:read'), handler: c.getShipment,
     schema: { description: 'Get a shipment with its event log', ...tag } });
-  fastify.post('/shipments/:id/sync', { ...auth('delivery_shipments:update'), handler: c.syncShipment,
+  fastify.post('/shipments/:id/sync', { ...auth('delivery_shipments:sync'), handler: c.syncShipment,
     schema: { description: 'Poll the provider and update the shipment status', ...tag } });
-  fastify.post('/shipments/:id/cancel', { ...auth('delivery_shipments:update'), handler: c.cancelShipment,
+  fastify.post('/shipments/:id/cancel', { ...auth('delivery_shipments:cancel'), handler: c.cancelShipment,
     schema: { description: 'Cancel a shipment', ...tag } });
-  fastify.get('/shipments/:id/label', { ...auth('delivery_shipments:read'), handler: c.shipmentLabel,
+  fastify.get('/shipments/:id/label', { ...auth('delivery_shipments:print_label'), handler: c.shipmentLabel,
     schema: { description: 'Get a printable shipment label URL (if supported)', ...tag } });
 
   // ── Webhook logs (debugging) ────────────────────────────────────────────────
   fastify.get('/webhook-logs', { ...auth('delivery_webhooks:view'), handler: c.webhookLogs,
     schema: { description: 'List inbound webhook logs (debugging)', ...tag } });
+  fastify.get('/action-logs', { ...auth('delivery_logs:view'), handler: c.actionLogs,
+    schema: { description: 'List outbound action logs (audit)', ...tag } });
 
   // ── Webhook (no auth — verified by provider shared secret) ──────────────────
   fastify.post('/webhooks/:providerCode', {

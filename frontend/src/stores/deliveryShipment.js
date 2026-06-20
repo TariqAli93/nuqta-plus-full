@@ -76,6 +76,30 @@ export const useDeliveryShipmentStore = defineStore('deliveryShipment', {
       }
     },
 
+    /**
+     * Quote shipping cost (provider optional → default). Does NOT toast here so
+     * the caller can show an inline hint (e.g. a muted "غير مدعوم" on 409).
+     */
+    async quote(payload) {
+      const res = await api.post('/delivery/quote', payload);
+      return res.data?.data || res.data;
+    },
+
+    /** Outbound action logs for a shipment (perm delivery_logs:view, optional). */
+    async fetchActionLogs(params = {}) {
+      try {
+        const res = await api.get('/delivery/action-logs', {
+          params,
+          permission: 'delivery_logs:view',
+          permissionMode: 'optional_feature',
+          fallbackValue: null,
+        });
+        return { data: res?.data?.data || [], meta: res?.data?.meta || {} };
+      } catch {
+        return { data: [], meta: {} };
+      }
+    },
+
     /** Fetch a printable label URL (provider must support it). */
     async fetchLabel(id) {
       const notificationStore = useNotificationStore();

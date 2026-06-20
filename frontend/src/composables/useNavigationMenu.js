@@ -282,6 +282,12 @@ export function useNavigationMenu() {
             permission: 'view:online_commerce_reports',
           },
           {
+            title: 'تقارير الشحن',
+            icon: 'mdi-truck-check-outline',
+            to: '/reports/delivery',
+            permission: 'view:delivery_reports',
+          },
+          {
             title: 'الربح والخسارة والوضع المالي',
             icon: 'mdi-finance',
             to: '/reports/financial',
@@ -334,7 +340,7 @@ export function useNavigationMenu() {
             permission: 'view:sales_channels',
           },
           {
-            title: 'موفّرو التوصيل',
+            title: 'شركات التوصيل',
             icon: 'mdi-truck-outline',
             to: '/settings/integrations/delivery-providers',
             permission: 'delivery_providers:manage',

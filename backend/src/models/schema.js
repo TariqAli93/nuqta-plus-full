@@ -11,6 +11,7 @@ import {
   jsonb,
   date,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 // ── Users ─────────────────────────────────────────────────────────────────
 export const users = pgTable('users', {
@@ -1643,16 +1644,26 @@ export const deliveryProviders = pgTable(
     name: text('name').notNull(),
     adapterKey: text('adapter_key').notNull().default('CUSTOM'),
     isActive: boolean('is_active').notNull().default(true),
+    // At most one provider may be the default (enforced by the partial unique
+    // index below + a transactional clear-then-set in deliveryService).
+    isDefault: boolean('is_default').notNull().default(false),
     config: jsonb('config'),
     apiKeyEncrypted: text('api_key_encrypted'),
     apiSecretEncrypted: text('api_secret_encrypted'),
     webhookSecretEncrypted: text('webhook_secret_encrypted'),
+    // Extra credentials (username + access token) as an encrypted JSON bag, so
+    // a provider that needs them costs no schema change. password →
+    // api_secret_encrypted, base URL → config.baseUrl.
+    credentialsEncrypted: text('credentials_encrypted'),
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
     createdBy: integer('created_by').references(() => users.id),
   },
   (t) => ({
     activeIdx: index('delivery_providers_active_idx').on(t.isActive),
+    oneDefaultIdx: uniqueIndex('delivery_providers_one_default_idx')
+      .on(t.isDefault)
+      .where(sql`${t.isDefault} = true`),
   })
 );
 
@@ -1774,6 +1785,38 @@ export const deliveryWebhookLogs = pgTable(
     statusIdx: index('delivery_webhook_logs_status_idx').on(t.status),
     createdAtIdx: index('delivery_webhook_logs_created_at_idx').on(t.createdAt),
     shipmentIdx: index('delivery_webhook_logs_shipment_idx').on(t.shipmentId),
+  })
+);
+
+// ── Delivery Action Logs (سجل إجراءات التوصيل) ─────────────────────────────
+// Audit of OUTBOUND provider calls we initiate (create/cancel/sync/label/quote)
+// with the request + response of each. Distinct from delivery_events (the
+// canonical status timeline) and delivery_webhook_logs (inbound webhooks only).
+// Secrets are stripped before a row is written (deliveryService._sanitizeForLog).
+export const deliveryActionLogs = pgTable(
+  'delivery_action_logs',
+  {
+    id: serial('id').primaryKey(),
+    shipmentId: integer('shipment_id').references(() => deliveryShipments.id, {
+      onDelete: 'set null',
+    }),
+    providerId: integer('provider_id').references(() => deliveryProviders.id, {
+      onDelete: 'set null',
+    }),
+    providerCode: text('provider_code'),
+    action: text('action').notNull(), // DELIVERY_ACTION
+    requestPayload: jsonb('request_payload'),
+    responsePayload: jsonb('response_payload'),
+    success: boolean('success').notNull().default(false),
+    errorMessage: text('error_message'),
+    createdBy: integer('created_by').references(() => users.id),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (t) => ({
+    shipmentIdx: index('delivery_action_logs_shipment_idx').on(t.shipmentId),
+    providerIdx: index('delivery_action_logs_provider_idx').on(t.providerId),
+    actionIdx: index('delivery_action_logs_action_idx').on(t.action),
+    createdAtIdx: index('delivery_action_logs_created_at_idx').on(t.createdAt),
   })
 );
 

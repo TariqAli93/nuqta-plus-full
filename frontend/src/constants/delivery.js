@@ -51,8 +51,21 @@ export const DELIVERY_EVENT_META = Object.freeze({
 export const statusMeta = (s) =>
   DELIVERY_STATUS_META[s] || { label: s || '—', color: 'grey', icon: 'mdi-help-circle-outline' };
 
+// ── Outbound action log types (mirror backend DELIVERY_ACTION) ───────────────
+export const DELIVERY_ACTION_META = Object.freeze({
+  CREATE: { label: 'إنشاء شحنة', icon: 'mdi-plus-circle-outline' },
+  CANCEL: { label: 'إلغاء شحنة', icon: 'mdi-close-circle-outline' },
+  SYNC: { label: 'مزامنة الحالة', icon: 'mdi-cloud-sync-outline' },
+  LABEL: { label: 'طباعة الملصق', icon: 'mdi-printer-outline' },
+  QUOTE: { label: 'حساب التكلفة', icon: 'mdi-calculator-variant-outline' },
+  STATUS: { label: 'استعلام الحالة', icon: 'mdi-magnify' },
+});
+
 export const eventMeta = (t) =>
   DELIVERY_EVENT_META[t] || { label: t || '—', icon: 'mdi-circle-small' };
+
+export const actionMeta = (a) =>
+  DELIVERY_ACTION_META[a] || { label: a || '—', icon: 'mdi-circle-small' };
 
 export const isTerminalStatus = (s) => DELIVERY_TERMINAL_STATUSES.includes(s);
 

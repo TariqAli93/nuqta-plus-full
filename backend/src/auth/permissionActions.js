@@ -46,6 +46,8 @@ export const RESOURCE_NAMES = Object.freeze({
   delivery_providers: 'شركات التوصيل',
   delivery_shipments: 'الشحنات',
   delivery_webhooks: 'سجل الويبهوك',
+  delivery_logs: 'سجل إجراءات التوصيل',
+  delivery_reports: 'تقارير الشحن',
   delivery: 'التوصيل',
   settings: 'الإعدادات',
   backups: 'النسخ الاحتياطي',

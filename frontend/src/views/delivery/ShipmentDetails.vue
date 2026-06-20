@@ -7,6 +7,7 @@
     >
       <template v-if="s">
         <v-btn
+          v-if="canSync"
           variant="tonal"
           color="primary"
           prepend-icon="mdi-cloud-sync-outline"
@@ -14,10 +15,10 @@
           :disabled="isTerminalStatus(s.status) || !!busy"
           @click="doSync"
         >
-          مزامنة من Boxy
+          مزامنة الحالة
         </v-btn>
         <v-btn
-          v-if="!isTerminalStatus(s.status)"
+          v-if="canCancel && !isTerminalStatus(s.status)"
           variant="text"
           color="error"
           prepend-icon="mdi-close-circle-outline"
@@ -30,7 +31,7 @@
           نسخ المعرّفات
         </v-btn>
         <v-btn
-          v-if="s.labelSupported"
+          v-if="canPrintLabel && s.labelSupported"
           variant="text"
           prepend-icon="mdi-printer-outline"
           :loading="busy === 'label'"
@@ -186,6 +187,40 @@
           </v-card>
         </v-col>
       </v-row>
+
+      <!-- 9. Action log (outbound provider calls — create/cancel/sync/label/quote) -->
+      <v-card v-if="canViewLogs" class="page-section mb-3">
+        <v-card-title>
+          <v-icon color="primary" class="me-2">mdi-clipboard-text-clock-outline</v-icon>سجل الإجراءات
+        </v-card-title>
+        <v-divider />
+        <v-table v-if="actionLogs.length" density="compact">
+          <thead>
+            <tr>
+              <th class="text-right">الوقت</th>
+              <th>الإجراء</th>
+              <th>النتيجة</th>
+              <th>الخطأ</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="lg in actionLogs" :key="lg.id">
+              <td class="text-caption">{{ fmtDate(lg.createdAt) }}</td>
+              <td>
+                <v-icon size="14" class="me-1">{{ actionMeta(lg.action).icon }}</v-icon>
+                {{ actionMeta(lg.action).label }}
+              </td>
+              <td>
+                <v-chip :color="lg.success ? 'success' : 'error'" size="x-small" variant="tonal">
+                  {{ lg.success ? 'نجح' : 'فشل' }}
+                </v-chip>
+              </td>
+              <td class="text-caption text-error">{{ lg.errorMessage || '—' }}</td>
+            </tr>
+          </tbody>
+        </v-table>
+        <v-card-text v-else class="text-medium-emphasis">لا توجد إجراءات مسجّلة.</v-card-text>
+      </v-card>
     </template>
 
     <ConfirmDialog
@@ -208,7 +243,8 @@ import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter, RouterLink } from 'vue-router';
 import { useDeliveryShipmentStore } from '@/stores/deliveryShipment';
 import { useNotificationStore } from '@/stores/notification';
-import { statusMeta, eventMeta, isTerminalStatus } from '@/constants/delivery';
+import { useAuthStore } from '@/stores/auth';
+import { statusMeta, eventMeta, actionMeta, isTerminalStatus } from '@/constants/delivery';
 import PageHeader from '@/components/PageHeader.vue';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 
@@ -216,11 +252,17 @@ const route = useRoute();
 const router = useRouter();
 const store = useDeliveryShipmentStore();
 const notify = useNotificationStore();
+const authStore = useAuthStore();
+const canViewLogs = computed(() => authStore.hasPermission('delivery_logs:view'));
+const canSync = computed(() => authStore.hasPermission('delivery_shipments:sync'));
+const canCancel = computed(() => authStore.hasPermission('delivery_shipments:cancel'));
+const canPrintLabel = computed(() => authStore.hasPermission('delivery_shipments:print_label'));
 
 const s = ref(null);
 const loading = ref(true);
 const busy = ref(null); // 'sync' | 'cancel' | 'label'
 const cancelDialog = ref(false);
+const actionLogs = ref([]);
 
 const id = computed(() => route.params.id);
 
@@ -278,10 +320,17 @@ const contactFields = computed(() => {
   ];
 });
 
+async function refreshLogs() {
+  if (!canViewLogs.value) return;
+  const res = await store.fetchActionLogs({ shipmentId: id.value });
+  actionLogs.value = res.data || [];
+}
+
 async function load() {
   loading.value = true;
   try {
     s.value = await store.fetchShipment(id.value);
+    await refreshLogs();
   } catch {
     s.value = null;
   } finally {
@@ -297,6 +346,7 @@ async function doSync() {
     /* notified */
   } finally {
     busy.value = null;
+    refreshLogs();
   }
 }
 
@@ -309,6 +359,7 @@ async function doCancel() {
     /* notified */
   } finally {
     busy.value = null;
+    refreshLogs();
   }
 }
 
@@ -321,6 +372,7 @@ async function printLabel() {
     /* notified */
   } finally {
     busy.value = null;
+    refreshLogs();
   }
 }
 

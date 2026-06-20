@@ -26,6 +26,7 @@ import salesChannelRoutes from './routes/salesChannelRoutes.js';
 import onlineOrderRoutes from './routes/onlineOrderRoutes.js';
 import deliveryRoutes from './routes/deliveryRoutes.js';
 import onlineCommerceReportRoutes from './routes/onlineCommerceReportRoutes.js';
+import deliveryReportRoutes from './routes/deliveryReportRoutes.js';
 import rbacRoutes from './routes/rbacRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import currencyRoutes from './routes/currencyRoutes.js';
@@ -147,6 +148,7 @@ const start = async () => {
     await fastify.register(onlineOrderRoutes, { prefix: '/api/online-orders' });
     await fastify.register(deliveryRoutes, { prefix: '/api/delivery' });
     await fastify.register(onlineCommerceReportRoutes, { prefix: '/api/reports/online-commerce' });
+    await fastify.register(deliveryReportRoutes, { prefix: '/api/reports/delivery' });
     await fastify.register(rbacRoutes, { prefix: '/api/rbac' });
     await fastify.register(userRoutes, { prefix: '/api/users' });
     await fastify.register(currencyRoutes, { prefix: '/api/currencies' });

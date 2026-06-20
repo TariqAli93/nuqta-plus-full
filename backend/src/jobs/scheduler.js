@@ -1,5 +1,6 @@
 import { runCreditScoringJob } from './creditScoringJob.js';
 import { runOverdueReminderJob } from '../services/notifications/overdueReminderJob.js';
+import { runDeliverySyncJob } from './deliverySyncJob.js';
 
 /**
  * Lightweight internal scheduler.
@@ -84,6 +85,24 @@ export function registerDefaultJobs(fastify) {
     });
     fastify.log.info(
       `[scheduler] overdueReminder registered (intervalMs=${overdueIntervalMs}, runOnStart=${overdueRunOnStart})`
+    );
+  }
+
+  // Delivery status auto-sync — poll active providers for non-terminal shipments.
+  // Webhooks remain the primary update path; this catches providers without
+  // webhooks (and missed deliveries). The service already dedupes/no-ops when a
+  // status hasn't changed.
+  if (process.env.DELIVERY_SYNC_DISABLED !== '1') {
+    const deliveryIntervalMs = Number(process.env.DELIVERY_SYNC_INTERVAL_MS) || 30 * 60 * 1000;
+    const deliveryRunOnStart = process.env.DELIVERY_SYNC_RUN_ON_START === '1';
+    scheduleJob('deliverySync', {
+      intervalMs: deliveryIntervalMs,
+      runOnStart: deliveryRunOnStart,
+      run: runDeliverySyncJob,
+      logger: fastify.log,
+    });
+    fastify.log.info(
+      `[scheduler] deliverySync registered (intervalMs=${deliveryIntervalMs}, runOnStart=${deliveryRunOnStart})`
     );
   }
 }

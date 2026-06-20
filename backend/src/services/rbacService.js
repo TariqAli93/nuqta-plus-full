@@ -123,6 +123,40 @@ class RbacService {
       }
     }
 
+    // 3) Backfill grants for permission keys added AFTER the initial role seed.
+    //    System roles created before a new key existed won't have it (grants are
+    //    seeded only at role creation). For each new key we grant it to the
+    //    SYSTEM roles the matrix assigns it to — but ONLY the first time the key
+    //    appears anywhere (zero existing grants). On a fresh install the key was
+    //    already granted via creation seeding (count>0 → skipped); on an upgrade
+    //    it has no grants yet → backfilled once. This never undoes a later admin
+    //    removal (some role keeps it, so the count stays > 0).
+    const BACKFILL_KEYS = [
+      'delivery_shipments:cancel',
+      'delivery_shipments:sync',
+      'delivery_shipments:print_label',
+      'delivery_shipments:change_provider',
+      'delivery_logs:view',
+      'delivery_reports:view',
+    ];
+    for (const key of BACKFILL_KEYS) {
+      const pid = permIdByKey.get(key);
+      if (!pid) continue;
+      const [seen] = await db
+        .select({ count: sql`count(*)` })
+        .from(rolePermissions)
+        .where(eq(rolePermissions.permissionId, pid));
+      if (Number(seen?.count || 0) > 0) continue; // already seeded/assigned — leave as-is
+      const targetCodes = (PERMISSION_MATRIX[key] || []).filter((c) => !isGlobalCode(c));
+      if (!targetCodes.length) continue;
+      const targetRoles = await db
+        .select({ id: roles.id })
+        .from(roles)
+        .where(inArray(roles.code, targetCodes));
+      const grantRows = targetRoles.map((r) => ({ roleId: r.id, permissionId: pid }));
+      if (grantRows.length) await db.insert(rolePermissions).values(grantRows).onConflictDoNothing();
+    }
+
     saveDatabase();
     await this.reload();
     log.info('RBAC seed ensured');

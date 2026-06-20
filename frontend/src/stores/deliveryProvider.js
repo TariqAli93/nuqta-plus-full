@@ -122,6 +122,23 @@ export const useDeliveryProviderStore = defineStore('deliveryProvider', {
       }
     },
 
+    /** Make a provider the default carrier; refresh so others lose the flag. */
+    async setDefault(id) {
+      this.saving = true;
+      const notificationStore = useNotificationStore();
+      try {
+        await api.post(`/delivery/providers/${id}/default`);
+        notificationStore.success('تم تعيين الشركة الافتراضية');
+        await this.fetchProviders();
+        return true;
+      } catch (error) {
+        notificationStore.error(error?.message || 'تعذّر تعيين الشركة الافتراضية');
+        throw error;
+      } finally {
+        this.saving = false;
+      }
+    },
+
     /** Debugging: inbound webhook logs (perm delivery_webhooks:view). */
     async fetchWebhookLogs(params = {}) {
       const notificationStore = useNotificationStore();
