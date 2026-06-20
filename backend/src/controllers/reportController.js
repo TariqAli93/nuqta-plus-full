@@ -11,6 +11,10 @@ const querySchema = z.object({
   // Scope a report to a single accounting period (القيد المحاسبي). When set,
   // figures are restricted to rows stamped with this period id.
   accountingPeriodId: z.coerce.number().int().positive().optional(),
+  // Scope a report to a single user's operations. Only honoured for privileged
+  // users (global admin / reports-permission holders); normal users are always
+  // forced to their own id in the service, so this is ignored for them.
+  userId: z.coerce.number().int().positive().optional(),
   reportType: z.string().optional().default('dashboard'),
   // Inventory-valuation filters (تقرير قيمة المخزون). All optional so other
   // report endpoints sharing this schema ignore them.

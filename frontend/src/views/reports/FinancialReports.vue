@@ -6,6 +6,16 @@
       icon="mdi-finance"
     />
 
+    <PermissionEmptyState
+      v-if="!canReadLedger"
+      title="لا تملك صلاحية عرض الحسابات"
+      message="تحتاج إلى صلاحية عرض دفتر الأستاذ العام لاستعراض التقارير المالية."
+      icon="mdi-lock-outline"
+      page-title="التقارير المالية"
+      :missing-permissions="[{ label: 'عرض دفتر الأستاذ العام والقيود', permission: 'gl:read' }]"
+    />
+
+    <template v-else>
     <v-card class="page-section">
       <v-tabs v-model="tab" color="primary" density="comfortable" show-arrows>
         <v-tab value="trial">فحص توازن الحسابات</v-tab>
@@ -235,17 +245,27 @@
         icon="mdi-book-open-variant"
       />
     </v-card>
+    </template>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useGlStore } from '@/stores/gl';
+import { useAuthStore } from '@/stores/auth';
 import PageHeader from '@/components/PageHeader.vue';
 import EmptyState from '@/components/EmptyState.vue';
+import PermissionEmptyState from '@/components/PermissionEmptyState.vue';
 import { formatCurrency } from '@/utils/formatters';
 
 const glStore = useGlStore();
+const authStore = useAuthStore();
+
+// The page is reachable with `reports:read_financial`, but the underlying GL
+// endpoints (trial balance / income / balance sheet / ledger / accounts list)
+// require `gl:read`. Guard every fetch so a user without it never triggers a
+// 403 toast, and show an empty state instead.
+const canReadLedger = computed(() => authStore.hasPermission('gl:read'));
 
 const tab = ref('trial');
 const loading = ref(false);
@@ -261,6 +281,7 @@ const filters = reactive({ dateFrom: '', dateTo: '', asOf: today, accountId: nul
 const fmt = (v) => formatCurrency(v, 'IQD');
 
 async function reload() {
+  if (!canReadLedger.value) return; // no gl:read → don't hit the API
   loading.value = true;
   try {
     const range = { dateFrom: filters.dateFrom || undefined, dateTo: filters.dateTo || undefined };
@@ -277,6 +298,7 @@ async function reload() {
 }
 
 onMounted(async () => {
+  if (!canReadLedger.value) return; // no gl:read → skip all secondary fetches
   if (postableAccounts.value.length === 0) {
     try {
       await glStore.fetchAccounts();

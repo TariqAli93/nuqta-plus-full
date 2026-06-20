@@ -41,13 +41,9 @@
 import { computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
-import { useCashSessionStore } from '@/stores/cashSession';
 
 const router = useRouter();
 const authStore = useAuthStore();
-const cashSession = useCashSessionStore();
-
-const hasOpenShift = computed(() => cashSession.hasOpenSession);
 
 const actions = computed(() => [
   {
@@ -84,13 +80,6 @@ const actions = computed(() => [
     icon: 'mdi-cash-remove',
     show: authStore.hasPermission('expenses:create'),
     to: '/expenses?new=1',
-  },
-  {
-    key: 'shift',
-    title: hasOpenShift.value ? 'غلق الوردية' : 'فتح الوردية',
-    icon: hasOpenShift.value ? 'mdi-lock-clock' : 'mdi-clock-start',
-    show: authStore.hasPermission('cash_sessions:open'),
-    to: '/sales/pos',
   },
   {
     key: 'search',

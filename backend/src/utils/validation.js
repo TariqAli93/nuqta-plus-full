@@ -9,6 +9,7 @@ import {
   POS_PAYMENT_METHODS,
   PAYMENT_METHOD_CARD,
 } from '../constants/sales.js';
+import { ORDER_STATUSES } from '../constants/orders.js';
 
 /**
  * Validation schemas using Zod
@@ -28,18 +29,16 @@ export const userSchema = z.object({
     .max(100, 'Password cannot exceed 100 characters'),
   fullName: z.string().min(2, 'Full name must be at least 2 characters'),
   phone: z.string().optional(),
-  role: z
-    .enum([
-      'admin',
-      'global_admin',
-      'branch_admin',
-      'branch_manager',
-      'cashier',
-      'manager',
-      'viewer',
-    ])
-    .default('cashier'),
+  // Role is a dynamic RBAC code (table `roles`), NOT a fixed enum — any active
+  // role created on the Roles & permissions page is valid. Existence + active
+  // status are verified against the DB in the service layer (userService /
+  // authService), so this only checks the shape.
+  role: z.string().trim().min(1, 'الدور مطلوب').default('cashier'),
   assignedBranchId: z.union([z.number().int().positive(), z.null()]).optional(),
+  // Full set of branches the user may act on (many-to-many). When provided, the
+  // first entry (or assignedBranchId) becomes the primary branch. Optional —
+  // omitting it keeps the single-branch behaviour driven by assignedBranchId.
+  branchIds: z.array(z.number().int().positive()).optional(),
   assignedWarehouseId: z.union([z.number().int().positive(), z.null()]).optional(),
 });
 
@@ -239,6 +238,119 @@ export const stockTransferSchema = z
 export const categorySchema = z.object({
   name: z.string().min(2, 'Category name must be at least 2 characters'),
   description: z.string().optional(),
+});
+
+// Sales channel schemas (قنوات البيع)
+// `code` is a stable machine identifier (UPPER_SNAKE_CASE); the service
+// normalises/uppercases it before persisting. `color` is a hex string and
+// `icon` an mdi icon name — both optional UI hints.
+export const salesChannelSchema = z.object({
+  code: z
+    .string()
+    .trim()
+    .min(2, 'Channel code must be at least 2 characters')
+    .max(40, 'Channel code is too long')
+    .regex(/^[A-Za-z][A-Za-z0-9_]*$/, 'Code may contain only letters, numbers and underscore'),
+  name: z.string().trim().min(2, 'Channel name must be at least 2 characters'),
+  isActive: z.boolean().optional(),
+  color: z
+    .string()
+    .trim()
+    .regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, 'Color must be a hex value like #25D366')
+    .nullable()
+    .optional(),
+  icon: z.string().trim().max(60).nullable().optional(),
+});
+
+// Online order schemas (الطلبات الأونلاين)
+// `order_number`, `status`, and `total_amount` are owned by the server — they
+// are NOT accepted from the client on create. Items are optional at intake.
+export const onlineOrderItemSchema = z.object({
+  productId: z.number().int().positive().nullable().optional(),
+  productName: z.string().trim().min(1, 'Product name is required'),
+  productSku: z.string().trim().nullable().optional(),
+  quantity: z.coerce.number().int().positive('Quantity must be at least 1'),
+  unitPrice: z.coerce.number().nonnegative('Unit price cannot be negative'),
+  notes: z.string().trim().nullable().optional(),
+});
+
+export const onlineOrderSchema = z.object({
+  channelId: z.number().int().positive('A sales channel is required'),
+  customerName: z.string().trim().min(2, 'Customer name must be at least 2 characters'),
+  customerPhone: z.string().trim().nullable().optional(),
+  customerAddress: z.string().trim().nullable().optional(),
+  province: z.string().trim().nullable().optional(),
+  notes: z.string().trim().nullable().optional(),
+  // Used only when the order carries no line items (item-less intake).
+  totalAmount: z.coerce.number().nonnegative().optional(),
+  items: z.array(onlineOrderItemSchema).optional(),
+});
+
+export const onlineOrderStatusSchema = z.object({
+  status: z.enum(ORDER_STATUSES),
+  note: z.string().trim().max(500).nullable().optional(),
+});
+
+// ── Delivery integration ─────────────────────────────────────────────────────
+// Provider settings + credentials. Secrets (apiKey/webhookSecret) are encrypted
+// by the service; an empty string clears them, undefined leaves them untouched.
+export const deliveryProviderUpdateSchema = z.object({
+  name: z.string().trim().min(1).optional(),
+  adapterKey: z.string().trim().min(1).optional(),
+  isActive: z.boolean().optional(),
+  // Selecting the environment drives the API base URL server-side.
+  environment: z.enum(['sandbox', 'production']).optional(),
+  config: z.any().optional(),
+  // Secrets: a value sets/re-encrypts, '' clears, omitted leaves untouched.
+  apiKey: z.string().nullable().optional(),
+  apiSecret: z.string().nullable().optional(),
+  webhookSecret: z.string().nullable().optional(),
+});
+
+export const deliveryShipmentCreateSchema = z
+  .object({
+    // Source: an online order and/or a sale (at least one).
+    onlineOrderId: z.coerce.number().int().positive().optional(),
+    saleId: z.coerce.number().int().positive().optional(),
+    providerId: z.coerce.number().int().positive().optional(),
+    providerCode: z.string().trim().min(1).optional(),
+    // Recipient (dialog fields).
+    recipientName: z.string().trim().min(1, 'Customer name is required'),
+    recipientPhone: z.string().trim().min(1, 'Customer phone is required'),
+    secondaryPhone: z.string().trim().nullable().optional(),
+    province: z.string().trim().nullable().optional(),
+    region: z.string().trim().nullable().optional(),
+    recipientAddress: z.string().trim().nullable().optional(),
+    // Boxy dispatch attributes.
+    description: z.string().trim().nullable().optional(),
+    size: z.enum(['S', 'M', 'L', 'XL']).optional(),
+    fragile: z.boolean().optional(),
+    readyToPickup: z.boolean().optional(),
+    paymentType: z.enum(['COLLECT_ON_DELIVERY', 'PREPAID']).optional(),
+    feeType: z.enum(['BY_MERCHANT', 'BY_CUSTOMER']).optional(),
+    codAmount: z.coerce.number().nonnegative().optional(),
+    deliveryFee: z.coerce.number().nonnegative().optional(),
+    currency: z.enum(['USD', 'IQD']).optional(),
+    notes: z.string().trim().nullable().optional(),
+  })
+  .refine((d) => d.onlineOrderId || d.saleId, {
+    message: 'onlineOrderId or saleId is required',
+    path: ['onlineOrderId'],
+  })
+  .refine((d) => d.providerId || d.providerCode, {
+    message: 'providerId or providerCode is required',
+    path: ['providerId'],
+  });
+
+// Optional overrides when converting an order to a sale invoice. Everything is
+// optional — the order itself supplies the items, channel and customer.
+export const onlineOrderConvertSchema = z.object({
+  paidAmount: z.coerce.number().nonnegative().optional(),
+  paymentMethod: z.enum(['cash', 'card']).optional(),
+  paymentReference: z.string().trim().nullable().optional(),
+  currency: z.enum(['USD', 'IQD']).optional(),
+  branchId: z.coerce.number().int().positive().optional(),
+  warehouseId: z.coerce.number().int().positive().optional(),
 });
 
 // Sale schemas
@@ -530,25 +642,4 @@ export const settingsSchema = z.object({
   value: z.any(),
 });
 
-// ── Cash session / shift closing schemas ──────────────────────────────────
-export const openCashSessionSchema = z.object({
-  openingCash: z
-    .number({ invalid_type_error: 'Opening cash must be a number' })
-    .nonnegative('Opening cash cannot be negative')
-    .default(0),
-  currency: z.enum(['USD', 'IQD']).default('USD'),
-  notes: z.string().nullable().optional(),
-  // branchId is only honoured for global admins; the service falls back to
-  // the user's assigned branch otherwise.
-  branchId: z.number().int().positive().nullable().optional(),
-  // Treasury: which cashbox the shift operates on. Optional — the service
-  // falls back to the branch's default cashbox when the flag is on.
-  cashboxId: z.number().int().positive().nullable().optional(),
-});
-
-export const closeCashSessionSchema = z.object({
-  closingCash: z
-    .number({ invalid_type_error: 'Closing cash must be a number' })
-    .nonnegative('Closing cash cannot be negative'),
-  notes: z.string().nullable().optional(),
-});
+// Cash session / shift schemas removed — the shift system no longer exists.

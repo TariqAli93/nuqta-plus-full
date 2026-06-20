@@ -261,6 +261,11 @@ const inventoryStore = useInventoryStore();
 const multiBranch = computed(() => authStore.hasFeature?.('multiBranch') === true);
 const canOpen = computed(() => authStore.hasPermission?.('accounting_periods:open') === true);
 const canClose = computed(() => authStore.hasPermission?.('accounting_periods:close') === true);
+// Branch list is an OPTIONAL sub-feature (powers the multi-branch scope picker
+// in the "open period" dialog). Reading branches needs `inventory:read`, a
+// different permission than this page — guard the fetch so a period manager
+// without inventory access doesn't trigger a spurious 403 toast.
+const canReadBranches = computed(() => authStore.hasPermission?.('inventory:read') === true);
 const branches = computed(() => inventoryStore.branches || []);
 
 const headers = [
@@ -359,7 +364,7 @@ const showDetails = async (item) => {
 
 onMounted(async () => {
   await store.fetchAll();
-  if (multiBranch.value && branches.value.length === 0) {
+  if (multiBranch.value && canReadBranches.value && branches.value.length === 0) {
     await inventoryStore.fetchBranches().catch(() => {});
   }
 });

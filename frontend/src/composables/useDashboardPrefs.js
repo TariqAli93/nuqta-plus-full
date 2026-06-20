@@ -24,6 +24,7 @@ const DEFAULTS = {
   sections: {
     quickActions: true, // العمليات السريعة
     performance: true, // مؤشرات الأداء والرسوم
+    onlineCommerce: true, // ودجات التجارة الأونلاين
     alerts: true, // مركز التنبيهات
     activity: true, // النشاط الحديث
   },

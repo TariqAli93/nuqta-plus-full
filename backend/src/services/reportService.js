@@ -20,6 +20,7 @@ import { branchFilterFor } from './scopeService.js';
 import { netAfterReturn } from './reportMath.js';
 import accountingPeriodService from './accountingPeriodService.js';
 import { isFeatureEnabled } from './featureFlagsService.js';
+import { hasPermission } from '../auth/permissionMatrix.js';
 
 
 function toNum(v) {
@@ -62,14 +63,54 @@ function applyBranchScope(filters, actingUser) {
     return filters.branchId ? Number(filters.branchId) : null;
   }
   if (allowed.length === 0) return -1;
+  // Branch-scoped accounting-period reports are per-branch: a multi-branch user
+  // may pick any ONE of their assigned branches (a foreign request is ignored);
+  // otherwise default to their primary/first branch.
+  const req = filters.branchId ? Number(filters.branchId) : null;
+  if (req && allowed.includes(req)) return req;
   return Number(allowed[0]);
 }
 
-function withConditions(base = [], { branchId, currency, from, to, accountingPeriodId }, dateColumn) {
+/**
+ * May the acting user see EVERY user's operations on the dashboard / financial
+ * reports? Global admins and holders of a financial-reports permission can;
+ * everyone else is scoped to the operations they personally performed. Mirrors
+ * `posReportsService.canViewAllUsers` — the cash-session (shift) scope was
+ * replaced by per-user (`created_by`) scoping, enforced in the BACKEND.
+ */
+function canViewAllUsers(actingUser) {
+  if (!actingUser) return false;
+  if (actingUser.allPermissions === true) return true;
+  return (
+    hasPermission('reports:read_profit', actingUser.role) ||
+    hasPermission('reports:read_financial', actingUser.role) ||
+    hasPermission('reports:view_all_users', actingUser.role)
+  );
+}
+
+/**
+ * Resolve which user's operations a report must be scoped to:
+ *   - "view all" user → the requested userId, or null (= every user);
+ *   - normal user → ALWAYS their own id (any requested userId ignored);
+ *   - no resolvable id → -1 (sentinel → empty result).
+ */
+function applyUserScope(filters, actingUser) {
+  if (canViewAllUsers(actingUser)) {
+    return filters.userId ? Number(filters.userId) : null;
+  }
+  const own = Number(actingUser?.id);
+  return Number.isFinite(own) && own > 0 ? own : -1;
+}
+
+function withConditions(base = [], { branchId, userId, currency, from, to, accountingPeriodId }, dateColumn) {
   const out = [...base];
   if (branchId !== null && branchId !== undefined) {
     if (branchId === -1) out.push(sql`1=0`);
     else out.push(eq(sales.branchId, branchId));
+  }
+  if (userId !== null && userId !== undefined) {
+    if (userId === -1) out.push(sql`1=0`);
+    else out.push(eq(sales.createdBy, userId));
   }
   if (currency && currency !== 'ALL') out.push(eq(sales.currency, currency));
   if (from) out.push(gte(dateColumn, from));
@@ -132,13 +173,16 @@ export class ReportService {
     // is synchronous and flag-unaware; see scopeService note.)
     const branchScoped = await accountingPeriodService.isBranchScoped();
     const branchId = branchScoped ? applyBranchScope(filters, actingUser) : null;
+    // Per-user scope: normal users see only their own operations; reports-
+    // permission holders / global admins see everyone (optionally one userId).
+    const userId = applyUserScope(filters, actingUser);
     const currency = filters.currency || 'ALL';
     const { accountingPeriodId, noOpenPeriod } = await this.resolveReportPeriod(filters, branchId);
 
     const salesDate = sql`${sales.createdAt}::date::text`;
     const saleConds = withConditions([
       sql`${sales.status} <> 'draft'`,
-    ], { branchId, currency, from, to, accountingPeriodId }, salesDate);
+    ], { branchId, userId, currency, from, to, accountingPeriodId }, salesDate);
 
     const salesSummaryRows = await db
       .select({
@@ -194,6 +238,10 @@ export class ReportService {
       if (branchId === -1) paymentConds.push(sql`1=0`);
       else paymentConds.push(eq(sales.branchId, branchId));
     }
+    if (userId !== null && userId !== undefined) {
+      if (userId === -1) paymentConds.push(sql`1=0`);
+      else paymentConds.push(eq(payments.createdBy, userId));
+    }
     if (accountingPeriodId) paymentConds.push(eq(sales.accountingPeriodId, accountingPeriodId));
 
     const paymentRows = await db
@@ -218,6 +266,10 @@ export class ReportService {
     if (branchId !== null && branchId !== undefined) {
       if (branchId === -1) installmentConds.push(sql`1=0`);
       else installmentConds.push(eq(sales.branchId, branchId));
+    }
+    if (userId !== null && userId !== undefined) {
+      if (userId === -1) installmentConds.push(sql`1=0`);
+      else installmentConds.push(eq(installments.createdBy, userId));
     }
     // Scope installments (and the delay stats below, which reuse these conds)
     // to the active period too, so the dashboard zeroes out after close — the
@@ -350,6 +402,10 @@ export class ReportService {
     if (branchId !== null && branchId !== undefined) {
       if (branchId === -1) expenseConds.push(sql`1=0`);
       else expenseConds.push(eq(expenses.branchId, branchId));
+    }
+    if (userId !== null && userId !== undefined) {
+      if (userId === -1) expenseConds.push(sql`1=0`);
+      else expenseConds.push(eq(expenses.createdBy, userId));
     }
     if (accountingPeriodId) expenseConds.push(eq(expenses.accountingPeriodId, accountingPeriodId));
     const expenseWhere = expenseConds.length ? and(...expenseConds) : undefined;
@@ -556,7 +612,7 @@ export class ReportService {
         topDebtCustomers: debtRows,
         topPayingCustomers: topPaying,
       },
-      trends: await this.getTrends({ from, to, branchId, currency, accountingPeriodId }),
+      trends: await this.getTrends({ from, to, branchId, userId, currency, accountingPeriodId }),
     };
   }
 
@@ -580,13 +636,14 @@ export class ReportService {
     // filter so the default-branch period scope isn't mismatched to zero.
     const branchScoped = await accountingPeriodService.isBranchScoped();
     const branchId = branchScoped ? applyBranchScope(filters, actingUser) : null;
+    const userId = applyUserScope(filters, actingUser);
     const currency = filters.currency || 'ALL';
     const { accountingPeriodId, noOpenPeriod } = await this.resolveReportPeriod(filters, branchId);
 
     const salesDate = sql`${sales.createdAt}::date::text`;
     const saleConds = withConditions(
       [sql`${sales.status} <> 'cancelled'`, sql`${sales.status} <> 'draft'`],
-      { branchId, currency, from, to, accountingPeriodId },
+      { branchId, userId, currency, from, to, accountingPeriodId },
       salesDate
     );
     const saleWhere = saleConds.length ? and(...saleConds) : undefined;
@@ -769,6 +826,10 @@ export class ReportService {
       if (branchId === -1) expenseConds.push(sql`1=0`);
       else expenseConds.push(eq(expenses.branchId, branchId));
     }
+    if (userId !== null && userId !== undefined) {
+      if (userId === -1) expenseConds.push(sql`1=0`);
+      else expenseConds.push(eq(expenses.createdBy, userId));
+    }
     if (accountingPeriodId) expenseConds.push(eq(expenses.accountingPeriodId, accountingPeriodId));
     const expenseWhere = expenseConds.length ? and(...expenseConds) : undefined;
 
@@ -881,7 +942,7 @@ export class ReportService {
     };
   }
 
-  async getTrends({ from, to, branchId, currency, accountingPeriodId = null }) {
+  async getTrends({ from, to, branchId, userId = null, currency, accountingPeriodId = null }) {
     const db = await getDb();
     const conds = [sql`${sales.status} <> 'cancelled'`];
     if (from) conds.push(gte(sql`${sales.createdAt}::date::text`, from));
@@ -889,6 +950,10 @@ export class ReportService {
     if (branchId !== null && branchId !== undefined) {
       if (branchId === -1) conds.push(sql`1=0`);
       else conds.push(eq(sales.branchId, branchId));
+    }
+    if (userId !== null && userId !== undefined) {
+      if (userId === -1) conds.push(sql`1=0`);
+      else conds.push(eq(sales.createdBy, userId));
     }
     if (currency && currency !== 'ALL') conds.push(eq(sales.currency, currency));
     // Live trends follow the active period too (sentinel -1 → empty charts).
@@ -918,6 +983,7 @@ export class ReportService {
         ...(to ? [lte(installments.dueDate, to)] : []),
         ...(currency && currency !== 'ALL' ? [eq(installments.currency, currency)] : []),
         ...(branchId !== null && branchId !== undefined ? [branchId === -1 ? sql`1=0` : eq(sales.branchId, branchId)] : []),
+        ...(userId !== null && userId !== undefined ? [userId === -1 ? sql`1=0` : eq(installments.createdBy, userId)] : []),
         ...(accountingPeriodId ? [eq(sales.accountingPeriodId, accountingPeriodId)] : [])
       ))
       .groupBy(installments.dueDate, installments.currency)

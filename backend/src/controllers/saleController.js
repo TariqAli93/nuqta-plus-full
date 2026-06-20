@@ -1,7 +1,7 @@
 import { SaleService } from '../services/saleService.js';
 import { saleSchema, saleReturnSchema } from '../utils/validation.js';
 import { CurrencyConversionService } from '../services/currencyConversionService.js';
-import { enforceBranchScope } from '../services/scopeService.js';
+import { enforceInvoiceBranchScope } from '../services/scopeService.js';
 
 const saleService = new SaleService();
 const currencyService = new CurrencyConversionService();
@@ -36,7 +36,7 @@ export class SaleController {
 
   async getById(request, reply) {
     const sale = await saleService.getById(request.params.id);
-    enforceBranchScope(request.user, sale.branchId);
+    await enforceInvoiceBranchScope(request.user, sale.branchId);
     return reply.send({
       success: true,
       data: sale,
@@ -45,7 +45,7 @@ export class SaleController {
 
   async cancel(request, reply) {
     const existing = await saleService.getById(request.params.id);
-    enforceBranchScope(request.user, existing.branchId);
+    await enforceInvoiceBranchScope(request.user, existing.branchId);
     const sale = await saleService.cancel(request.params.id, request.user.id);
     return reply.send({
       success: true,
@@ -55,6 +55,10 @@ export class SaleController {
   }
 
   async addPayment(request, reply) {
+    // Branch scope first — a branch-bound user must not pay against an invoice
+    // from a branch they aren't assigned to, even by passing the id directly.
+    const existing = await saleService.getById(request.params.saleId);
+    await enforceInvoiceBranchScope(request.user, existing.branchId);
     const sale = await saleService.addPayment(request.params.saleId, request.body, request.user.id);
     return reply.send({
       success: true,
@@ -72,6 +76,8 @@ export class SaleController {
   }
 
   async removePayment(request, reply) {
+    const existing = await saleService.getById(request.params.saleId);
+    await enforceInvoiceBranchScope(request.user, existing.branchId);
     const sale = await saleService.removePayment(
       request.params.saleId,
       request.params.paymentId,
@@ -114,7 +120,7 @@ export class SaleController {
     // (Closed accounting-period / closed-shift protection is enforced inside
     // saleService.removeSale via assertSaleWritable.)
     const existing = await saleService.getById(request.params.id);
-    enforceBranchScope(request.user, existing.branchId);
+    await enforceInvoiceBranchScope(request.user, existing.branchId);
     const sale = await saleService.removeSale(request.params.id);
     return reply.send({
       success: true,
@@ -125,7 +131,7 @@ export class SaleController {
 
   async restoreSale(request, reply) {
     const existing = await saleService.getById(request.params.id);
-    enforceBranchScope(request.user, existing.branchId);
+    await enforceInvoiceBranchScope(request.user, existing.branchId);
     const sale = await saleService.restoreSale(request.params.id, request.user.id);
     return reply.send({
       success: true,

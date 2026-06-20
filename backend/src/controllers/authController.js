@@ -1,6 +1,5 @@
 import { AuthService } from '../services/authService.js';
 import { loginSchema, userSchema } from '../utils/validation.js';
-import cashSessionService from '../services/cashSessionService.js';
 
 const authService = new AuthService();
 
@@ -66,14 +65,10 @@ export class AuthController {
   }
 
   async logout(request, reply) {
-    // Auto-close any open shift for this user BEFORE the session ends, so a
-    // logged-out user never leaves a shift hanging open. If the close fails the
-    // error propagates (handled centrally) and the SPA blocks the sign-out.
-    const { closed } = await cashSessionService.closeOpenSessionsForUser(request.user);
+    // Shifts were removed — logout is now stateless.
     return reply.send({
       success: true,
       message: 'Logout successful',
-      data: { closedSessions: closed },
     });
   }
 

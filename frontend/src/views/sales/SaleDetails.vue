@@ -29,7 +29,7 @@
 
       <v-btn
         data-testid="sale-return-btn"
-        v-if="canReturn"
+        v-if="canReturn && canRecordReturn"
         color="warning"
         variant="tonal"
         prepend-icon="mdi-keyboard-return"
@@ -42,8 +42,12 @@
 
       <select-printer />
 
+      <BoxyShipmentButton v-if="sale && canReadShipments" :sale="sale" check-on-mount />
+
       <v-btn variant="text" prepend-icon="mdi-arrow-right" @click="router.go(-1)"> رجوع </v-btn>
     </PageHeader>
+
+    <BoxyShipmentPanel v-if="sale && canReadShipments" :sale="sale" />
 
     <v-card v-if="sale" class="mb-4">
       <v-card-title class="d-flex justify-space-between align-center">
@@ -719,7 +723,7 @@
 
     <!-- Add Payment Form -->
     <v-card
-      v-if="sale && sale.status === 'pending' && sale.remainingAmount > 0"
+      v-if="sale && sale.status === 'pending' && sale.remainingAmount > 0 && canAddPayment"
       class="page-section"
     >
       <div class="section-title">
@@ -792,8 +796,11 @@ import { useSaleStore } from '@/stores/sale';
 import { useSettingsStore } from '@/stores/settings';
 import { useNotificationStore } from '@/stores/notification';
 import { useAuthStore } from '@/stores/auth';
+import { usePermissions } from '@/composables/usePermissions';
 import SelectPrinter from '@/components/SelectPrinter.vue';
 import PageHeader from '@/components/PageHeader.vue';
+import BoxyShipmentButton from '@/components/delivery/BoxyShipmentButton.vue';
+import BoxyShipmentPanel from '@/components/delivery/BoxyShipmentPanel.vue';
 import { formatReceiptData } from '@/utils/receiptFormatter';
 import { priceTierLabel } from '@/utils/productUnits';
 import {
@@ -812,12 +819,25 @@ const saleStore = useSaleStore();
 const settingsStore = useSettingsStore();
 const notificationStore = useNotificationStore();
 const authStore = useAuthStore();
+const { can } = usePermissions();
 
 const printing = ref(false);
 const settings = ref(null);
 
 // Profit visibility — manager and above only.
 const canViewProfit = computed(() => authStore.hasPermission?.(['manage:sales']));
+
+// user_action gates — the backend authoritatively enforces these; we only hide
+// the entry points so the user doesn't trigger a 403 dialog from an action they
+// can never complete.
+const canRecordReturn = computed(() => can('sales:update'));
+const canAddPayment = computed(() => can('sales:update'));
+
+// optional_feature: the Boxy delivery panel/button reach a DIFFERENT permission
+// than the invoice page (delivery_shipments:read). Gate their render so the
+// embedded shipment lookups never fire — and never toast a 403 — for users who
+// can read invoices but not shipments.
+const canReadShipments = computed(() => can('delivery_shipments:read'));
 
 // Wholesale/agent price tiers (تسعير الوكلاء) — gates the "نوع السعر" row.
 const agentPricingOn = computed(() => authStore.hasFeature?.('agentPricing') === true);

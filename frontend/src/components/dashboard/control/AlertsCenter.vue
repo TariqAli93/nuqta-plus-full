@@ -204,7 +204,12 @@ function act(alert) {
   if (alert.to) return router.push(alert.to);
 }
 
+// The alerts endpoint requires `sales:read`. Guard so users without it never
+// trigger a 403 (the store also surfaces its own error toast on failure).
+const canReadAlerts = computed(() => authStore.hasPermission('sales:read'));
+
 async function reload() {
+  if (!canReadAlerts.value) return;
   try {
     await alertStore.fetchAlerts();
   } catch {

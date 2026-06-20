@@ -30,16 +30,58 @@ function paging(filters) {
 }
 
 /**
- * Resolve the branch a report must be scoped to:
- *   - global admin → the requested branchId, or null (= all branches);
- *   - branch-bound user → ALWAYS their own branch (request ignored);
+ * Resolve the branch(es) a report must be scoped to (multi-branch aware):
+ *   - global admin → the requested branchId as a 1-element array, or null (= all);
+ *   - branch-bound user → ALL the branches assigned to them; a requested branch
+ *     that is one of theirs narrows to just that one (so they can filter between
+ *     their branches); a foreign requested branch is ignored;
  *   - user with no branch → -1 (sentinel → empty result).
+ *
+ * Returns `null` (no filter), `-1` (empty), or a NON-empty array of branch ids.
+ * Callers compare with `branch_id = ANY($n)` so a single or many branches work.
  */
 function effectiveBranch(actingUser, requestedBranchId) {
   const allowed = branchFilterFor(actingUser);
-  if (allowed === null) return requestedBranchId ? Number(requestedBranchId) : null;
+  const req = requestedBranchId ? Number(requestedBranchId) : null;
+  if (allowed === null) return req ? [req] : null;
   if (allowed.length === 0) return -1;
-  return Number(allowed[0]);
+  if (req && allowed.includes(req)) return [req];
+  return allowed.map(Number);
+}
+
+/**
+ * May the acting user see OTHER users' operations in reports?
+ *   - a global admin (all_permissions) → yes;
+ *   - a holder of a financial-reports permission (profit / financial / the
+ *     explicit "all users" grant) → yes;
+ *   - everyone else → no (restricted to their own rows).
+ * Replaces the old shift (cash-session) scope: reports are now scoped by the
+ * user who performed the operation (`created_by`), enforced in the BACKEND.
+ */
+function canViewAllUsers(actingUser) {
+  if (!actingUser) return false;
+  if (actingUser.allPermissions === true) return true;
+  return (
+    hasPermission('reports:read_profit', actingUser.role) ||
+    hasPermission('reports:read_financial', actingUser.role) ||
+    hasPermission('reports:view_all_users', actingUser.role)
+  );
+}
+
+/**
+ * Resolve which user's operations a report must be scoped to (backend-enforced;
+ * the UI is never the only gate):
+ *   - "view all" user → the requested userId, or null (= every user);
+ *   - normal user → ALWAYS their own id (any requested userId is ignored);
+ *   - no resolvable id → -1 (sentinel → empty result).
+ * Returns null (no user filter), a numeric user id, or -1.
+ */
+function effectiveUserId(actingUser, requestedUserId) {
+  if (canViewAllUsers(actingUser)) {
+    return requestedUserId ? Number(requestedUserId) : null;
+  }
+  const own = Number(actingUser?.id);
+  return Number.isFinite(own) && own > 0 ? own : -1;
 }
 
 /** Per-line COGS expression (snapshot cost → fallback to product base cost). */
@@ -55,12 +97,15 @@ class PosReportsService {
     const pool = await getPool();
     const branch = effectiveBranch(user, filters.branchId);
     if (branch === -1) return this.#empty(filters);
+    const userScope = effectiveUserId(user, filters.userId);
+    if (userScope === -1) return this.#empty(filters);
     const { page, limit, offset } = paging(filters);
 
     const where = ['COALESCE(s.is_opening_balance,false) = false'];
     const args = [];
     const add = (cond, val) => { args.push(val); where.push(cond.replace('$$', `$${args.length}`)); };
-    if (branch !== null) add('s.branch_id = $$', branch);
+    if (branch !== null) add('s.branch_id = ANY($$)', branch);
+    if (userScope !== null) add('s.created_by = $$', userScope);
     if (filters.from) add('s.created_at::date >= $$', filters.from);
     if (filters.to) add('s.created_at::date <= $$', filters.to);
     if (filters.search) {
@@ -119,12 +164,15 @@ class PosReportsService {
     const pool = await getPool();
     const branch = effectiveBranch(user, filters.branchId);
     if (branch === -1) return this.#empty(filters);
+    const userScope = effectiveUserId(user, filters.userId);
+    if (userScope === -1) return this.#empty(filters);
     const { page, limit, offset } = paging(filters);
 
     const sWhere = ['COALESCE(s.is_opening_balance,false) = false'];
     const a = [];
     const addS = (cond, val) => { a.push(val); sWhere.push(cond.replace('$$', `$${a.length}`)); };
-    if (branch !== null) addS('s.branch_id = $$', branch);
+    if (branch !== null) addS('s.branch_id = ANY($$)', branch);
+    if (userScope !== null) addS('s.created_by = $$', userScope);
     if (filters.from) addS('s.created_at::date >= $$', filters.from);
     if (filters.to) addS('s.created_at::date <= $$', filters.to);
     const SW = sWhere.join(' AND ');
@@ -145,7 +193,8 @@ class PosReportsService {
     const rWhere = [];
     const ra = [];
     const addR = (cond, val) => { ra.push(val); rWhere.push(cond.replace('$$', `$${ra.length}`)); };
-    if (branch !== null) addR('sr.branch_id = $$', branch);
+    if (branch !== null) addR('sr.branch_id = ANY($$)', branch);
+    if (userScope !== null) addR('sr.created_by = $$', userScope);
     if (filters.from) addR('sr.created_at::date >= $$', filters.from);
     if (filters.to) addR('sr.created_at::date <= $$', filters.to);
     const RW = rWhere.length ? 'WHERE ' + rWhere.join(' AND ') : '';
@@ -170,7 +219,8 @@ class PosReportsService {
     const eWhere = [];
     const ea = [];
     const addE = (cond, val) => { ea.push(val); eWhere.push(cond.replace('$$', `$${ea.length}`)); };
-    if (branch !== null) addE('e.branch_id = $$', branch);
+    if (branch !== null) addE('e.branch_id = ANY($$)', branch);
+    if (userScope !== null) addE('e.created_by = $$', userScope);
     if (filters.from) addE('e.expense_date >= $$', filters.from);
     if (filters.to) addE('e.expense_date <= $$', filters.to);
     const EW = eWhere.length ? 'WHERE ' + eWhere.join(' AND ') : '';
@@ -222,12 +272,15 @@ class PosReportsService {
     const pool = await getPool();
     const branch = effectiveBranch(user, filters.branchId);
     if (branch === -1) return this.#empty(filters);
+    const userScope = effectiveUserId(user, filters.userId);
+    if (userScope === -1) return this.#empty(filters);
     const { page, limit, offset } = paging(filters);
 
     const where = ['COALESCE(s.is_opening_balance,false) = false'];
     const a = [];
     const add = (cond, val) => { a.push(val); where.push(cond.replace('$$', `$${a.length}`)); };
-    if (branch !== null) add('s.branch_id = $$', branch);
+    if (branch !== null) add('s.branch_id = ANY($$)', branch);
+    if (userScope !== null) add('s.created_by = $$', userScope);
     if (filters.from) add('s.created_at::date >= $$', filters.from);
     if (filters.to) add('s.created_at::date <= $$', filters.to);
     if (filters.search) {
@@ -286,6 +339,8 @@ class PosReportsService {
     const pool = await getPool();
     const branch = effectiveBranch(user, filters.branchId);
     if (branch === -1) return this.#emptyDebts(filters);
+    const userScope = effectiveUserId(user, filters.userId);
+    if (userScope === -1) return this.#emptyDebts(filters);
     const { page, limit, offset } = paging(filters);
 
     const partyType = ['customer', 'agent', 'supplier', 'all'].includes(filters.partyType)
@@ -309,6 +364,8 @@ class PosReportsService {
     const a = [];
     const P = (v) => { a.push(v); return `$${a.length}`; };
     const branchP = branch !== null ? P(branch) : null;
+    // Restricted users only see debts arising from their OWN sales (created_by).
+    const userScopeP = userScope !== null ? P(userScope) : null;
     const fromP = filters.from ? P(filters.from) : null;
     const toP = filters.to ? P(filters.to) : null;
     const searchP = filters.search ? P(`%${filters.search}%`) : null;
@@ -324,7 +381,8 @@ class PosReportsService {
       const w = ['s.customer_id IS NOT NULL', 'COALESCE(s.is_opening_balance,false) = false'];
       if (partyType === 'customer') w.push(`COALESCE(c.customer_type,'retail') <> 'agent'`);
       if (partyType === 'agent') w.push(`COALESCE(c.customer_type,'retail') = 'agent'`);
-      if (branchP) w.push(`s.branch_id = ${branchP}`);
+      if (branchP) w.push(`s.branch_id = ANY(${branchP})`);
+      if (userScopeP) w.push(`s.created_by = ${userScopeP}`);
       if (fromP) w.push(`s.created_at::date >= ${fromP}`);
       if (toP) w.push(`s.created_at::date <= ${toP}`);
       if (customerIdP) w.push(`s.customer_id = ${customerIdP}`);
@@ -348,7 +406,8 @@ class PosReportsService {
 
     if (wantSuppliers) {
       const w = [`pi.status <> 'cancelled'`, 'COALESCE(pi.is_opening_balance,false) = false'];
-      if (branchP) w.push(`pi.branch_id = ${branchP}`);
+      if (branchP) w.push(`pi.branch_id = ANY(${branchP})`);
+      if (userScopeP) w.push(`pi.created_by = ${userScopeP}`);
       if (fromP) w.push(`pi.invoice_date >= ${fromP}`);
       if (toP) w.push(`pi.invoice_date <= ${toP}`);
       if (searchP)
@@ -452,15 +511,16 @@ class PosReportsService {
     const pool = await getPool();
     const branch = effectiveBranch(user, filters.branchId);
     if (branch === -1) return this.#empty(filters);
+    const userScope = effectiveUserId(user, filters.userId);
+    if (userScope === -1) return this.#empty(filters);
 
     // Receipts = cash payments. Expenses = cash expenses. Returns = cash refunds.
-    const sess = filters.cashSessionId ? Number(filters.cashSessionId) : null;
-
+    // Scoped by the user who performed each operation (was: by cash session).
     const pWhere = [`p.payment_method = 'cash'`];
     const pa = [];
     const addP = (cond, val) => { pa.push(val); pWhere.push(cond.replace('$$', `$${pa.length}`)); };
-    if (sess) addP('p.cash_session_id = $$', sess);
-    if (branch !== null) addP('s.branch_id = $$', branch);
+    if (userScope !== null) addP('p.created_by = $$', userScope);
+    if (branch !== null) addP('s.branch_id = ANY($$)', branch);
     if (filters.from) addP('p.payment_date::date >= $$', filters.from);
     if (filters.to) addP('p.payment_date::date <= $$', filters.to);
     const [{ receipts }] = (await pool.query(
@@ -471,8 +531,8 @@ class PosReportsService {
     const eWhere = [`(e.payment_method = 'cash' OR e.payment_method IS NULL)`];
     const ea = [];
     const addE = (cond, val) => { ea.push(val); eWhere.push(cond.replace('$$', `$${ea.length}`)); };
-    if (sess) addE('e.cash_session_id = $$', sess);
-    if (branch !== null) addE('e.branch_id = $$', branch);
+    if (userScope !== null) addE('e.created_by = $$', userScope);
+    if (branch !== null) addE('e.branch_id = ANY($$)', branch);
     if (filters.from) addE('e.expense_date >= $$', filters.from);
     if (filters.to) addE('e.expense_date <= $$', filters.to);
     const [{ expensesOut }] = (await pool.query(
@@ -482,20 +542,16 @@ class PosReportsService {
     const rWhere = [`(sr.refund_method = 'cash' OR sr.refund_method IS NULL)`];
     const ra = [];
     const addR = (cond, val) => { ra.push(val); rWhere.push(cond.replace('$$', `$${ra.length}`)); };
-    if (sess) addR('sr.cash_session_id = $$', sess);
-    if (branch !== null) addR('sr.branch_id = $$', branch);
+    if (userScope !== null) addR('sr.created_by = $$', userScope);
+    if (branch !== null) addR('sr.branch_id = ANY($$)', branch);
     if (filters.from) addR('sr.created_at::date >= $$', filters.from);
     if (filters.to) addR('sr.created_at::date <= $$', filters.to);
     const [{ refunds }] = (await pool.query(
       `SELECT COALESCE(SUM(sr.refund_amount),0) refunds FROM sale_returns sr WHERE ${rWhere.join(' AND ')}`, ra
     )).rows;
 
-    // Opening from the cash session if scoped to one.
-    let opening = 0;
-    if (sess) {
-      const r = (await pool.query('SELECT opening_cash FROM cash_sessions WHERE id = $1', [sess])).rows[0];
-      opening = num(r?.opening_cash);
-    }
+    // No shift opening float anymore (cash sessions removed); start from zero.
+    const opening = 0;
     const net = num(receipts) - num(expensesOut) - num(refunds);
 
     // Recent cash movements (context table) — reuse the unified ledger.
@@ -520,12 +576,15 @@ class PosReportsService {
     const pool = await getPool();
     const branch = effectiveBranch(user, filters.branchId);
     if (branch === -1) return this.#empty(filters);
+    const userScope = effectiveUserId(user, filters.userId);
+    if (userScope === -1) return this.#empty(filters);
     const { page, limit, offset } = paging(filters);
 
     const where = [];
     const a = [];
     const add = (cond, val) => { a.push(val); where.push(cond.replace('$$', `$${a.length}`)); };
-    if (branch !== null) add('e.branch_id = $$', branch);
+    if (branch !== null) add('e.branch_id = ANY($$)', branch);
+    if (userScope !== null) add('e.created_by = $$', userScope);
     if (filters.from) add('e.expense_date >= $$', filters.from);
     if (filters.to) add('e.expense_date <= $$', filters.to);
     if (filters.search) {
@@ -574,8 +633,9 @@ class PosReportsService {
     const pool = await getPool();
     const branch = effectiveBranch(user, filters.branchId);
     if (branch === -1) return this.#empty(filters);
+    const userScope = effectiveUserId(user, filters.userId);
+    if (userScope === -1) return this.#empty(filters);
     const { page, limit, offset } = paging(filters);
-    const sess = filters.cashSessionId ? Number(filters.cashSessionId) : null;
 
     // Build the three legs as a UNION ALL, then a window running balance.
     // Params are shared positionally across legs; collect them once.
@@ -584,7 +644,8 @@ class PosReportsService {
     const fromP = filters.from ? P(filters.from) : null;
     const toP = filters.to ? P(filters.to) : null;
     const branchP = branch !== null ? P(branch) : null;
-    const sessP = sess ? P(sess) : null;
+    // Each ledger leg is scoped to the user who performed it (was: cash session).
+    const userScopeP = userScope !== null ? P(userScope) : null;
 
     const dateCond = (col) => [
       fromP ? `${col} >= ${fromP}` : null,
@@ -604,8 +665,8 @@ class PosReportsService {
       LEFT JOIN branches b ON b.id = s.branch_id
       LEFT JOIN users u ON u.id = p.created_by
       WHERE p.payment_method = 'cash'
-        ${sessP ? `AND p.cash_session_id = ${sessP}` : ''}
-        ${branchP ? `AND s.branch_id = ${branchP}` : ''}
+        ${userScopeP ? `AND p.created_by = ${userScopeP}` : ''}
+        ${branchP ? `AND s.branch_id = ANY(${branchP})` : ''}
         ${dateCond('p.payment_date::date') ? 'AND ' + dateCond('p.payment_date::date') : ''}`;
 
     const expLeg = `
@@ -618,8 +679,8 @@ class PosReportsService {
       LEFT JOIN users u ON u.id = e.created_by
       LEFT JOIN branches b ON b.id = e.branch_id
       WHERE (e.payment_method = 'cash' OR e.payment_method IS NULL)
-        ${sessP ? `AND e.cash_session_id = ${sessP}` : ''}
-        ${branchP ? `AND e.branch_id = ${branchP}` : ''}
+        ${userScopeP ? `AND e.created_by = ${userScopeP}` : ''}
+        ${branchP ? `AND e.branch_id = ANY(${branchP})` : ''}
         ${dateCond('e.expense_date') ? 'AND ' + dateCond('e.expense_date') : ''}`;
 
     const retLeg = `
@@ -632,8 +693,8 @@ class PosReportsService {
       LEFT JOIN users u ON u.id = sr.created_by
       LEFT JOIN branches b ON b.id = sr.branch_id
       WHERE (sr.refund_method = 'cash' OR sr.refund_method IS NULL) AND sr.refund_amount > 0
-        ${sessP ? `AND sr.cash_session_id = ${sessP}` : ''}
-        ${branchP ? `AND sr.branch_id = ${branchP}` : ''}
+        ${userScopeP ? `AND sr.created_by = ${userScopeP}` : ''}
+        ${branchP ? `AND sr.branch_id = ANY(${branchP})` : ''}
         ${dateCond('sr.created_at::date') ? 'AND ' + dateCond('sr.created_at::date') : ''}`;
 
     // type filter

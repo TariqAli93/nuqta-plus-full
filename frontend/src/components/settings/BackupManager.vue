@@ -6,6 +6,7 @@ import { useSimpleLoading } from '@/composables/useLoading';
 import { useNotificationStore } from '@/stores/notification';
 import { useResetStore } from '@/stores/reset';
 import { useAuthStore } from '@/stores/auth';
+import { usePermissions } from '@/composables/usePermissions';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import { useTheme } from 'vuetify';
 
@@ -14,6 +15,7 @@ const notification = useNotificationStore();
 
 const resetStore = useResetStore();
 const authStore = useAuthStore();
+const { can } = usePermissions();
 
 const theme = useTheme();
 
@@ -191,6 +193,7 @@ onMounted(async () => {
       <div class="text-h6 font-weight-bold">📦 إدارة نسخ قاعدة البيانات الاحتياطية</div>
       <div class="flex gap-2">
         <v-btn
+          v-if="can('settings:create')"
           color="primary"
           variant="elevated"
           prepend-icon="mdi-database-export-outline"
@@ -200,6 +203,7 @@ onMounted(async () => {
         </v-btn>
 
         <v-btn
+          v-if="can('settings:create')"
           color="secondary"
           variant="elevated"
           prepend-icon="mdi-database-import-outline"
@@ -209,6 +213,7 @@ onMounted(async () => {
         </v-btn>
 
         <v-btn
+          v-if="can('settings:create')"
           color="error"
           variant="elevated"
           prepend-icon="mdi-database-remove-outline"
@@ -234,14 +239,28 @@ onMounted(async () => {
         </template>
 
         <template #[`item.actions`]="{ item }">
-          <v-btn icon small color="error" variant="text" @click="deleteBackup(item.filename)">
+          <v-btn
+            v-if="can('settings:delete')"
+            icon
+            small
+            color="error"
+            variant="text"
+            @click="deleteBackup(item.filename)"
+          >
             <v-icon>mdi-delete</v-icon>
             <v-tooltip activator="parent" location="start" :theme="isDarkMode ? 'light' : 'dark'">
               حذف النسخة الاحتياطية
             </v-tooltip>
           </v-btn>
 
-          <v-btn icon small color="error" variant="text" @click="restoreBackup(item.filename)">
+          <v-btn
+            v-if="can('settings:create')"
+            icon
+            small
+            color="error"
+            variant="text"
+            @click="restoreBackup(item.filename)"
+          >
             <v-icon>mdi-restore</v-icon>
             <v-tooltip activator="parent" location="start" :theme="isDarkMode ? 'light' : 'dark'">
               استعادة النسخة الاحتياطية

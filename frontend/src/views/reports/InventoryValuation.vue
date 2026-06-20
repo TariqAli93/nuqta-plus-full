@@ -6,6 +6,16 @@
       icon="mdi-cash-multiple"
     />
 
+    <PermissionEmptyState
+      v-if="!canReadInventory"
+      title="لا تملك صلاحية عرض المخزون"
+      message="تحتاج إلى صلاحية عرض المخزون لاستعراض قيمة البضاعة."
+      icon="mdi-lock-outline"
+      page-title="قيمة المخزون"
+      :missing-permissions="[{ label: 'عرض المخزون وقيمته', permission: 'inventory:read' }]"
+    />
+
+    <template v-else>
     <!-- ── الفلاتر ─────────────────────────────────────────────────────────── -->
     <v-card variant="outlined" class="mb-4">
       <v-card-text>
@@ -148,6 +158,7 @@
         لا توجد بضاعة في المخزون مطابقة للفلاتر المحددة.
       </div>
     </v-card>
+    </template>
   </div>
 </template>
 
@@ -159,6 +170,7 @@ import { useCategoryStore } from '@/stores/category';
 import { useProductStore } from '@/stores/product';
 import { useAuthStore } from '@/stores/auth';
 import PageHeader from '@/components/PageHeader.vue';
+import PermissionEmptyState from '@/components/PermissionEmptyState.vue';
 import { formatCurrency } from '@/utils/formatters';
 import { PRICE_TIERS } from '@/utils/productUnits';
 
@@ -170,6 +182,11 @@ const authStore = useAuthStore();
 
 const multiBranchOn = computed(() => authStore.hasFeature?.('multiBranch') === true);
 const multiWarehouseOn = computed(() => authStore.hasFeature?.('multiWarehouse') === true);
+
+// The page is reachable with `view:inventory`, but the valuation endpoint
+// requires `inventory:read`. Guard the fetch so a user lacking it never
+// triggers a 403 toast, and show an empty state instead.
+const canReadInventory = computed(() => authStore.hasPermission('inventory:read'));
 
 const filters = reactive({
   branchId: multiBranchOn.value ? inventoryStore.selectedBranchId || null : null,
@@ -221,6 +238,7 @@ const buildParams = () => {
 };
 
 const load = async () => {
+  if (!canReadInventory.value) return; // no inventory:read → don't hit the API
   await reportStore.fetchInventoryValuation(buildParams());
 };
 
@@ -234,6 +252,7 @@ const resetFilters = () => {
 };
 
 onMounted(async () => {
+  if (!canReadInventory.value) return; // page is hidden → skip all fetches
   // Load filter option sources (best-effort) then run the initial report.
   const tasks = [
     categoryStore.fetchCategories().catch(() => {}),

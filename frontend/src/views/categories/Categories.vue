@@ -5,7 +5,12 @@
       subtitle="تنظيم منتجاتك ضمن تصنيفات"
       icon="mdi-shape"
     >
-      <v-btn color="primary" variant="flat" prepend-icon="mdi-plus" @click="openDialog()"
+      <v-btn
+        v-if="canCreate"
+        color="primary"
+        variant="flat"
+        prepend-icon="mdi-plus"
+        @click="openDialog()"
         >تصنيف جديد
       </v-btn>
     </PageHeader>
@@ -24,8 +29,15 @@
         @update:items-per-page="changeItemsPerPage"
       >
         <template #[`item.actions`]="{ item }">
-          <v-btn icon="mdi-pencil" size="small" variant="text" @click="openDialog(item)"></v-btn>
           <v-btn
+            v-if="canUpdate"
+            icon="mdi-pencil"
+            size="small"
+            variant="text"
+            @click="openDialog(item)"
+          ></v-btn>
+          <v-btn
+            v-if="canDelete"
             icon="mdi-delete"
             size="small"
             variant="text"
@@ -97,11 +109,19 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue';
 import { useCategoryStore } from '@/stores/category';
+import { usePermissions } from '@/composables/usePermissions';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import PaginationControls from '@/components/PaginationControls.vue';
 import PageHeader from '@/components/PageHeader.vue';
 
 const categoryStore = useCategoryStore();
+const { can } = usePermissions();
+
+// Action-button gates (user_action behavior): hide write affordances the
+// signed-in user lacks. Backend authorize() remains the real gate.
+const canCreate = computed(() => can('categories:create'));
+const canUpdate = computed(() => can('categories:update'));
+const canDelete = computed(() => can('categories:delete'));
 
 const dialog = ref(false);
 const deleteDialog = ref(false);

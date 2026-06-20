@@ -128,10 +128,9 @@ const route = useRoute();
 // State
 const activeTab = ref('company');
 
-const canManageMessaging = computed(() => {
-  const role = authStore.user?.role;
-  return role === 'admin' || role === 'global_admin';
-});
+// Permission-based (NOT role-name): messaging config is an administrative
+// settings surface, gated by the same grant as the rest of system settings.
+const canManageMessaging = computed(() => authStore.hasPermission('settings:manage'));
 
 onMounted(async () => {
   // Check for tab query parameter

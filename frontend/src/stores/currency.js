@@ -25,7 +25,7 @@ export const useCurrencyStore = defineStore('currency', {
 
         this.currencies = response.data;
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل تحميل العملات');
+        notificationStore.error(error?.message || 'فشل تحميل العملات');
         throw error;
       } finally {
         this.loading = false;
@@ -39,7 +39,7 @@ export const useCurrencyStore = defineStore('currency', {
         const response = await api.get('/currencies/active');
         this.currencies = response.data;
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل تحميل العملات النشطة');
+        notificationStore.error(error?.message || 'فشل تحميل العملات النشطة');
         throw error;
       } finally {
         this.loading = false;
@@ -53,7 +53,7 @@ export const useCurrencyStore = defineStore('currency', {
         const response = await api.get('/currencies/base');
         this.baseCurrency = response.data;
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل تحميل العملة الأساسية');
+        notificationStore.error(error?.message || 'فشل تحميل العملة الأساسية');
         throw error;
       } finally {
         this.loading = false;
@@ -68,7 +68,7 @@ export const useCurrencyStore = defineStore('currency', {
         notificationStore.success('تم جلب بيانات العملة بنجاح');
         return response.data;
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل جلب بيانات العملة');
+        notificationStore.error(error?.message || 'فشل جلب بيانات العملة');
         throw error;
       } finally {
         this.loading = false;
@@ -95,7 +95,7 @@ export const useCurrencyStore = defineStore('currency', {
         notificationStore.success('تم تحديث سعر الصرف بنجاح');
         return response.data;
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل تحديث سعر الصرف');
+        notificationStore.error(error?.message || 'فشل تحديث سعر الصرف');
         throw error;
       } finally {
         this.loading = false;
@@ -119,7 +119,7 @@ export const useCurrencyStore = defineStore('currency', {
         notificationStore.success('تم تحديث العملة بنجاح');
         return response.data;
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل تحديث العملة');
+        notificationStore.error(error?.message || 'فشل تحديث العملة');
         throw error;
       } finally {
         this.loading = false;

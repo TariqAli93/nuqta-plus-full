@@ -77,7 +77,7 @@ export const useAlertStore = defineStore('alert', {
 
         return response.data;
       } catch (error) {
-        const errorMessage = error.response?.data?.message || 'فشل تحميل التنبيهات';
+        const errorMessage = error?.message || 'فشل تحميل التنبيهات';
         if (!this.isRealtimeConnected) {
           notificationStore.error(errorMessage);
         }
@@ -118,16 +118,10 @@ export const useAlertStore = defineStore('alert', {
         });
 
         if (newOutOfStockCount > 0) {
-          notificationStore.warning(
-            `${newOutOfStockCount} منتج نفد من المخزون`,
-            5000
-          );
+          notificationStore.warning(`${newOutOfStockCount} منتج نفد من المخزون`, 5000);
         }
         if (newOverdueCount > 0) {
-          notificationStore.warning(
-            `${newOverdueCount} قسط متأخر جديد`,
-            5000
-          );
+          notificationStore.warning(`${newOverdueCount} قسط متأخر جديد`, 5000);
         }
       }
 

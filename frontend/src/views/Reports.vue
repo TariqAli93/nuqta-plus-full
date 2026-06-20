@@ -120,8 +120,18 @@
       </ul>
     </v-alert>
 
+    <!-- No permission to read the report data (page is reachable via view:reports). -->
+    <PermissionEmptyState
+      v-if="!canReadReportData"
+      title="لا تملك صلاحية عرض بيانات التقارير"
+      message="تحتاج إلى صلاحية عرض الفواتير لاستعراض ملخص المبيعات والمحاسبة."
+      icon="mdi-lock-outline"
+      page-title="التقارير"
+      :missing-permissions="[{ label: 'عرض ملخص المبيعات والمحاسبة', permission: 'sales:read' }]"
+    />
+
     <!-- Loading -->
-    <div v-if="loading && !report" class="loading-state">
+    <div v-else-if="loading && !report" class="loading-state">
       <v-progress-circular indeterminate color="primary" size="48" />
       <div class="text-body-2 text-medium-emphasis mt-3">
         جاري تحميل بيانات التقرير...
@@ -204,6 +214,7 @@ import { useSettingsStore } from '@/stores/settings';
 import { useAccountingPeriodStore } from '@/stores/accountingPeriod';
 import { formatCurrency } from '@/utils/formatters';
 import EmptyState from '@/components/EmptyState.vue';
+import PermissionEmptyState from '@/components/PermissionEmptyState.vue';
 import PageHeader from '@/components/PageHeader.vue';
 import ReportHeader from '@/components/reports/ReportHeader.vue';
 import ReportFilters from '@/components/reports/ReportFilters.vue';
@@ -270,6 +281,14 @@ const defaultFilters = () => ({
 const filters = ref(defaultFilters());
 
 const showBranchFilter = computed(() => authStore.isGlobalAdmin);
+
+// The page is reachable with `view:reports`, but the dashboard/aging data
+// require `sales:read`. Guard the secondary fetches so a view:reports-only user
+// never triggers a 403 toast, and show an empty state instead.
+const canReadReportData = computed(() => authStore.hasPermission('sales:read'));
+const canReadPeriods = computed(() =>
+  authStore.hasPermission('accounting_periods:read'),
+);
 
 // Profit-sensitive sections require manager-level role.
 const canViewProfit = computed(() => {
@@ -338,6 +357,7 @@ function translateNote(note) {
 }
 
 async function load() {
+  if (!canReadReportData.value) return; // no sales:read → don't hit the API
   error.value = '';
   try {
     if (!showBranchFilter.value) filters.value.branchId = null;
@@ -364,7 +384,7 @@ onMounted(async () => {
   await Promise.allSettled([
     settingsStore.fetchCurrencySettings(),
     showBranchFilter.value ? inventoryStore.fetchBranches() : Promise.resolve(),
-    accountingPeriodsEnabled.value
+    accountingPeriodsEnabled.value && canReadPeriods.value
       ? accountingPeriodStore.fetchAll({ status: 'closed' })
       : Promise.resolve(),
   ]);

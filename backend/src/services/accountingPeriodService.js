@@ -211,53 +211,17 @@ export class AccountingPeriodService {
   }
 
   /**
-   * Enforce "an open shift inside the open period" for a financial write
-   * (sale / expense). No-op when the feature is OFF. Returns the shift id.
+   * Shifts (cash sessions) were removed from the system. These two methods are
+   * kept as no-ops so the historical call sites keep working without enforcing
+   * any shift requirement. Financial writes now bind to the current user and
+   * the open accounting period only.
    */
-  async requireOpenShift(user, periodId, { message } = {}) {
-    if (!(await this.isEnabled())) return null;
-    const shift = await this.getOpenShiftForUser(user?.id, periodId);
-    if (!shift) {
-      // Distinguish "no open shift at all" from "a legacy shift exists but isn't
-      // bound to an accounting period" (item 5 / older data).
-      const stray = await this.getAnyOpenShiftForUser(user?.id);
-      if (stray && !stray.accountingPeriodId) {
-        const err = new ValidationError(
-          'لا يمكن تنفيذ العملية لأن الوردية غير مرتبطة بقيد محاسبي.'
-        );
-        err.code = 'SHIFT_NOT_LINKED_TO_PERIOD';
-        err.statusCode = 422;
-        throw err;
-      }
-      const err = new ValidationError(
-        message || 'لا توجد وردية مفتوحة ضمن قيد محاسبي مفتوح — افتح وردية أولاً'
-      );
-      err.code = 'SHIFT_REQUIRED';
-      err.statusCode = 422;
-      throw err;
-    }
-    return shift.id;
+  async requireOpenShift() {
+    return null; // no shift system — never required
   }
 
-  /**
-   * Throw if the given shift is closed (locks edits on sales/expenses tied to a
-   * manually-closed shift even while the period is still open). No-op off.
-   */
-  async assertShiftWritable(cashSessionId) {
-    if (!cashSessionId) return;
-    if (!(await this.isEnabled())) return;
-    const db = await getDb();
-    const [s] = await db
-      .select({ status: cashSessions.status })
-      .from(cashSessions)
-      .where(eq(cashSessions.id, cashSessionId))
-      .limit(1);
-    if (s && s.status === 'closed') {
-      const err = new ValidationError('لا يمكن تعديل هذه العملية لأنها تابعة لوردية مغلقة');
-      err.code = 'SHIFT_CLOSED';
-      err.statusCode = 422;
-      throw err;
-    }
+  async assertShiftWritable() {
+    return; // no shift system — nothing to lock
   }
 
   /**

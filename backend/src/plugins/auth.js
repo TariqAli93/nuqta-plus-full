@@ -5,9 +5,11 @@ import config from '../config.js';
 import { getDb } from '../db.js';
 import { users } from '../models/index.js';
 import { eq } from 'drizzle-orm';
-import { hasPermission } from '../auth/permissionMatrix.js';
+import rbacService from '../services/rbacService.js';
 import featureFlagsService from '../services/featureFlagsService.js';
 import { getUserCapabilities } from '../services/permissionService.js';
+import { loadUserBranchIds } from '../services/scopeService.js';
+import { describePermission } from '../auth/permissionActions.js';
 
 async function authPlugin(fastify) {
   // Register JWT
@@ -16,7 +18,7 @@ async function authPlugin(fastify) {
   });
 
   // Decorate request with auth methods
-  fastify.decorate('authenticate', async function (request, reply) {
+  fastify.decorate('authenticate', async function (request, _reply) {
     try {
       await request.jwtVerify();
 
@@ -27,6 +29,12 @@ async function authPlugin(fastify) {
       if (!user || !user.isActive) {
         throw new AuthenticationError('User not found or inactive');
       }
+
+      // Attach the full set of branches this user may act on (many-to-many).
+      // The synchronous scope helpers (branchFilterFor / enforceBranchScope)
+      // read this list off the user object, so every authenticated request
+      // carries it. Falls back to the primary assignedBranchId internally.
+      user.allowedBranchIds = await loadUserBranchIds(user);
 
       request.user = user;
     } catch (error) {
@@ -45,7 +53,13 @@ async function authPlugin(fastify) {
   // for endpoints like branch update where branch_admin (inventory:manage)
   // and branch_manager (branches:set_default_warehouse) both need access
   // and the service then enforces the stricter per-role field rules.
-  fastify.decorate('authorize', function (requiredPermission) {
+  //
+  // Optional `meta` ({ action, resource }) lets a route spell out a precise
+  // Arabic operation name; otherwise it is derived from the permission key via
+  // the central permissionActions map. On denial the thrown AuthorizationError
+  // carries a rich `details` payload so the UI explains exactly what was
+  // refused, why, and who can fix it (instead of a vague generic message).
+  fastify.decorate('authorize', function (requiredPermission, meta = {}) {
     return async function (request, reply) {
       // Ensure user is authenticated first
       await fastify.authenticate(request, reply);
@@ -60,9 +74,33 @@ async function authPlugin(fastify) {
       const required = Array.isArray(requiredPermission)
         ? requiredPermission
         : [requiredPermission];
-      const ok = required.some((perm) => hasPermission(perm, userRole));
+      // Dynamic, DB-backed check (cached). Changes to a role's permissions take
+      // effect immediately for every user holding that role.
+      await rbacService.ensureLoaded();
+      const ok = required.some((perm) => rbacService.can(userRole, perm));
       if (!ok) {
-        throw new AuthorizationError(`Permission denied: ${required.join(' or ')}`);
+        // Describe the *primary* required permission (first one) for the action
+        // name / reason / suggestion; expose every accepted key too.
+        const desc = describePermission(required[0], meta);
+        let userPermissions = [];
+        try {
+          userPermissions = rbacService.getRolePermissionKeys(userRole);
+        } catch {
+          /* cache miss — leave empty rather than fail the error path */
+        }
+
+        const err = new AuthorizationError(`ليس لديك صلاحية ${desc.action}`);
+        err.code = 'PERMISSION_DENIED';
+        err.details = {
+          action: desc.action,
+          resource: desc.resource,
+          requiredPermission: required.length === 1 ? desc.requiredPermission : required,
+          ...(required.length > 1 ? { requiredAnyOf: required } : {}),
+          userPermissions,
+          reason: desc.reason,
+          suggestion: desc.suggestion,
+        };
+        throw err;
       }
     };
   });
@@ -76,7 +114,7 @@ async function authPlugin(fastify) {
    * detect the case and refresh its session/bootstrap.
    */
   fastify.decorate('requireFeature', function (flag) {
-    return async function (request) {
+    return async function () {
       const enabled = await featureFlagsService.isFeatureEnabled(flag);
       if (!enabled) {
         const err = new AuthorizationError(`Feature "${flag}" is disabled`);
@@ -102,12 +140,17 @@ async function authPlugin(fastify) {
       await fastify.authenticate(request);
       const caps = await getUserCapabilities(request.user);
       if (caps[capabilityName] !== true) {
-        const err = new AuthorizationError(
-          `Capability "${capabilityName}" is not granted`
-        );
+        const err = new AuthorizationError('لا تملك صلاحية استخدام هذه الميزة');
         err.statusCode = 403;
         err.code = 'CAPABILITY_DENIED';
         err.capability = capabilityName;
+        err.details = {
+          capability: capabilityName,
+          reason:
+            'هذه العملية غير متاحة لحسابك — قد تكون الميزة غير مُفعّلة في النمط الحالي أو أن دورك لا يسمح باستخدامها.',
+          suggestion:
+            'تواصل مع المدير العام للتأكد من تفعيل الميزة في الإعدادات أو لمنح دورك صلاحية استخدامها.',
+        };
         throw err;
       }
     };

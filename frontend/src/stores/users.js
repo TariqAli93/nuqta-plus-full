@@ -25,7 +25,7 @@ export const useUsersStore = defineStore('users', {
         this.list = data.data;
         this.total = data.total;
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل تحميل المستخدمين');
+        notificationStore.error(error?.message || 'فشل تحميل المستخدمين');
       } finally {
         this.loading = false;
       }
@@ -37,7 +37,7 @@ export const useUsersStore = defineStore('users', {
         this.current = data.data;
         return this.current;
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل تحميل بيانات المستخدم');
+        notificationStore.error(error?.message || 'فشل تحميل بيانات المستخدم');
         throw error;
       }
     },
@@ -49,7 +49,7 @@ export const useUsersStore = defineStore('users', {
         notificationStore.success('تم إضافة المستخدم بنجاح');
         return data.data;
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل إضافة المستخدم');
+        notificationStore.error(error?.message || 'فشل إضافة المستخدم');
         throw error;
       }
     },
@@ -61,7 +61,7 @@ export const useUsersStore = defineStore('users', {
         notificationStore.success('تم تحديث المستخدم بنجاح');
         return data.data;
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل تحديث المستخدم');
+        notificationStore.error(error?.message || 'فشل تحديث المستخدم');
         throw error;
       }
     },
@@ -72,7 +72,7 @@ export const useUsersStore = defineStore('users', {
         await this.fetch();
         notificationStore.success('تم حذف المستخدم بنجاح');
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل حذف المستخدم');
+        notificationStore.error(error?.message || 'فشل حذف المستخدم');
         throw error;
       }
     },
@@ -82,7 +82,7 @@ export const useUsersStore = defineStore('users', {
         await api.post(`/users/${id}/reset-password`, { password });
         notificationStore.success('تم إعادة تعيين كلمة المرور بنجاح');
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل إعادة تعيين كلمة المرور');
+        notificationStore.error(error?.message || 'فشل إعادة تعيين كلمة المرور');
         throw error;
       }
     },
@@ -93,7 +93,7 @@ export const useUsersStore = defineStore('users', {
         const { data } = await api.get('/users/check-first-user');
         return data.exists;
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل التحقق من المستخدم الأول');
+        notificationStore.error(error?.message || 'فشل التحقق من المستخدم الأول');
         throw error;
       }
     },
@@ -111,7 +111,7 @@ export const useUsersStore = defineStore('users', {
         const currentUser = users.find((u) => u.isCurrent);
         return currentUser ? currentUser.permissions || [] : [];
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل جلب أذونات المستخدم');
+        notificationStore.error(error?.message || 'فشل جلب أذونات المستخدم');
         throw error;
       }
     },

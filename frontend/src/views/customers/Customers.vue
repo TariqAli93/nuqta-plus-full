@@ -2,6 +2,7 @@
   <div class="page-shell">
     <PageHeader title="إدارة العملاء" subtitle="عرض وإدارة بيانات عملائك" icon="mdi-account-group">
       <v-btn
+        v-if="canCreateCustomers"
         color="primary"
         prepend-icon="mdi-plus"
         size="default"
@@ -161,6 +162,7 @@
             <v-icon size="20">mdi-account-details</v-icon>
           </v-btn>
           <v-btn
+            v-if="canManageCustomers"
             icon="mdi-pencil"
             size="small"
             variant="text"
@@ -212,6 +214,7 @@ import { ref, computed, onMounted } from 'vue';
 import { RouterLink } from 'vue-router';
 import { useCustomerStore } from '@/stores/customer';
 import { useAuthStore } from '@/stores/auth';
+import { usePermissions } from '@/composables/usePermissions';
 import * as uiAccess from '@/auth/uiAccess.js';
 import EmptyState from '@/components/EmptyState.vue';
 import TableSkeleton from '@/components/TableSkeleton.vue';
@@ -229,6 +232,12 @@ import { useNotificationStore } from '@/stores/notification';
 
 const customerStore = useCustomerStore();
 const authStore = useAuthStore();
+const { can } = usePermissions();
+
+// Action-button gates (user_action): hide the add/edit affordances the user
+// lacks. Delete keeps the existing uiAccess helper.
+const canCreateCustomers = computed(() => can('customers:create'));
+const canManageCustomers = computed(() => can('customers:update'));
 
 const userRole = computed(() => authStore.user?.role);
 const canDeleteCustomers = computed(() =>

@@ -5,92 +5,15 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1780527784725,
-      "tag": "0000_light_prowler",
+      "when": 1781672099352,
+      "tag": "0000_minor_mac_gargan",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "7",
-      "when": 1780696823908,
-      "tag": "0001_add_product_type",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1780900000000,
-      "tag": "0002_accounting_periods",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1780900100000,
-      "tag": "0003_expense_cash_session",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1780900200000,
-      "tag": "0004_accounting_snapshots",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1780900300000,
-      "tag": "0005_accounting_period_default_branch",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "7",
-      "when": 1780900400000,
-      "tag": "0006_treasury",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "7",
-      "when": 1780900500000,
-      "tag": "0007_suppliers_purchases",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "7",
-      "when": 1780900600000,
-      "tag": "0008_general_ledger",
-      "breakpoints": true
-    },
-    {
-      "idx": 9,
-      "version": "7",
-      "when": 1780900700000,
-      "tag": "0009_agent_pricing",
-      "breakpoints": true
-    },
-    {
-      "idx": 10,
-      "version": "7",
-      "when": 1780900800000,
-      "tag": "0010_opening_balances",
-      "breakpoints": true
-    },
-    {
-      "idx": 11,
-      "version": "7",
-      "when": 1780900900000,
-      "tag": "0011_sale_price_type",
-      "breakpoints": true
-    },
-    {
-      "idx": 12,
-      "version": "7",
-      "when": 1780901000000,
-      "tag": "0012_coa_description_friendly",
+      "when": 1781795383159,
+      "tag": "0001_burly_longshot",
       "breakpoints": true
     }
   ]

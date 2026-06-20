@@ -38,7 +38,7 @@
         @remove="onRemoveFilter"
       >
         <v-row dense>
-          <v-col cols="12" sm="6" md="4">
+          <v-col v-if="canReadCategories" cols="12" sm="6" md="4">
             <v-select
               v-model="selectedCategory"
               :items="categories"
@@ -149,16 +149,14 @@
            rows visible with a subtle top progress line (no layout jump). -->
       <TableSkeleton v-if="initialLoading" :rows="8" :columns="headers.length" class="pa-3" />
       <v-data-table
-        data-testid="products-table"
         v-else
+        data-testid="products-table"
         :headers="headers"
         :items="productStore.products"
         :loading="tableLoading"
         :items-per-page="productStore.pagination.limit"
         :page="productStore.pagination.page"
-        :items-length="productStore.pagination.total"
-        server-items-length
-        density="comfortable"
+        :items-length="productStore.pagination.limit"
         hide-default-footer
       >
         <template #no-data>
@@ -245,7 +243,9 @@
         </template>
         <template #[`item.wholesalePrice`]="{ item }">
           <span :class="{ 'text-medium-emphasis': item.wholesalePrice == null }">
-            {{ item.wholesalePrice == null ? '—' : formatCurrency(item.wholesalePrice, item.currency) }}
+            {{
+              item.wholesalePrice == null ? '—' : formatCurrency(item.wholesalePrice, item.currency)
+            }}
           </span>
         </template>
         <template #[`item.agentPrice`]="{ item }">
@@ -265,6 +265,7 @@
         </template>
         <template #[`item.actions`]="{ item }">
           <v-btn
+            v-if="canManageProducts"
             data-testid="product-edit"
             icon="mdi-pencil"
             size="small"
@@ -276,8 +277,8 @@
             <v-icon size="20">mdi-pencil</v-icon>
           </v-btn>
           <v-btn
-            data-testid="product-delete"
             v-if="canDeleteProducts"
+            data-testid="product-delete"
             icon="mdi-delete"
             size="small"
             variant="text"
@@ -318,6 +319,7 @@ import { useProductStore } from '@/stores/product';
 import { useCategoryStore } from '@/stores/category';
 import { useAuthStore } from '@/stores/auth';
 import { useInventoryStore } from '@/stores/inventory';
+import { usePermissions } from '@/composables/usePermissions';
 import * as uiAccess from '@/auth/uiAccess.js';
 import EmptyState from '@/components/EmptyState.vue';
 import TableSkeleton from '@/components/TableSkeleton.vue';
@@ -338,6 +340,12 @@ const productStore = useProductStore();
 const categoryStore = useCategoryStore();
 const authStore = useAuthStore();
 const inventoryStore = useInventoryStore();
+
+const { can } = usePermissions();
+// Category filter is a secondary/optional feature on this page: it loads the
+// categories list (categories:read), a DIFFERENT permission than the products
+// page itself. Guard both the fetch and the filter UI on it.
+const canReadCategories = computed(() => can('categories:read'));
 
 const userRole = computed(() => authStore.user?.role);
 const canManageProducts = computed(() =>
@@ -381,24 +389,41 @@ const currentWarehouseId = () => inventoryStore.selectedWarehouseId || undefined
 // Centralized debounced/cancelable/cached search. `warehouseId` is injected per
 // request (not a user filter) so "مسح الفلاتر" never drops the warehouse
 // context; warehouse changes bust the cache via refresh().
-const { query, isSearching, error, onQueryChange, runNow, clear, setFilters, clearFilters, setPage, setPageSize, refresh } =
-  useServerSearch({
-    limit: productStore.pagination.limit,
-    initialFilters: { categoryId: null, status: null, productType: null, minPrice: null, maxPrice: null },
-    load: (params, opts) =>
-      productStore.fetch({ ...params, warehouseId: currentWarehouseId() }, { ...opts, silent: true }),
-    apply: (res) => {
-      productStore.products = res?.data || [];
-      if (res?.meta) {
-        productStore.pagination = {
-          page: Number(res.meta.page) || 1,
-          limit: Number(res.meta.limit) || productStore.pagination.limit,
-          total: Number(res.meta.total) || 0,
-          totalPages: Number(res.meta.totalPages) || 0,
-        };
-      }
-    },
-  });
+const {
+  query,
+  isSearching,
+  error,
+  onQueryChange,
+  runNow,
+  clear,
+  setFilters,
+  clearFilters,
+  setPage,
+  setPageSize,
+  refresh,
+} = useServerSearch({
+  limit: productStore.pagination.limit,
+  initialFilters: {
+    categoryId: null,
+    status: null,
+    productType: null,
+    minPrice: null,
+    maxPrice: null,
+  },
+  load: (params, opts) =>
+    productStore.fetch({ ...params, warehouseId: currentWarehouseId() }, { ...opts, silent: true }),
+  apply: (res) => {
+    productStore.products = res?.data || [];
+    if (res?.meta) {
+      productStore.pagination = {
+        page: Number(res.meta.page) || 1,
+        limit: Number(res.meta.limit) || productStore.pagination.limit,
+        total: Number(res.meta.total) || 0,
+        totalPages: Number(res.meta.totalPages) || 0,
+      };
+    }
+  },
+});
 
 const tableLoading = computed(() => isSearching.value || productStore.loading);
 const initialLoading = computed(() => tableLoading.value && productStore.products.length === 0);
@@ -414,7 +439,10 @@ const filterChips = computed(() => {
     chips.push({ key: 'status', label: `الحالة: ${getStatusText(statusFilter.value)}` });
   }
   if (productTypeFilter.value) {
-    chips.push({ key: 'productType', label: `النوع: ${productTypeLabel(productTypeFilter.value)}` });
+    chips.push({
+      key: 'productType',
+      label: `النوع: ${productTypeLabel(productTypeFilter.value)}`,
+    });
   }
   if (minPrice.value) chips.push({ key: 'minPrice', label: `السعر من: ${minPrice.value}` });
   if (maxPrice.value) chips.push({ key: 'maxPrice', label: `السعر إلى: ${maxPrice.value}` });
@@ -578,9 +606,12 @@ onMounted(async () => {
   // Initial load goes through the search composable (default list).
   refresh();
 
-  // Fetch all categories for the dropdown
-  const { data } = await categoryStore.fetchCategories();
-  categories.value = data || [];
+  // Fetch all categories for the dropdown — optional feature gated on
+  // categories:read so users without it never trigger a 403 toast.
+  if (canReadCategories.value) {
+    const { data } = await categoryStore.fetchCategories();
+    categories.value = data || [];
+  }
 });
 
 // React to warehouse selection changes — bust the cache (results are

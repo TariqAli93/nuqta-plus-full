@@ -33,12 +33,15 @@ import { getCustomerCreditSnapshot, canCreateInstallmentSale } from './creditSco
 import auditService from './auditService.js';
 import { InventoryService } from './inventoryService.js';
 import { resolveUnitSnapshot, listProductUnits } from './productUnitService.js';
-import { branchFilterFor, enforceBranchScope, enforceWarehouseScope } from './scopeService.js';
+import {
+  enforceWarehouseScope,
+  invoiceBranchScope,
+  enforceInvoiceBranchScope,
+} from './scopeService.js';
 import featureFlagsService from './featureFlagsService.js';
 import { ensureDefaultBranch, ensureDefaultWarehouse } from './systemDefaultsService.js';
 import { netAfterReturn, returnedItemCost } from './reportMath.js';
 import accountingPeriodService from './accountingPeriodService.js';
-import cashSessionService from './cashSessionService.js';
 import voucherService from './voucherService.js';
 import glPostingService from './gl/glPostingService.js';
 import { PAYMENT_METHOD_CASH } from '../constants/sales.js';
@@ -549,11 +552,13 @@ export class SaleService {
       user: actingUser,
     });
 
-    // Resolve branch + warehouse. Keeps existing callers working without changes.
-    // If the caller is branch-bound, force their assigned branch so a client
-    // that tries to spoof branchId/warehouseId in the payload cannot escape.
+    // Resolve branch + warehouse. A branch-bound user may target any branch in
+    // their assigned set (many-to-many) — honour the requested branch/warehouse
+    // first, then fall back to their primary/fixed assignment. The
+    // enforceWarehouseScope() gate below rejects anything outside their scope,
+    // so a client still can't spoof a foreign branch.
     const { branchId, warehouseId } = await resolveBranchWarehouse({
-      branchId: actingUser?.assignedBranchId || saleData.branchId,
+      branchId: saleData.branchId || actingUser?.assignedBranchId,
       warehouseId: actingUser?.assignedWarehouseId || saleData.warehouseId,
       actingUser,
     });
@@ -569,33 +574,12 @@ export class SaleService {
       { require: true }
     );
 
-    // ── Cash session enforcement ────────────────────────────────────────────
-    // When the accounting-period feature is ON, EVERY sale must run inside an
-    // open shift bound to the open period (strict cash-box model) — regardless
-    // of payment type or source. When OFF, the legacy rule applies: only POS
-    // cash sales need an open shift.
-    let cashSessionId = null;
-    const incomingPaymentMethod = saleData.paymentMethod || PAYMENT_METHOD_CASH;
-    const isPosCashSale =
-      saleSource === SALE_SOURCE_POS &&
-      !isInstallmentSale &&
-      incomingPaymentMethod === PAYMENT_METHOD_CASH &&
-      Number(paidAmount) > 0;
-
-    if (await accountingPeriodService.isEnabled()) {
-      cashSessionId = await accountingPeriodService.requireOpenShift(actingUser, accountingPeriodId, {
-        message: 'لا يمكن إتمام البيع — لا توجد وردية مفتوحة ضمن قيد محاسبي مفتوح',
-      });
-    } else if (isPosCashSale) {
-      const session = await cashSessionService.findOpenSession(userId, branchId);
-      if (!session) {
-        throw new ValidationError(
-          'No open cash session — open a shift before recording cash sales',
-          'CASH_SESSION_REQUIRED'
-        );
-      }
-      cashSessionId = session.id;
-    }
+    // ── No shift system ───────────────────────────────────────────────────────
+    // Shifts (cash sessions) were removed: a sale binds to the CURRENT USER
+    // (createdBy) and the open accounting period (enforced above via
+    // resolvePeriodIdForWrite). cash_session_id stays null on new rows; the
+    // column is retained only for historical records.
+    const cashSessionId = null;
 
     const newSaleId = await withTransaction(async (tx) => {
       // Allocate inside the transaction so a rollback releases the number
@@ -623,6 +607,9 @@ export class SaleService {
           saleSource,
           saleType,
           priceType,
+          // Online-order linkage — null for ordinary POS/NewSale invoices.
+          channelId: saleData.channelId || null,
+          onlineOrderId: saleData.onlineOrderId || null,
           paidAmount: String(paidAmount),
           remainingAmount: String(remainingAmount),
           status: remainingAmount <= 0 ? 'completed' : 'pending',
@@ -847,16 +834,24 @@ export class SaleService {
       conditions.push(lte(sales.total, String(Number(maxTotal))));
     }
 
-    // Branch scope — non-global-admins only see their branch. Global admins
-    // may pass `branchId` explicitly to filter.
-    const allowedBranches = branchFilterFor(actingUser);
-    if (allowedBranches === null && filters.branchId) {
-      conditions.push(eq(sales.branchId, Number(filters.branchId)));
-    } else if (allowedBranches !== null) {
-      if (allowedBranches.length === 0) {
+    // Branch scope (multi-branch + feature-flag aware). A branch-bound user only
+    // ever sees invoices from the branches assigned to them; a multi-branch user
+    // sees ALL of theirs and may narrow to one via `filters.branchId`. Global
+    // admins (and the feature-off single-branch shop) are unrestricted and may
+    // optionally filter by an explicit branch.
+    const invoiceScope = await invoiceBranchScope(actingUser);
+    if (invoiceScope === null) {
+      if (filters.branchId) conditions.push(eq(sales.branchId, Number(filters.branchId)));
+    } else {
+      if (invoiceScope.length === 0) {
         return { data: [], meta: { total: 0, page, limit, totalPages: 0 } };
       }
-      conditions.push(eq(sales.branchId, allowedBranches[0]));
+      const req = filters.branchId ? Number(filters.branchId) : null;
+      conditions.push(
+        req && invoiceScope.includes(req)
+          ? eq(sales.branchId, req)
+          : inArray(sales.branchId, invoiceScope)
+      );
     }
 
     // Get total count. The customers join is required because the search
@@ -1378,13 +1373,18 @@ export class SaleService {
     ];
     if (currency) conds.push(eq(sales.currency, currency));
 
-    const allowedBranches = branchFilterFor(actingUser);
-    if (allowedBranches !== null) {
-      if (allowedBranches.length === 0) {
+    const invoiceScope = await invoiceBranchScope(actingUser);
+    if (invoiceScope !== null) {
+      if (invoiceScope.length === 0) {
         // Nothing to report for a user with no assigned branch
         return { salesUSD: 0, paidUSD: 0, profitUSD: 0, salesIQD: 0, paidIQD: 0, profitIQD: 0, count: 0 };
       }
-      conds.push(eq(sales.branchId, allowedBranches[0]));
+      const req = filters.branchId ? Number(filters.branchId) : null;
+      conds.push(
+        req && invoiceScope.includes(req)
+          ? eq(sales.branchId, req)
+          : inArray(sales.branchId, invoiceScope)
+      );
     } else if (filters.branchId) {
       conds.push(eq(sales.branchId, Number(filters.branchId)));
     }
@@ -1846,8 +1846,10 @@ export class SaleService {
       throw new ValidationError('Return must include at least one item');
     }
 
-    // Branch/warehouse scope — same defensive check used elsewhere.
-    enforceBranchScope(actingUser, sale.branchId);
+    // Branch/warehouse scope — strict, feature-flag aware: a branch-bound user
+    // can never return an invoice from a branch they aren't assigned to (even by
+    // passing the sale id directly).
+    await enforceInvoiceBranchScope(actingUser, sale.branchId);
     if (sale.warehouseId) {
       await enforceWarehouseScope(actingUser, sale.warehouseId);
     }
@@ -2464,31 +2466,8 @@ export class SaleService {
       { require: true }
     );
 
-    // Mirror the cash-session enforcement from create(): strict shift requirement
-    // when the accounting-period feature is ON, otherwise the legacy POS-cash rule.
-    let cashSessionId = null;
-    const draftPaymentMethod = saleData.paymentMethod || 'cash';
-    const draftSaleSource = saleData.saleSource || draft.saleSource || null;
-    const draftPaymentType = saleData.paymentType || draft.paymentType;
-    const draftIsCashSale =
-      draftSaleSource === SALE_SOURCE_POS &&
-      draftPaymentType === 'cash' &&
-      draftPaymentMethod === PAYMENT_METHOD_CASH &&
-      Number(paidAmount) > 0;
-    if (await accountingPeriodService.isEnabled()) {
-      cashSessionId = await accountingPeriodService.requireOpenShift(actingUser, accountingPeriodId, {
-        message: 'لا يمكن إتمام البيع — لا توجد وردية مفتوحة ضمن قيد محاسبي مفتوح',
-      });
-    } else if (draftIsCashSale) {
-      const session = await cashSessionService.findOpenSession(userId, branchId);
-      if (!session) {
-        throw new ValidationError(
-          'No open cash session — open a shift before completing a cash sale',
-          'CASH_SESSION_REQUIRED'
-        );
-      }
-      cashSessionId = session.id;
-    }
+    // Shifts removed — bind to the current user + open accounting period only.
+    const cashSessionId = null;
 
     // Pricing tier (تسعير الوكلاء): explicit completion payload → the tier the
     // draft was saved with → 'retail'. Stamped for reporting only.

@@ -59,7 +59,7 @@ export const useSaleStore = defineStore('sale', {
       } catch (error) {
         if (isCanceledRequest(error)) throw error;
         if (!silent) {
-          notificationStore.error(error.response?.data?.message || 'فشل تحميل المبيعات');
+          notificationStore.error(error?.message || 'فشل تحميل المبيعات');
           this.sales = [];
         }
         throw error;
@@ -85,7 +85,7 @@ export const useSaleStore = defineStore('sale', {
         this.currentSale = response?.data || null;
         return response;
       } catch (error) {
-        const errorMessage = error.response?.data?.message || 'فشل تحميل بيانات المبيعة';
+        const errorMessage = error?.message || 'فشل تحميل بيانات المبيعة';
         notificationStore.error(errorMessage);
         throw error;
       } finally {
@@ -115,7 +115,7 @@ export const useSaleStore = defineStore('sale', {
         notificationStore.success('تم إضافة المبيعة بنجاح');
         return response;
       } catch (error) {
-        const errorMessage = error.response?.data?.message || 'فشل إضافة المبيعة';
+        const errorMessage = error?.message || 'فشل إضافة المبيعة';
         notificationStore.error(errorMessage);
         throw error;
       } finally {
@@ -151,7 +151,7 @@ export const useSaleStore = defineStore('sale', {
         notificationStore.success('تم إلغاء المبيعة بنجاح');
         return response;
       } catch (error) {
-        const errorMessage = error.response?.data?.message || 'فشل إلغاء المبيعة';
+        const errorMessage = error?.message || 'فشل إلغاء المبيعة';
         notificationStore.error(errorMessage);
         throw error;
       } finally {
@@ -182,7 +182,7 @@ export const useSaleStore = defineStore('sale', {
         notificationStore.success('تم حذف المسودة بنجاح');
         return response;
       } catch (error) {
-        const errorMessage = error.response?.data?.message || 'فشل حذف المسودة';
+        const errorMessage = error?.message || 'فشل حذف المسودة';
         notificationStore.error(errorMessage);
         throw error;
       } finally {
@@ -204,7 +204,7 @@ export const useSaleStore = defineStore('sale', {
         // Axios interceptor already extracts response.data, so response is {success, data, ...}
         return response?.data || response;
       } catch (error) {
-        const errorMessage = error.response?.data?.message || 'فشل تحميل تقرير المبيعات';
+        const errorMessage = error?.message || 'فشل تحميل تقرير المبيعات';
         notificationStore.error(errorMessage);
         throw error;
       } finally {
@@ -226,7 +226,7 @@ export const useSaleStore = defineStore('sale', {
         notificationStore.success('تم إضافة الدفعة بنجاح');
         return response;
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل إضافة الدفعة');
+        notificationStore.error(error?.message || 'فشل إضافة الدفعة');
         throw error;
       } finally {
         this.loading = false;
@@ -248,7 +248,7 @@ export const useSaleStore = defineStore('sale', {
         await this.fetchSale(this.currentSale.id);
         notificationStore.success('تم حذف الدفعة بنجاح');
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل حذف الدفعة');
+        notificationStore.error(error?.message || 'فشل حذف الدفعة');
         throw error;
       } finally {
         this.loading = false;
@@ -263,7 +263,7 @@ export const useSaleStore = defineStore('sale', {
         this.sales = this.sales.filter((s) => s.id !== id);
         notificationStore.success('تم حذف المبيعة بنجاح');
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل حذف المبيعة');
+        notificationStore.error(error?.message || 'فشل حذف المبيعة');
         throw error;
       } finally {
         this.loading = false;
@@ -287,7 +287,7 @@ export const useSaleStore = defineStore('sale', {
         notificationStore.success('تم تسجيل الإرجاع بنجاح');
         return response;
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل تسجيل الإرجاع');
+        notificationStore.error(error?.message || 'فشل تسجيل الإرجاع');
         throw error;
       } finally {
         this.loading = false;
@@ -306,7 +306,7 @@ export const useSaleStore = defineStore('sale', {
         notificationStore.success('تم استعادة المبيعة بنجاح');
         return response;
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل استعادة المبيعة');
+        notificationStore.error(error?.message || 'فشل استعادة المبيعة');
         throw error;
       } finally {
         this.loading = false;
@@ -373,7 +373,7 @@ export const useSaleStore = defineStore('sale', {
         notificationStore.success('تم إكمال البيع بنجاح');
         return response;
       } catch (error) {
-        const errorMessage = error.response?.data?.message || 'فشل إكمال البيع';
+        const errorMessage = error?.message || 'فشل إكمال البيع';
         notificationStore.error(errorMessage);
         throw error;
       } finally {

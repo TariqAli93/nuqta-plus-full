@@ -1,12 +1,12 @@
 import { getDb, saveDatabase, getBootstrapState } from '../db.js';
 import { users, settings } from '../models/index.js';
 import { hashPassword, comparePassword } from '../utils/helpers.js';
-import { AuthenticationError, NotFoundError, ConflictError } from '../utils/errors.js';
+import { AuthenticationError, NotFoundError, ConflictError, ValidationError } from '../utils/errors.js';
 import { eq } from 'drizzle-orm';
-import { getRolePermissions } from '../auth/permissionMatrix.js';
+import rbacService from './rbacService.js';
 import config from '../config.js';
 import auditService from './auditService.js';
-import { resolveUserScope } from './scopeService.js';
+import { resolveUserScope, loadUserBranchIds } from './scopeService.js';
 import featureFlagsService from './featureFlagsService.js';
 import { getUserCapabilities } from './permissionService.js';
 import { ensureDefaultWarehouse } from './systemDefaultsService.js';
@@ -153,6 +153,13 @@ export class AuthService {
       throw new ConflictError('Username already exists');
     }
 
+    // Role must exist and be active in the dynamic RBAC roles table (no enum).
+    const role = userData.role || 'cashier';
+    const roleRow = await rbacService.getRoleByCode(role);
+    if (!roleRow || roleRow.isActive === false) {
+      throw new ValidationError('الدور المحدد غير موجود أو غير فعّال');
+    }
+
     // Hash password
     const hashedPassword = await hashPassword(userData.password);
 
@@ -164,7 +171,7 @@ export class AuthService {
         password: hashedPassword,
         fullName: userData.fullName,
         phone: userData.phone,
-        role: userData.role || 'cashier',
+        role,
         isActive: true,
       })
       .returning();
@@ -263,6 +270,10 @@ export class AuthService {
       ipAddress,
     });
 
+    // Attach the user's full assigned-branch set (many-to-many) so scope +
+    // capabilities below reflect every branch the user may act on.
+    user.allowedBranchIds = await loadUserBranchIds(user);
+
     // Remove sensitive data from response
     const userWithoutPassword = { ...user };
     delete userWithoutPassword.password;
@@ -282,7 +293,8 @@ export class AuthService {
       user: {
         ...userWithoutPassword,
         role: user.role,
-        permissions: this.getRolePermissions(user.role),
+        permissions: await this.getRolePermissions(user.role),
+        allPermissions: rbacService.isAllPermissions(user.role),
       },
       scope,
       featureFlags,
@@ -298,8 +310,9 @@ export class AuthService {
    * @param {string} role - User role
    * @returns {Array<string>} Array of permission strings
    */
-  getRolePermissions(role) {
-    return getRolePermissions(role);
+  async getRolePermissions(role) {
+    await rbacService.ensureLoaded();
+    return rbacService.getRolePermissionKeys(role);
   }
 
   /**
@@ -330,7 +343,9 @@ export class AuthService {
       throw new NotFoundError('User');
     }
 
-    user.permissions = this.getRolePermissions(user.role);
+    user.permissions = await this.getRolePermissions(user.role);
+    user.allPermissions = rbacService.isAllPermissions(user.role);
+    user.allowedBranchIds = await loadUserBranchIds(user);
 
     const [scope, featureFlags, setupMode, appMode, capabilities] = await Promise.all([
       resolveUserScope(user),

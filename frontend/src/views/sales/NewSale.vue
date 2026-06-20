@@ -265,7 +265,7 @@
 
           <!-- Credit Score (shown for installment sales with a selected customer) -->
           <CreditScoreCard
-            v-if="sale.paymentType === 'installment' && sale.customerId"
+            v-if="sale.paymentType === 'installment' && sale.customerId && canReadCustomers"
             :customer-id="sale.customerId"
             :sale-total="totalWithInterest"
             :currency="sale.currency"
@@ -273,7 +273,7 @@
 
           <!-- Smart credit decision banner -->
           <v-alert
-            v-if="creditDecision && sale.paymentType === 'installment'"
+            v-if="creditDecision && sale.paymentType === 'installment' && canReadCustomers"
             :type="decisionAlertType"
             variant="tonal"
             border="start"
@@ -615,6 +615,7 @@ import {
   useInventoryStore,
 } from '@/stores';
 import { useAuthStore } from '@/stores/auth';
+import { usePermissions } from '@/composables/usePermissions';
 import { formatCurrency as fmtCurrency } from '@/utils/formatters';
 import CustomerSelector from '@/components/CustomerSelector.vue';
 import CreditScoreCard from '@/components/CreditScoreCard.vue';
@@ -641,6 +642,12 @@ const settingsStore = useSettingsStore();
 const notify = useNotificationStore();
 const inventoryStore = useInventoryStore();
 const authStore = useAuthStore();
+const { can } = usePermissions();
+
+// optional_feature: the smart credit decision + credit-score card read a
+// DIFFERENT permission (customers:read) than this page (sales:create). Gate the
+// background check AND the UI so a sales-only user never triggers a 403 dialog.
+const canReadCustomers = computed(() => can('customers:read'));
 
 /**
  * Combined feature + capability gate via `canUse`. Hides the installment UI
@@ -677,6 +684,12 @@ const decisionTitle = computed(() => {
 });
 
 async function refreshCreditDecision() {
+  // OPTIONAL — needs customers:read. Skip silently when the user can't read
+  // customers so the global interceptor never raises a 403 dialog.
+  if (!canReadCustomers.value) {
+    creditDecision.value = null;
+    return;
+  }
   if (!sale.value?.customerId || sale.value?.paymentType !== 'installment') {
     creditDecision.value = null;
     return;

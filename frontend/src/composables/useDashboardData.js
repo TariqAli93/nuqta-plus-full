@@ -5,7 +5,6 @@ import { useSaleStore } from '@/stores/sale';
 import { useCustomerStore } from '@/stores/customer';
 import { useProductStore } from '@/stores/product';
 import { useInventoryStore } from '@/stores/inventory';
-import { useCashSessionStore } from '@/stores/cashSession';
 import { useAuthStore } from '@/stores/auth';
 import { useCurrency } from '@/composables/useCurrency';
 import { formatCurrency as centralFormatCurrency } from '@/utils/formatters';
@@ -52,8 +51,6 @@ const counts = ref({ invoicesToday: 0, totalCustomers: 0, totalProducts: 0, tota
 const recent = ref({ sales: [], customers: [], products: [], movements: [] });
 
 export function useDashboardData() {
-  const cashSession = useCashSessionStore();
-
   // ── تنسيق موحّد بالعملة الافتراضية المُهيّأة ──────────────────────────────
   const formatMoney = (n) => centralFormatCurrency(Number(n) || 0, resolvedCurrency.value);
 
@@ -71,14 +68,6 @@ export function useDashboardData() {
   const hasProfitTrend = computed(() => trendDaysRef.value.some((d) => d.profit != null));
   const topProducts = computed(() => topProductsRef.value);
   const topCustomers = computed(() => topCustomersRef.value);
-
-  // ── الوردية / الصندوق ─────────────────────────────────────────────────────
-  const hasOpenShift = computed(() => cashSession.hasOpenSession);
-  const cashInBox = computed(() => {
-    const cur = cashSession.current;
-    if (!cur || cur.status !== 'open') return null;
-    return Number(cur.expectedCash ?? cur.openingCash ?? 0);
-  });
 
   // ── الجلب + كل الحسابات/التحويلات في مكان واحد ────────────────────────────
   async function refresh() {
@@ -113,32 +102,47 @@ export function useDashboardData() {
       const today = ymd(new Date());
       const tomorrow = ymd(new Date(Date.now() + 86400000));
       const weekAgo = ymd(new Date(Date.now() - 6 * 86400000));
+      // Permission gates — each dashboard data source is fetched ONLY when the
+      // user can read it, so a user with just `view:dashboard` (but none of the
+      // data permissions) never triggers a 403 toast and never sees misleading
+      // zero cards. Endpoints: /reports/dashboard, /sales, /sales/top-products →
+      // sales:read; customers → customers:read; products → products:read.
+      const canSales = authStore.hasPermission(['view:sales', 'sales:read']);
+      const canCustomers = authStore.hasPermission(['view:customers', 'customers:read']);
+      const canProducts = authStore.hasPermission(['view:products', 'products:read']);
       const canProfit = authStore.hasPermission('reports:read_profit');
       const canInventory =
         authStore.hasPermission('view:inventory') && authStore.hasFeature('inventory');
 
       const tasks = {
-        today: reportStore.fetchDashboard({ dateFrom: today, dateTo: today }),
-        week: reportStore.fetchDashboard({ dateFrom: weekAgo, dateTo: today }),
-        recentSales: saleStore.fetch({ limit: 8 }),
+        today: canSales
+          ? reportStore.fetchDashboard({ dateFrom: today, dateTo: today }).catch(() => null)
+          : Promise.resolve(null),
+        week: canSales
+          ? reportStore.fetchDashboard({ dateFrom: weekAgo, dateTo: today }).catch(() => null)
+          : Promise.resolve(null),
+        recentSales: canSales ? saleStore.fetch({ limit: 8 }).catch(() => null) : Promise.resolve(null),
         // قائمة المبيعات تفلتر بـ startDate/endDate (المتحكّم يقارن createdAt
         // مباشرة)، لذا endDate = الغد لالتقاط يوم كامل، وعدد فواتير اليوم = meta.total.
-        invoiceCount: api
-          .get('/sales', {
-            params: { startDate: today, endDate: tomorrow, limit: 1 },
-            meta: { silent: true },
-          })
-          .catch(() => null),
-        customers: customerStore.fetch({ limit: 6 }).catch(() => null),
-        products: productStore.fetch({ limit: 6 }).catch(() => null),
-        cash: cashSession.fetchCurrent().catch(() => null),
+        invoiceCount: canSales
+          ? api
+              .get('/sales', {
+                params: { startDate: today, endDate: tomorrow, limit: 1 },
+                meta: { silent: true },
+              })
+              .catch(() => null)
+          : Promise.resolve(null),
+        customers: canCustomers ? customerStore.fetch({ limit: 6 }).catch(() => null) : Promise.resolve(null),
+        products: canProducts ? productStore.fetch({ limit: 6 }).catch(() => null) : Promise.resolve(null),
         profit: canProfit
           ? reportStore.fetchProfit({ dateFrom: weekAgo, dateTo: today }).catch(() => null)
           : Promise.resolve(null),
-        top: api
-          .get('/sales/top-products', { params: { limit: 5 } })
-          .then((r) => r?.data || r || [])
-          .catch(() => []),
+        top: canSales
+          ? api
+              .get('/sales/top-products', { params: { limit: 5 } })
+              .then((r) => r?.data || r || [])
+              .catch(() => [])
+          : Promise.resolve([]),
         movements: canInventory
           ? inventoryStore.fetchMovements({ limit: 6 }).catch(() => null)
           : Promise.resolve(null),
@@ -248,9 +252,6 @@ export function useDashboardData() {
     inventoryValue,
     customerDebt,
     unpaidToday,
-    // shift
-    hasOpenShift,
-    cashInBox,
     // performance
     trendDays,
     hasProfitTrend,

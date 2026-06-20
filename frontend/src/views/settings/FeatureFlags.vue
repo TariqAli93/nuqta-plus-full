@@ -30,7 +30,7 @@
           </div>
         </div>
         <v-btn
-          v-if="!isFullMode && canManage"
+          v-if="!isFullMode && canSwitchMode"
           color="success"
           prepend-icon="mdi-arrow-up-bold-circle"
           :loading="switching"
@@ -39,7 +39,7 @@
           الترقية للنمط الكامل
         </v-btn>
         <v-btn
-          v-if="isFullMode && canManage"
+          v-if="isFullMode && canSwitchMode"
           color="primary"
           variant="tonal"
           prepend-icon="mdi-arrow-down-bold-circle"
@@ -159,6 +159,9 @@ const downgradeDialog = ref(false);
 const appMode = ref(authStore.appMode || 'simple');
 
 const canManage = computed(() => authStore.hasPermission('manage_feature_toggles'));
+// Switching the whole operating mode (simple⇄full) is a distinct backend action
+// gated by `app_mode:upgrade`, separate from the per-flag `manage_feature_toggles`.
+const canSwitchMode = computed(() => authStore.hasPermission('app_mode:upgrade'));
 const isFullMode = computed(() => appMode.value === 'full');
 
 // Grouped so the page reads like a product settings screen, not a developer flag list.

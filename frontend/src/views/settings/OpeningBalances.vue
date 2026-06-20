@@ -47,7 +47,7 @@
       </v-col>
 
       <!-- أرصدة الموردين الافتتاحية -->
-      <v-col cols="12" md="6">
+      <v-col v-if="canReadSuppliers" cols="12" md="6">
         <v-card class="h-full">
           <v-card-title class="dialog-title">
             <v-icon color="deep-purple">mdi-truck-outline</v-icon>
@@ -148,14 +148,21 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import api from '@/plugins/axios';
 import { useNotificationStore } from '@/stores/notification';
+import { useAuthStore } from '@/stores/auth';
 import PageHeader from '@/components/PageHeader.vue';
 import CustomerSelector from '@/components/CustomerSelector.vue';
 import { formatCurrency } from '@/utils/formatters';
 
 const notify = useNotificationStore();
+const authStore = useAuthStore();
+// Supplier list is an OPTIONAL sub-feature here (powers the supplier opening
+// picker). Listing suppliers needs `suppliers:read`, a different permission
+// than this page (`opening_balances:manage`) — guard the fetch so the global
+// axios interceptor never toasts a spurious 403 on /suppliers.
+const canReadSuppliers = computed(() => authStore.hasPermission?.('suppliers:read') === true);
 
 const status = ref(null);
 const suppliers = ref([]);
@@ -175,6 +182,10 @@ async function loadStatus() {
 }
 
 async function loadSuppliers() {
+  if (!canReadSuppliers.value) {
+    suppliers.value = [];
+    return;
+  }
   try {
     const res = await api.get('/suppliers', { params: { limit: 500 } });
     suppliers.value = res?.data || res?.data?.data || [];

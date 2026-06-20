@@ -58,7 +58,7 @@ export const useInventoryStore = defineStore('inventory', {
      */
     warehousesForBranch(state) {
       const auth = useAuthStore();
-      const branchOn = auth.hasFeature("multiBranch");
+      const branchOn = auth.hasFeature('multiBranch');
       if (!branchOn) return state.warehouses;
       if (!state.selectedBranchId) return state.warehouses;
       return state.warehouses.filter(
@@ -109,7 +109,7 @@ export const useInventoryStore = defineStore('inventory', {
 
     async fetchWarehouses(branchId) {
       const auth = useAuthStore();
-      const branchOn = auth.hasFeature("multiBranch");
+      const branchOn = auth.hasFeature('multiBranch');
       const params = { activeOnly: true };
       if (branchOn && branchId) params.branchId = branchId;
       const response = await api.get('/warehouses', { params });
@@ -131,20 +131,15 @@ export const useInventoryStore = defineStore('inventory', {
      */
     async resolveActiveWarehouse() {
       const auth = useAuthStore();
-      const branchOn = auth.hasFeature("multiBranch");
+      const branchOn = auth.hasFeature('multiBranch');
       this.missingDefaultWarehouse = false;
 
       // Branches OFF → global warehouse list, no branch filter.
       if (!branchOn) {
         const pool = this.warehouses.filter((w) => w.isActive !== false);
         const allowed = auth.allowedWarehouseIds || [];
-        const visible = allowed.length
-          ? pool.filter((w) => allowed.includes(w.id))
-          : pool;
-        if (
-          this.selectedWarehouseId &&
-          visible.some((w) => w.id === this.selectedWarehouseId)
-        ) {
+        const visible = allowed.length ? pool.filter((w) => allowed.includes(w.id)) : pool;
+        if (this.selectedWarehouseId && visible.some((w) => w.id === this.selectedWarehouseId)) {
           return; // current selection is still valid
         }
         const next = auth.assignedWarehouseId || auth.scope?.warehouseId || visible[0]?.id || null;
@@ -159,9 +154,7 @@ export const useInventoryStore = defineStore('inventory', {
       }
 
       try {
-        const response = await api.get(
-          `/branches/${this.selectedBranchId}/active-warehouse`
-        );
+        const response = await api.get(`/branches/${this.selectedBranchId}/active-warehouse`);
         const data = response?.data || {};
         this.missingDefaultWarehouse = data.hasDefault === false;
         if (data.warehouseId) {
@@ -177,9 +170,7 @@ export const useInventoryStore = defineStore('inventory', {
         (w) => w.isActive !== false && w.branchId === this.selectedBranchId
       );
       const allowed = auth.allowedWarehouseIds || [];
-      const visible = allowed.length
-        ? pool.filter((w) => allowed.includes(w.id))
-        : pool;
+      const visible = allowed.length ? pool.filter((w) => allowed.includes(w.id)) : pool;
       const next = visible[0]?.id || null;
       this.setWarehouse(next);
     },
@@ -199,7 +190,7 @@ export const useInventoryStore = defineStore('inventory', {
       const auth = useAuthStore();
       if (!auth.isAuthenticated) return;
 
-      const branchOn = auth.hasFeature("multiBranch");
+      const branchOn = auth.hasFeature('multiBranch');
 
       // Always fetch warehouses; only fetch branches when branches are on.
       const tasks = [this.fetchWarehouses()];
@@ -357,7 +348,7 @@ export const useInventoryStore = defineStore('inventory', {
       } catch (error) {
         // Prefer the backend's clear Arabic message over the raw axios error
         // (e.g. "Request failed with status code 409").
-        notificationStore.error(error.response?.data?.message || 'فشل حذف المخزن');
+        notificationStore.error(error?.message || 'فشل حذف المخزن');
         throw error;
       }
     },

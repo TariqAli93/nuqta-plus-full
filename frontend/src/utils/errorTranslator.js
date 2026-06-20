@@ -19,6 +19,21 @@ function translateErrorCode(data = {}) {
   const d = (data.details && !Array.isArray(data.details)) ? data.details : {};
 
   switch (code) {
+    case 'PERMISSION_DENIED': {
+      // Backend already sends a specific message ("ليس لديك صلاحية حذف مستخدم")
+      // plus a `details` payload — compose a clear, multi-line explanation so
+      // even a plain toast tells the user the reason and what to do next.
+      const lines = [data.message || 'ليس لديك صلاحية لتنفيذ هذه العملية'];
+      if (d.reason) lines.push(d.reason);
+      if (d.suggestion) lines.push(`الحل: ${d.suggestion}`);
+      return lines.join('\n');
+    }
+    case 'CAPABILITY_DENIED': {
+      const lines = [data.message || 'لا تملك صلاحية استخدام هذه الميزة'];
+      if (d.reason) lines.push(d.reason);
+      if (d.suggestion) lines.push(`الحل: ${d.suggestion}`);
+      return lines.join('\n');
+    }
     case 'CREDIT_LIMIT_EXCEEDED': {
       const current = d.currentAR != null ? d.currentAR : d.currentDebt;
       const limit = d.creditLimit;
@@ -34,12 +49,6 @@ function translateErrorCode(data = {}) {
       return 'هذه الميزة متوفرة في النمط الكامل فقط.\nحتى تستخدمها، فعّل النمط الكامل من الإعدادات.';
     case 'MODE_DOWNGRADE_UNSUPPORTED':
       return 'لا يمكن الرجوع من النمط الكامل إلى السهل. يمكنك إيقاف أي ميزة لا تحتاجها من شاشة الميزات.';
-    case 'SHIFT_REQUIRED':
-      return 'لا توجد وردية مفتوحة.\nافتح وردية حتى تبدأ البيع.';
-    case 'SHIFT_CLOSED':
-      return 'الوردية مغلقة — لا يمكن التعديل عليها بعد الإغلاق.';
-    case 'SHIFT_NOT_LINKED_TO_PERIOD':
-      return 'الوردية غير مرتبطة بفترة عمل. افتح فترة عمل أولاً.';
     case 'ACCOUNTING_PERIOD_DISABLED':
     case 'ACCOUNTING_PERIOD_REQUIRED':
       return 'يجب فتح فترة عمل قبل البيع.\nافتح فترة عمل من الإعدادات أو اطلب من المدير.';
@@ -319,6 +328,53 @@ export function buildArabicErrorMessage(error) {
   const combined = parts.length ? parts.join(' - ') : 'حدث خطأ غير متوقع';
 
   return details ? `${combined} — ${details}` : combined;
+}
+
+/**
+ * Pull the structured Authorization (403) payload out of an Axios error.
+ * Returns `null` for any error that is NOT a permission/capability denial,
+ * so callers can branch on it.
+ *
+ * Shape: { code, message, action, resource, requiredPermission, capability,
+ *          userPermissions[], reason, suggestion }
+ */
+export function extractPermissionDenied(error) {
+  const data = error?.response?.data || {};
+  if (data.code !== 'PERMISSION_DENIED' && data.code !== 'CAPABILITY_DENIED') return null;
+  const d = data.details && !Array.isArray(data.details) ? data.details : {};
+  const req = d.requiredPermission;
+  return {
+    code: data.code,
+    message: data.message || 'ليس لديك صلاحية لتنفيذ هذه العملية',
+    action: d.action || '',
+    resource: d.resource || '',
+    requiredPermission: Array.isArray(req) ? req.join('، ') : req || '',
+    capability: d.capability || '',
+    userPermissions: Array.isArray(d.userPermissions) ? d.userPermissions : [],
+    reason: d.reason || '',
+    suggestion: d.suggestion || '',
+  };
+}
+
+/**
+ * Build the {title, message, details[]} object the global error dialog expects
+ * from a permission-denied error — labeled Arabic lines the user can read at a
+ * glance. Returns `null` when the error is not a permission/capability denial.
+ */
+export function buildPermissionDeniedDialog(error) {
+  const info = extractPermissionDenied(error);
+  if (!info) return null;
+  const details = [];
+  if (info.action) details.push(`العملية: ${info.action}`);
+  if (info.requiredPermission) details.push(`الصلاحية المطلوبة: ${info.requiredPermission}`);
+  else if (info.capability) details.push(`الميزة المطلوبة: ${info.capability}`);
+  if (info.reason) details.push(`السبب: ${info.reason}`);
+  if (info.suggestion) details.push(`الحل: ${info.suggestion}`);
+  return {
+    title: info.code === 'CAPABILITY_DENIED' ? 'ميزة غير متاحة' : 'صلاحيات غير كافية',
+    message: info.message,
+    details,
+  };
 }
 
 export function extractArabicDetails(error) {

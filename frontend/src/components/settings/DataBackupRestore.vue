@@ -3,8 +3,10 @@ import { ref, onMounted, computed } from 'vue';
 import api from '@/plugins/axios';
 import { useSimpleLoading } from '@/composables/useLoading';
 import { useNotificationStore } from '@/stores/notification';
+import { usePermissions } from '@/composables/usePermissions';
 
 const notification = useNotificationStore();
+const { can } = usePermissions();
 const { isLoading, startLoading, stopLoading } = useSimpleLoading();
 
 // Long-running requests must not hit the default 10s axios timeout.
@@ -196,10 +198,22 @@ onMounted(async () => {
     <v-card-title class="d-flex align-center justify-space-between flex-wrap">
       <div class="text-h6 font-weight-bold">🗂️ النسخ الاحتياطي الانتقائي (تصدير/استيراد البيانات)</div>
       <div class="d-flex gap-2">
-        <v-btn color="primary" variant="elevated" prepend-icon="mdi-export-variant" @click="openBackup">
+        <v-btn
+          v-if="can('settings:create')"
+          color="primary"
+          variant="elevated"
+          prepend-icon="mdi-export-variant"
+          @click="openBackup"
+        >
           إنشاء نسخة احتياطية
         </v-btn>
-        <v-btn color="secondary" variant="elevated" prepend-icon="mdi-import" @click="openRestore">
+        <v-btn
+          v-if="can('settings:create')"
+          color="secondary"
+          variant="elevated"
+          prepend-icon="mdi-import"
+          @click="openRestore"
+        >
           استعادة من ملف
         </v-btn>
       </div>

@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory, createWebHashHistory } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { useConnectionStore } from '@/stores/connection';
-import * as uiAccess from '@/auth/uiAccess.js';
+import { canAccessRouteMeta } from '@/auth/permissions.js';
 
 // Layouts
 import MainLayout from '@/layouts/MainLayout.vue';
@@ -18,16 +18,24 @@ import CustomerProfile from '@/views/customers/CustomerProfile.vue';
 import Products from '@/views/products/Products.vue';
 import ProductForm from '@/views/products/ProductForm.vue';
 import Categories from '@/views/categories/Categories.vue';
+import SalesChannels from '@/views/sales-channels/SalesChannels.vue';
+import OnlineOrders from '@/views/online-orders/OnlineOrders.vue';
+import DeliveryTracking from '@/views/delivery/DeliveryTracking.vue';
+import DeliveryShipments from '@/views/delivery/DeliveryShipments.vue';
+import ShipmentDetails from '@/views/delivery/ShipmentDetails.vue';
+import OnlineCommerceReports from '@/views/reports/OnlineCommerceReports.vue';
+import DeliveryProviders from '@/views/settings/DeliveryProviders.vue';
+import BoxySettings from '@/views/settings/BoxySettings.vue';
+import BoxyWebhookLogs from '@/views/settings/BoxyWebhookLogs.vue';
 import Sales from '@/views/sales/Sales.vue';
 import NewSale from '@/views/sales/NewSale.vue';
 import SaleDetails from '@/views/sales/SaleDetails.vue';
 import PosScreen from '@/views/sales/PosScreen.vue';
-import ShiftReport from '@/views/sales/ShiftReport.vue';
 import Reports from '@/views/Reports.vue';
-import SimpleReports from '@/views/reports/SimpleReports.vue';
 import Settings from '@/views/Settings.vue';
 import Notifications from '@/views/Notifications.vue';
 import Users from '@/views/users/Users.vue';
+import Roles from '@/views/roles/Roles.vue';
 import Forbidden from '@/views/errors/Forbidden.vue'; // 👈 صفحة 403
 import Profile from '@/views/Profile.vue';
 import About from '@/views/About.vue';
@@ -97,58 +105,119 @@ const routes = [
     component: MainLayout,
     meta: { requiresAuth: true },
     children: [
+      // The dashboard is the universal landing page (and the redirect target for
+      // disabled-feature pages), so it stays reachable by any authenticated
+      // user — no page-level permission. Its cards/panels self-gate internally.
       { path: '', name: 'Dashboard', component: Dashboard },
       {
         path: 'customers',
         name: 'Customers',
         component: Customers,
+        meta: { permission: 'view:customers' },
       },
       {
         path: 'customers/new',
         name: 'NewCustomer',
         component: CustomerForm,
-        meta: { requiresWrite: true },
+        meta: { permission: 'customers:create' },
       },
       {
         path: 'customers/:id/edit',
         name: 'EditCustomer',
         component: CustomerForm,
-        meta: { requiresWrite: true },
+        meta: { permission: 'customers:update' },
       },
       {
         path: 'customers/:id',
         name: 'CustomerProfile',
         component: CustomerProfile,
+        meta: { permission: 'view:customers' },
       },
       {
         path: 'products',
         name: 'Products',
         component: Products,
+        meta: { permission: 'view:products' },
       },
       {
         path: 'products/new',
         name: 'NewProduct',
         component: ProductForm,
-        meta: { requiresManageProducts: true },
+        meta: { permission: 'products:create' },
       },
       {
         path: 'products/:id/edit',
         name: 'EditProduct',
         component: ProductForm,
-        meta: { requiresManageProducts: true },
+        meta: { permission: 'products:update' },
       },
       {
         path: 'categories',
         name: 'Categories',
         component: Categories,
+        meta: { permission: 'view:categories' },
       },
-      { path: 'sales', name: 'Sales', component: Sales },
+      {
+        path: 'sales-channels',
+        name: 'SalesChannels',
+        component: SalesChannels,
+        meta: { permission: 'sales_channels:read' },
+      },
+      {
+        path: 'online-orders',
+        name: 'OnlineOrders',
+        component: OnlineOrders,
+        meta: { permission: 'online_orders:read' },
+      },
+      {
+        path: 'delivery-tracking',
+        name: 'DeliveryTracking',
+        component: DeliveryTracking,
+        meta: { permission: 'delivery_shipments:read' },
+      },
+      {
+        path: 'delivery/shipments',
+        name: 'DeliveryShipments',
+        component: DeliveryShipments,
+        meta: { permission: 'delivery_shipments:read' },
+      },
+      {
+        path: 'delivery/shipments/:id',
+        name: 'ShipmentDetails',
+        component: ShipmentDetails,
+        meta: { permission: 'delivery_shipments:read' },
+      },
+      {
+        path: 'reports/online-commerce',
+        name: 'OnlineCommerceReports',
+        component: OnlineCommerceReports,
+        meta: { permission: 'online_commerce_reports:read' },
+      },
+      {
+        path: 'settings/integrations/delivery-providers',
+        name: 'DeliveryProviders',
+        component: DeliveryProviders,
+        meta: { permission: 'delivery_providers:read' },
+      },
+      {
+        path: 'settings/integrations/delivery-providers/boxy',
+        name: 'BoxySettings',
+        component: BoxySettings,
+        meta: { permission: 'delivery_providers:manage' },
+      },
+      {
+        path: 'settings/integrations/delivery-providers/boxy/webhook-logs',
+        name: 'BoxyWebhookLogs',
+        component: BoxyWebhookLogs,
+        meta: { permission: 'delivery_webhooks:view' },
+      },
+      { path: 'sales', name: 'Sales', component: Sales, meta: { permission: 'view:sales' } },
       {
         path: 'sales/pos',
         name: 'PosScreen',
         component: PosScreen,
         // POS depends on the `pos` feature flag + canUsePOS capability.
-        meta: { requiresCreateSales: true, feature: 'pos', capability: 'canUsePOS' },
+        meta: { permission: 'sales:create', feature: 'pos', capability: 'canUsePOS' },
       },
       {
         path: 'sales/new',
@@ -157,16 +226,10 @@ const routes = [
         // /sales/new is the installment-sale entry point; gate it by the
         // installments feature flag + capability.
         meta: {
-          requiresCreateSales: true,
+          permission: 'sales:create',
           feature: 'installments',
           capability: 'canUseInstallments',
         },
-      },
-      {
-        path: 'sales/shifts',
-        name: 'ShiftReport',
-        component: ShiftReport,
-        meta: { requiresCreateSales: true },
       },
       {
         path: 'collections',
@@ -174,17 +237,19 @@ const routes = [
         component: Collections,
         // Same gate as adding a payment elsewhere — backend enforces the
         // `sales:read` / `sales:update` pair authoritatively.
-        meta: { requiresCreateSales: true },
+        meta: { permission: 'sales:read' },
       },
       {
         path: 'sales/:id',
         name: 'SaleDetails',
         component: SaleDetails,
+        meta: { permission: 'view:sales' },
       },
       {
         path: 'reports',
         name: 'Reports',
         component: Reports,
+        meta: { permission: 'view:reports' },
       },
       // {
       //   path: 'reports/simple',
@@ -196,108 +261,120 @@ const routes = [
         path: 'expenses',
         name: 'Expenses',
         component: Expenses,
-        meta: { requiresWrite: true },
+        meta: { permission: 'expenses:read' },
       },
       {
         path: 'accounting-periods',
         name: 'AccountingPeriods',
         component: AccountingPeriods,
+        meta: { permission: 'accounting_periods:read' },
       },
       // ── الخزينة (treasury) ─────────────────────────────────────────────
       {
         path: 'treasury/cashboxes',
         name: 'Cashboxes',
         component: Cashboxes,
-        meta: { feature: 'treasury', capability: 'canUseTreasury' },
+        meta: { permission: 'view:treasury', feature: 'treasury', capability: 'canUseTreasury' },
       },
       {
         path: 'treasury/cashboxes/:id/ledger',
         name: 'CashboxLedger',
         component: CashboxLedger,
-        meta: { feature: 'treasury', capability: 'canUseTreasury' },
+        meta: { permission: 'view:treasury', feature: 'treasury', capability: 'canUseTreasury' },
       },
       {
         path: 'treasury/vouchers',
         name: 'Vouchers',
         component: Vouchers,
-        meta: { feature: 'treasury', capability: 'canUseTreasury' },
+        meta: { permission: 'view:treasury', feature: 'treasury', capability: 'canUseTreasury' },
       },
       {
         path: 'treasury/transfers',
         name: 'TreasuryTransfers',
         component: TreasuryTransfers,
-        meta: { feature: 'treasury', capability: 'canUseTreasury' },
+        meta: { permission: 'view:treasury', feature: 'treasury', capability: 'canUseTreasury' },
       },
       {
         path: 'treasury/bank-accounts',
         name: 'BankAccounts',
         component: BankAccounts,
-        meta: { feature: 'bankAccounts', capability: 'canUseBankAccounts' },
+        meta: {
+          permission: 'view:treasury',
+          feature: 'bankAccounts',
+          capability: 'canUseBankAccounts',
+        },
       },
       // ── المشتريات والموردون (suppliers + purchases) ─────────────────────
       {
         path: 'suppliers',
         name: 'Suppliers',
         component: Suppliers,
-        meta: { feature: 'suppliers', capability: 'canUseSuppliers' },
+        meta: { permission: 'view:suppliers', feature: 'suppliers', capability: 'canUseSuppliers' },
       },
       {
         path: 'suppliers/:id',
         name: 'SupplierProfile',
         component: SupplierProfile,
-        meta: { feature: 'suppliers', capability: 'canUseSuppliers' },
+        meta: { permission: 'view:suppliers', feature: 'suppliers', capability: 'canUseSuppliers' },
       },
       {
         path: 'purchases',
         name: 'Purchases',
         component: Purchases,
-        meta: { feature: 'purchases', capability: 'canUsePurchases' },
+        meta: { permission: 'view:purchases', feature: 'purchases', capability: 'canUsePurchases' },
       },
       {
         path: 'purchases/new',
         name: 'NewPurchase',
         component: NewPurchase,
-        meta: { feature: 'purchases', capability: 'canUsePurchases' },
+        meta: { permission: 'purchases:create', feature: 'purchases', capability: 'canUsePurchases' },
       },
       {
         path: 'purchases/:id',
         name: 'PurchaseDetails',
         component: PurchaseDetails,
-        meta: { feature: 'purchases', capability: 'canUsePurchases' },
+        meta: { permission: 'view:purchases', feature: 'purchases', capability: 'canUsePurchases' },
       },
       // ── المحاسبة (general ledger) ───────────────────────────────────────
       {
         path: 'gl/accounts',
         name: 'ChartOfAccounts',
         component: ChartOfAccounts,
-        meta: { feature: 'generalLedger', capability: 'canUseGL' },
+        meta: { permission: 'gl:read', feature: 'generalLedger', capability: 'canUseGL' },
       },
       {
         path: 'gl/journal',
         name: 'JournalEntries',
         component: JournalEntries,
-        meta: { feature: 'generalLedger', capability: 'canUseGL' },
+        meta: { permission: 'gl:read', feature: 'generalLedger', capability: 'canUseGL' },
       },
       {
         path: 'gl/system-accounts',
         name: 'SystemAccounts',
         component: SystemAccounts,
-        // Coarse route gate (feature + GL capability); the backend enforces the
-        // finer gl:manage_system_accounts permission on every call, and the nav
-        // menu only surfaces this entry to authorized roles.
-        meta: { feature: 'generalLedger', capability: 'canUseGL' },
+        // Page-level permission gate + feature/capability. The backend enforces
+        // the same gl:manage_system_accounts permission on every call.
+        meta: {
+          permission: 'gl:manage_system_accounts',
+          feature: 'generalLedger',
+          capability: 'canUseGL',
+        },
       },
       {
         path: 'gl/posting-failures',
         name: 'PostingFailures',
         component: PostingFailures,
-        meta: { feature: 'generalLedger', capability: 'canUseGL' },
+        meta: { permission: 'gl:repair_postings', feature: 'generalLedger', capability: 'canUseGL' },
       },
       {
         path: 'reports/financial',
         name: 'FinancialReports',
         component: FinancialReports,
-        meta: { feature: 'financialReports', capability: 'canViewFinancialReports' },
+        meta: {
+          permission: 'reports:read_financial',
+          feature: 'financialReports',
+          capability: 'canViewFinancialReports',
+        },
       },
       {
         path: 'reports/inventory-valuation',
@@ -309,7 +386,7 @@ const routes = [
         path: 'settings/opening-balances',
         name: 'OpeningBalances',
         component: OpeningBalances,
-        meta: { feature: 'generalLedger', requiresGlobalAdmin: true },
+        meta: { feature: 'generalLedger', permission: 'opening_balances:manage' },
       },
       {
         path: 'notifications',
@@ -320,49 +397,53 @@ const routes = [
         path: 'inventory',
         name: 'Inventory',
         component: Inventory,
-        meta: { feature: 'inventory' },
+        meta: { permission: 'view:inventory', feature: 'inventory' },
       },
       {
         path: 'inventory/movements',
         name: 'StockMovements',
         component: StockMovements,
-        meta: { feature: 'inventory' },
+        meta: { permission: 'view:inventory', feature: 'inventory' },
       },
       {
         path: 'inventory/transfer',
         name: 'StockTransfer',
         component: StockTransfer,
-        meta: { feature: 'inventoryTransfers', capability: 'canTransferStock' },
+        meta: {
+          permission: 'inventory:transfer',
+          feature: 'inventoryTransfers',
+          capability: 'canTransferStock',
+        },
       },
       {
         path: 'inventory/low-stock',
         name: 'LowStock',
         component: LowStock,
-        meta: { feature: 'inventory' },
+        meta: { permission: 'view:inventory', feature: 'inventory' },
       },
       {
         path: 'inventory/transfers',
         name: 'TransferRequests',
         component: TransferRequests,
-        meta: { feature: 'inventoryTransfers' },
+        meta: { permission: 'inventory:transfer', feature: 'inventoryTransfers' },
       },
       {
         path: 'inventory/expiry-alerts',
         name: 'ExpiryAlerts',
         component: ExpiryAlerts,
-        meta: { feature: 'inventory' },
+        meta: { permission: 'view:inventory', feature: 'inventory' },
       },
       {
         path: 'inventory/settings',
         name: 'BranchesWarehouses',
         component: BranchesWarehouses,
-        meta: { requiresManageProducts: true, anyFeature: ['multiBranch', 'multiWarehouse'] },
+        meta: { permission: 'inventory:manage', anyFeature: ['multiBranch', 'multiWarehouse'] },
       },
       {
         path: 'settings/feature-flags',
         name: 'FeatureFlags',
         component: FeatureFlags,
-        meta: { requiresGlobalAdmin: true },
+        meta: { permission: 'manage_feature_toggles' },
       },
       {
         path: 'setup',
@@ -370,10 +451,11 @@ const routes = [
         component: SetupWizard,
         meta: { requiresGlobalAdmin: true },
       },
-      { path: 'users', name: 'Users', component: Users, meta: { requiresViewUsers: true } },
-      { path: 'profile', name: 'Profile', component: Profile }, // 👈 صفحة الملف الشخصي
-      { path: 'settings', name: 'Settings', component: Settings },
-      { path: 'about', name: 'About', component: About }, // 👈 صفحة حول البرنامج
+      { path: 'users', name: 'Users', component: Users, meta: { permission: 'view:users' } },
+      { path: 'roles', name: 'Roles', component: Roles, meta: { permission: 'roles:read' } },
+      { path: 'profile', name: 'Profile', component: Profile }, // 👈 صفحة الملف الشخصي (متاحة للجميع)
+      { path: 'settings', name: 'Settings', component: Settings, meta: { permission: 'view:settings' } },
+      { path: 'about', name: 'About', component: About }, // 👈 صفحة حول البرنامج (متاحة للجميع)
       { path: 'forbidden', name: 'Forbidden', component: Forbidden }, // 👈 صفحة 403
     ],
   },
@@ -480,29 +562,17 @@ router.beforeEach(async (to, from, next) => {
     return next({ name: 'Login' });
   }
 
-  // 2️⃣ التحقق من الصلاحيات بناءً على الدور (role-based)
-  const userRole = authStore.user?.role;
-  if (userRole) {
-    // Check route-specific access requirements
-    if (to.meta.requiresViewUsers && !uiAccess.canViewUsers(userRole)) {
-      return next({ name: 'Forbidden' });
-    }
-    if (to.meta.requiresManageProducts && !uiAccess.canManageProducts(userRole)) {
-      return next({ name: 'Forbidden' });
-    }
-    if (to.meta.requiresCreateSales && !uiAccess.canCreateSales(userRole)) {
-      return next({ name: 'Forbidden' });
-    }
-    if (to.meta.requiresWrite && !uiAccess.canWrite(userRole)) {
-      return next({ name: 'Forbidden' });
-    }
-    if (to.meta.requiresGlobalAdmin && !authStore.isGlobalAdmin) {
-      return next({ name: 'Forbidden' });
-    }
-
-    // Feature-flag gate: hide entire pages when the flag is off. Uses the
-    // alias-aware `hasFeature` getter so route meta can use either
-    // canonical (warehouseTransfers) or spec (inventoryTransfers) names.
+  // 2️⃣ Dynamic, page-level access control (DB-backed RBAC) ──────────────────
+  // The frontend decides access from granted permission KEYS — never from a
+  // hard-coded role name. The guard is the single entry point for page access;
+  // a page never mounts unless the user is allowed in. Sub-actions
+  // (add/edit/delete/export) stay gated individually inside each page.
+  if (authStore.isAuthenticated) {
+    // Feature-flag gate: hide entire pages when the optional module is off.
+    // Uses the alias-aware `hasFeature` getter so route meta can use either
+    // canonical (warehouseTransfers) or spec (inventoryTransfers) names. A
+    // disabled feature returns the user to the dashboard (the page does not
+    // exist for them), not to /forbidden.
     if (to.meta.feature && !authStore.hasFeature(to.meta.feature)) {
       return next({ name: 'Dashboard' });
     }
@@ -514,19 +584,33 @@ router.beforeEach(async (to, from, next) => {
       return next({ name: 'Dashboard' });
     }
 
-    // Capability gate: backend tells us whether this user (with this role,
-    // scope, AND feature flag state) can use the page. Block when false —
-    // forbidden, not redirect to dashboard, since the user might be on a
-    // page they previously could access (e.g. installments just got
-    // disabled while they were drafting a sale).
+    // Capability gate: backend-issued flag folding in role + scope + feature
+    // state. Block → Forbidden (the user lacks the right to use this page).
     if (to.meta.capability && !authStore.can(to.meta.capability)) {
-      return next({ name: 'Forbidden' });
+      return next({
+        name: 'Forbidden',
+        query: { capability: to.meta.capability, from: to.fullPath },
+      });
     }
 
-    // Permission gate (RBAC matrix) — used by the standalone report windows so a
-    // user without the report's permission is blocked from deep-linking to it.
-    if (to.meta.permission && !authStore.hasPermission(to.meta.permission)) {
-      return next({ name: 'Forbidden' });
+    // Permission gate (central helper). Honours meta.permission /
+    // meta.permissions (ANY) / meta.allPermissions (ALL) / requiresGlobalAdmin.
+    // Missing permission → /forbidden, so the page's content never loads. We
+    // pass the required permission(s) and origin path so the Forbidden page can
+    // explain exactly what was needed.
+    if (!canAccessRouteMeta(to.meta)) {
+      const required = []
+        .concat(to.meta.permission || [])
+        .concat(Array.isArray(to.meta.permissions) ? to.meta.permissions : [])
+        .concat(Array.isArray(to.meta.allPermissions) ? to.meta.allPermissions : []);
+      return next({
+        name: 'Forbidden',
+        query: {
+          ...(required.length ? { permission: required.join(',') } : {}),
+          ...(to.meta.requiresGlobalAdmin ? { requiresGlobalAdmin: '1' } : {}),
+          from: to.fullPath,
+        },
+      });
     }
 
     // First-run wizard: redirect a global admin with pending setup to the

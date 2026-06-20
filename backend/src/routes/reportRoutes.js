@@ -7,7 +7,8 @@ export default async function reportRoutes(fastify) {
   // ── Quick-question report windows (الأسئلة السريعة) ───────────────────────
   // Each opens in its own Electron window. RBAC: the dashboard hides the card
   // when the user lacks the permission; the route below returns 403 if hit
-  // directly. Branch/warehouse/shift scoping is applied inside the service.
+  // directly. Branch/warehouse + per-user scoping is applied inside the service
+  // (normal users see only their own operations; reports-permission holders all).
   // Namespaced under /quick to avoid colliding with the legacy /profit route.
   const quick = [
     ['/quick/sales', 'sales:read', 'sales'],
@@ -23,7 +24,7 @@ export default async function reportRoutes(fastify) {
       onRequest: [fastify.authenticate, fastify.authorize(permission)],
       handler: posReportsController[method].bind(posReportsController),
       schema: {
-        description: `Quick report: ${method} (from/to/branchId/cashSessionId/page/limit/search)`,
+        description: `Quick report: ${method} (from/to/branchId/userId/page/limit/search)`,
         tags: ['reports'],
         security: [{ bearerAuth: [] }],
       },

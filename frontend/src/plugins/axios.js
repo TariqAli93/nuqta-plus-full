@@ -3,8 +3,28 @@ import { useAuthStore } from '@/stores/auth';
 import { useNotificationStore } from '@/stores/notification';
 import { useLoadingStore } from '@/stores/loading';
 import router from '@/router';
-import { buildArabicErrorMessage, extractArabicDetails } from '@/utils/errorTranslator';
+import {
+  buildArabicErrorMessage,
+  extractArabicDetails,
+  buildPermissionDeniedDialog,
+} from '@/utils/errorTranslator';
 import { useErrorDialogStore } from '@/stores/errorDialog';
+import { hasPermission } from '@/auth/permissions';
+
+/**
+ * Is this request an OPTIONAL / silent permission request? Such requests
+ * (`permissionMode: 'optional_feature'` or `silentPermissionCheck: true`) never
+ * raise a toast/dialog: a 403 just means "the user can't use this optional
+ * sub-feature", so we resolve to the configured fallback instead.
+ */
+const isOptionalPermissionRequest = (config) =>
+  config?.permissionMode === 'optional_feature' || config?.silentPermissionCheck === true;
+
+/** The value an optional request resolves to when blocked/denied (default null). */
+const optionalFallback = (config) =>
+  config && Object.prototype.hasOwnProperty.call(config, 'fallbackValue')
+    ? config.fallbackValue
+    : null;
 
 // Helper to get help link based on error type
 const getHelpLinkForError = (error) => {
@@ -70,6 +90,22 @@ export function initAxiosBaseUrl(connectionStore) {
 // Request interceptor
 api.interceptors.request.use(
   (config) => {
+    // Optional-feature pre-check (BEFORE starting the loading bar): if this
+    // request declares a `permission` and is an optional/silent request, and
+    // the user lacks that permission, never hit the network. We reject with a
+    // sentinel the response handler turns into a silent fallback — no request,
+    // no loading bar, no toast.
+    if (
+      config.permission &&
+      isOptionalPermissionRequest(config) &&
+      !hasPermission(config.permission)
+    ) {
+      const blocked = new Error('PERMISSION_OPTIONAL_BLOCKED');
+      blocked.__optionalBlocked = true;
+      blocked.config = config;
+      return Promise.reject(blocked);
+    }
+
     // بدء تتبع الطلب في نظام التحميل.
     // Requests flagged `meta.silent` (e.g. live search) opt out of the global
     // loading bar — they render their own inline loading state — and out of the
@@ -110,6 +146,13 @@ api.interceptors.response.use(
     return response.data;
   },
   (error) => {
+    // Optional-feature request that was short-circuited BEFORE sending (the user
+    // lacks its permission). The loading bar was never started and nothing hit
+    // the network — resolve silently to the configured fallback (null / []).
+    if (error?.__optionalBlocked) {
+      return optionalFallback(error.config);
+    }
+
     // إنهاء تتبع الطلب في حالة الخطأ
     const loadingStore = useLoadingStore();
     const isSilent = !!error.config?.meta?.silent;
@@ -126,6 +169,17 @@ api.interceptors.response.use(
     // toast/dialog entirely (req #12 — never surface technical errors here).
     if (isSilent) {
       return Promise.reject(error);
+    }
+
+    // Optional-feature / silent-permission requests that WERE sent: a 403 here
+    // means the user can't use this optional sub-feature — resolve to the
+    // fallback with NO toast/dialog. Any other failure of an optional background
+    // call also stays silent (rejected quietly so callers may handle it).
+    if (isOptionalPermissionRequest(error.config)) {
+      if (error.response?.status === 403) {
+        return optionalFallback(error.config);
+      }
+      return Promise.reject(error.response?.data || error.message);
     }
 
     const notificationStore = useNotificationStore();
@@ -181,6 +235,17 @@ api.interceptors.response.use(
           /* non-fatal */
         }
       }
+
+      // Permission/capability denial → show the full structured explanation
+      // (action, required permission, reason, suggestion) in the error dialog
+      // instead of a one-line toast, so the user knows exactly what to do.
+      const permDialog = buildPermissionDeniedDialog(error);
+      if (permDialog) {
+        const dialog = useErrorDialogStore();
+        dialog.show(permDialog);
+        return Promise.reject(error.response?.data || error.message);
+      }
+
       notificationStore.error(buildMessage(error) || 'ليس لديك صلاحية للوصول إلى هذا المورد');
       return Promise.reject(error.response?.data || error.message);
     }

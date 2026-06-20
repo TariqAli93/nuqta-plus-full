@@ -6,6 +6,7 @@
       icon="mdi-cash-minus"
     >
       <v-btn
+        v-if="canCreate"
         color="primary"
         prepend-icon="mdi-plus"
         size="default"
@@ -290,8 +291,13 @@ const items = computed(() => expensesStore.items);
 const summary = computed(() => expensesStore.summary);
 const isGlobalAdmin = computed(() => authStore.isGlobalAdmin);
 const branchOptions = computed(() => inventoryStore.branches || []);
+const canCreate = computed(() => authStore.hasPermission?.('expenses:create'));
 const canManage = computed(() => authStore.hasPermission?.(['expenses:update']));
 const canDelete = computed(() => authStore.hasPermission?.(['expenses:delete']));
+// Treasury picker is an OPTIONAL sub-feature: only load cashboxes/bank accounts
+// when the feature is on AND the user can actually read treasury data, otherwise
+// the global axios interceptor would toast a spurious 403 on /treasury/*.
+const canReadTreasury = computed(() => authStore.hasPermission?.('treasury:read'));
 const treasuryOn = computed(() => authStore.hasFeature('treasury'));
 const treasuryTargets = computed(() => [
   ...(treasuryStore.cashboxes || []).map((c) => ({
@@ -442,7 +448,7 @@ onMounted(async () => {
       /* ignore */
     }
   }
-  if (treasuryOn.value) {
+  if (treasuryOn.value && canReadTreasury.value) {
     try {
       await treasuryStore.fetchCashboxes();
       if (authStore.hasFeature('bankAccounts')) await treasuryStore.fetchBankAccounts();
@@ -452,6 +458,6 @@ onMounted(async () => {
   }
   await reload();
   // Deep-link from the work hub / quick actions: open the add dialog directly.
-  if (route.query.new === '1' && canManage.value) openCreate();
+  if (route.query.new === '1' && canCreate.value) openCreate();
 });
 </script>

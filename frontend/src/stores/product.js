@@ -59,7 +59,7 @@ export const useProductStore = defineStore('product', {
         // Silent (live-search) callers render their own inline error and keep
         // the previous results visible (req #12/#13).
         if (!silent) {
-          notificationStore.error(error.response?.data?.message || 'فشل تحميل المنتجات');
+          notificationStore.error(error?.message || 'فشل تحميل المنتجات');
           this.products = [];
         }
         throw error;
@@ -78,7 +78,7 @@ export const useProductStore = defineStore('product', {
         console.log(this.currentProduct);
         return response;
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل تحميل بيانات المنتج');
+        notificationStore.error(error?.message || 'فشل تحميل بيانات المنتج');
         this.currentProduct = null;
         throw error;
       } finally {
@@ -110,7 +110,7 @@ export const useProductStore = defineStore('product', {
       } catch (error) {
         // Rollback: Remove optimistic product on error
         this.products = this.products.filter((p) => p.id !== tempId);
-        notificationStore.error(error.response?.data?.message || 'فشل إضافة المنتج');
+        notificationStore.error(error?.message || 'فشل إضافة المنتج');
         throw error;
       }
     },
@@ -138,7 +138,7 @@ export const useProductStore = defineStore('product', {
         if (index !== -1 && originalProduct) {
           this.products[index] = originalProduct;
         }
-        notificationStore.error(error.response?.data?.message || 'فشل تحديث المنتج');
+        notificationStore.error(error?.message || 'فشل تحديث المنتج');
         throw error;
       }
     },
@@ -163,7 +163,7 @@ export const useProductStore = defineStore('product', {
         if (index !== -1 && deletedProduct) {
           this.products.splice(index, 0, deletedProduct);
         }
-        notificationStore.error(error.response?.data?.message || 'فشل حذف المنتج');
+        notificationStore.error(error?.message || 'فشل حذف المنتج');
         throw error;
       }
     },
@@ -176,9 +176,7 @@ export const useProductStore = defineStore('product', {
 
         return response.data;
       } catch (error) {
-        notificationStore.error(
-          error.response?.data?.message || 'فشل تحميل المنتجات منخفضة المخزون'
-        );
+        notificationStore.error(error?.message || 'فشل تحميل المنتجات منخفضة المخزون');
         throw error;
       } finally {
         this.loading = false;

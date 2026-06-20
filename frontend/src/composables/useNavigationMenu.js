@@ -1,6 +1,5 @@
 import { computed } from 'vue';
 import { useAuthStore } from '@/stores/auth';
-import { hasPermission as rbacHasPermission } from '@/auth/permissionMatrix.js';
 
 /**
  * Navigation menu composable.
@@ -68,6 +67,28 @@ export function useNavigationMenu() {
       icon: 'mdi-receipt-text-outline',
       to: '/sales',
       permission: 'view:sales',
+    },
+
+    // ── الطلبات الأونلاين ──────────────────────────────────────────────────
+    {
+      title: 'الطلبات الأونلاين',
+      icon: 'mdi-cart-arrow-down',
+      to: '/online-orders',
+      permission: 'view:online_orders',
+    },
+
+    // ── الشحنات / التوصيل ──────────────────────────────────────────────────
+    {
+      title: 'الشحنات',
+      icon: 'mdi-truck-fast',
+      to: '/delivery/shipments',
+      permission: 'view:delivery',
+    },
+    {
+      title: 'تتبع الشحنات',
+      icon: 'mdi-map-marker-path',
+      to: '/delivery-tracking',
+      permission: 'view:delivery',
     },
 
     // ── العملاء والديون ────────────────────────────────────────────────────
@@ -188,21 +209,13 @@ export function useNavigationMenu() {
     },
 
     // ── الصندوق ────────────────────────────────────────────────────────────
-    // No group-level feature gate: shifts + expenses exist without the treasury
-    // module, so each item carries its own gate. Cashiers see الورديات only.
+    // No group-level feature gate: each item carries its own gate.
     {
       title: 'الصندوق',
       icon: 'mdi-safe-square-outline',
       to: '#cash',
       group: {
         items: [
-          {
-            title: 'الورديات',
-            icon: 'mdi-account-clock',
-            to: '/sales/shifts',
-            permission: 'view:sales',
-            feature: 'pos',
-          },
           {
             title: 'المصاريف',
             icon: 'mdi-cash-minus',
@@ -269,6 +282,12 @@ export function useNavigationMenu() {
             permission: 'view:reports',
           },
           {
+            title: 'تقارير التجارة الأونلاين',
+            icon: 'mdi-storefront-outline',
+            to: '/reports/online-commerce',
+            permission: 'view:online_commerce_reports',
+          },
+          {
             title: 'الربح والخسارة والوضع المالي',
             icon: 'mdi-finance',
             to: '/reports/financial',
@@ -296,6 +315,12 @@ export function useNavigationMenu() {
         items: [
           { title: 'الموظفون', icon: 'mdi-account-cog', to: '/users', permission: 'view:users' },
           {
+            title: 'الأدوار والصلاحيات',
+            icon: 'mdi-shield-account-outline',
+            to: '/roles',
+            permission: 'roles:read',
+          },
+          {
             title: 'الفروع والمخازن',
             icon: 'mdi-store',
             to: '/inventory/settings',
@@ -307,6 +332,18 @@ export function useNavigationMenu() {
             icon: 'mdi-tune',
             to: '/settings',
             permission: 'view:settings',
+          },
+          {
+            title: 'قنوات البيع',
+            icon: 'mdi-bullhorn-variant',
+            to: '/sales-channels',
+            permission: 'view:sales_channels',
+          },
+          {
+            title: 'موفّرو التوصيل',
+            icon: 'mdi-truck-outline',
+            to: '/settings/integrations/delivery-providers',
+            permission: 'delivery_providers:manage',
           },
           {
             title: 'الميزات والنمط',
@@ -392,8 +429,8 @@ export function useNavigationMenu() {
       return false;
     }
 
-    // RBAC permission check (falls through to central matrix)
-    if (item.permission && !rbacHasPermission(item.permission, userRole)) {
+    // Dynamic RBAC permission check (DB-backed, via the auth store).
+    if (item.permission && !authStore.hasPermission(item.permission)) {
       return false;
     }
 
@@ -414,7 +451,7 @@ export function useNavigationMenu() {
         // Group-level checks (e.g. hide the whole Inventory group when inventory is off)
         if (item.feature && !authStore.hasFeature(item.feature)) return null;
         if (item.capability && !authStore.can(item.capability)) return null;
-        if (item.permission && !rbacHasPermission(item.permission, userRole)) return null;
+        if (item.permission && !authStore.hasPermission(item.permission)) return null;
 
         const allowedSubs = item.group.items.filter((sub) => checkVisibility(sub, userRole));
         if (allowedSubs.length === 0) return null;

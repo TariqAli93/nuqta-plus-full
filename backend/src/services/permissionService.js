@@ -1,8 +1,9 @@
 import { getDb } from '../db.js';
 import { warehouses, branches } from '../models/index.js';
-import { eq, and, ne } from 'drizzle-orm';
+import { eq, and, ne, inArray } from 'drizzle-orm';
 import { AuthorizationError, NotFoundError, ValidationError } from '../utils/errors.js';
 import featureFlagsService from './featureFlagsService.js';
+import { effectiveBranchIds, primaryBranchId } from './scopeService.js';
 
 /**
  * Branch + warehouse permission policy.
@@ -65,9 +66,11 @@ export function isBranchManager(user) {
   return user?.role === ROLE.BRANCH_MANAGER;
 }
 
+// A user "owns" a branch when it's one of the branches assigned to them
+// (many-to-many). For a single-branch user this is just their one branch.
 function ownsBranch(user, branchId) {
-  if (!user?.assignedBranchId || branchId == null) return false;
-  return Number(user.assignedBranchId) === Number(branchId);
+  if (branchId == null) return false;
+  return effectiveBranchIds(user).includes(Number(branchId));
 }
 
 // ── Branch policies ───────────────────────────────────────────────────────
@@ -215,8 +218,7 @@ export async function canViewWarehouse(user, warehouseId) {
  */
 export function getAllowedBranchIdsSync(user) {
   if (isGlobalAdmin(user)) return null;
-  if (!user?.assignedBranchId) return [];
-  return [user.assignedBranchId];
+  return effectiveBranchIds(user);
 }
 
 /**
@@ -250,11 +252,12 @@ export async function getAllowedWarehouseIds(user) {
     return ids;
   }
 
-  if (!user?.assignedBranchId) return [];
+  const branchIds = effectiveBranchIds(user);
+  if (!branchIds.length) return [];
   const rows = await db
     .select({ id: warehouses.id })
     .from(warehouses)
-    .where(and(eq(warehouses.branchId, user.assignedBranchId), eq(warehouses.isActive, true)));
+    .where(and(inArray(warehouses.branchId, branchIds), eq(warehouses.isActive, true)));
   let ids = rows.map((r) => r.id);
   // Cashier/viewer/manager locked to one warehouse — narrow further.
   if (
@@ -384,7 +387,11 @@ const EMPTY_CAPABILITIES = Object.freeze({
 export async function getUserCapabilities(user) {
   if (!user) return { ...EMPTY_CAPABILITIES };
 
-  const branchId = user.assignedBranchId || null;
+  // Primary branch drives the coarse per-branch UI hints below; the real
+  // per-branch authorization is re-checked server-side for each branch the
+  // user touches. `multiBranchUser` is true when the user spans >1 branch.
+  const branchId = primaryBranchId(user);
+  const multiBranchUser = effectiveBranchIds(user).length > 1;
   const flags = await featureFlagsService.getFeatureFlags();
 
   const branchOn = flags.multiBranch !== false;
@@ -435,8 +442,9 @@ export async function getUserCapabilities(user) {
     canApproveTransfer: transfersOn && (isGlobal || isBA),
     canViewAllBranches: branchOn && isGlobal,
     canViewAllWarehouses: isGlobal || !branchOn,
-    // Switching branch context is admin-only and also requires multi-branch.
-    canSwitchBranch: branchOn && isGlobal,
+    // Switching branch context: global admins always, plus any branch-bound
+    // user assigned to more than one branch (many-to-many).
+    canSwitchBranch: branchOn && (isGlobal || multiBranchUser),
     // Switching warehouse only matters when the user has more than one to
     // pick from — backend reflects that via scope.canSwitchWarehouse.
     canSwitchWarehouse: warehouseOn || branchOn ? !user.assignedWarehouseId : false,

@@ -52,6 +52,25 @@
         @remove="onRemoveFilter"
       >
         <v-row dense>
+          <!-- Branch filter — only for users assigned to MORE THAN ONE branch.
+               Options are limited to the user's own branches (the backend also
+               rejects any out-of-scope branch). -->
+          <v-col v-if="showBranchFilter" cols="12" sm="6" md="3">
+            <v-select
+              v-model="filters.branchId"
+              :items="allowedBranchOptions"
+              item-title="name"
+              item-value="id"
+              label="الفرع"
+              prepend-inner-icon="mdi-source-branch"
+              clearable
+              hide-details
+              density="comfortable"
+              variant="outlined"
+              @update:model-value="applyFilters"
+            ></v-select>
+          </v-col>
+
           <v-col cols="12" sm="6" md="3">
             <v-select
               v-model="filters.status"
@@ -80,7 +99,7 @@
             ></v-select>
           </v-col>
 
-          <v-col cols="12" sm="6" md="3">
+          <v-col v-if="canReadCustomers" cols="12" sm="6" md="3">
             <v-autocomplete
               v-model="filters.customer"
               :items="customers"
@@ -404,6 +423,7 @@ import { useRouter } from 'vue-router';
 import { useSaleStore } from '@/stores/sale';
 import { useCustomerStore } from '@/stores/customer';
 import { useAuthStore } from '../../stores/auth';
+import { useInventoryStore } from '@/stores/inventory';
 import EmptyState from '@/components/EmptyState.vue';
 import TableSkeleton from '@/components/TableSkeleton.vue';
 import { priceTierLabel } from '@/utils/productUnits';
@@ -418,14 +438,30 @@ import { highlightSegments } from '@/utils/highlight';
 import { formatCurrency } from '@/utils/formatters';
 import { useExport } from '@/composables/useExport';
 import { useFeatureGate } from '@/composables/useFeatureGate';
+import { usePermissions } from '@/composables/usePermissions';
 import { useNotificationStore } from '@/stores/notification';
 
 const router = useRouter();
 const saleStore = useSaleStore();
 const customerStore = useCustomerStore();
 const authStore = useAuthStore();
+const inventoryStore = useInventoryStore();
+const { can } = usePermissions();
 
 const customers = ref([]);
+
+// optional_feature: the customer filter dropdown reads from a DIFFERENT
+// permission (customers:read) than this page (sales:read). Gate both the
+// options fetch and the control so a sales-only user never triggers a 403.
+const canReadCustomers = computed(() => can('customers:read'));
+
+// Branch filter is only meaningful for a user assigned to more than one branch.
+// `inventoryStore.branches` is already scoped to the user's branches by the
+// backend, so it doubles as the allowed-options source.
+const allowedBranchOptions = computed(() => inventoryStore.branches || []);
+const showBranchFilter = computed(
+  () => (authStore.allowedBranchIds?.length || 0) > 1 && allowedBranchOptions.value.length > 1
+);
 
 // Centralized debounced/cancelable/cached search. `filters` is the reactive
 // filter state the advanced-filter controls bind to directly.
@@ -444,6 +480,7 @@ const {
 } = useServerSearch({
   limit: 10,
   initialFilters: {
+    branchId: null,
     status: null,
     paymentType: null,
     customer: null,
@@ -549,6 +586,10 @@ const statusOptions = computed(() => {
 
 const filterChips = computed(() => {
   const chips = [];
+  if (filters.branchId) {
+    const br = allowedBranchOptions.value.find((b) => b.id === filters.branchId);
+    chips.push({ key: 'branchId', label: `الفرع: ${br?.name ?? filters.branchId}` });
+  }
   if (filters.status)
     chips.push({ key: 'status', label: `الحالة: ${getStatusText(filters.status)}` });
   if (filters.paymentType)
@@ -733,8 +774,12 @@ onMounted(async () => {
   // Initial list load goes through the search composable.
   refresh();
   // Populate the customer filter options (separate from the search results).
-  await customerStore.fetch({ limit: 200 });
-  customers.value = customerStore.customers;
+  // OPTIONAL — needs customers:read, not the page's sales:read. Skip the call
+  // entirely (no 403, no toast) when the user can't read customers.
+  if (canReadCustomers.value) {
+    await customerStore.fetch({ limit: 200 });
+    customers.value = customerStore.customers;
+  }
 });
 </script>
 

@@ -25,65 +25,6 @@
       </v-alert> -->
 
       <header class="products__toolbar">
-        <!-- Shift status / open / close shift bar -->
-        <div class="shift-bar">
-          <template v-if="hasOpenSession">
-            <v-chip
-              data-testid="pos-shift-chip"
-              size="small"
-              color="success"
-              variant="flat"
-              prepend-icon="mdi-cash-register"
-            >
-              وردية #{{ currentSession.id }} — افتتاحي
-              {{ formatMoney(currentSession.openingCash, currentSession.currency) }}
-            </v-chip>
-            <span class="shift-bar__metric">
-              <v-icon size="14">mdi-cash-plus</v-icon>
-              مستلم: {{ formatMoney(currentSession.cashIn, currentSession.currency) }}
-            </span>
-            <span class="shift-bar__metric shift-bar__metric--strong">
-              <v-icon size="14">mdi-scale-balance</v-icon>
-              متوقع: {{ formatMoney(currentSession.expectedCash, currentSession.currency) }}
-            </span>
-            <v-spacer />
-            <v-btn
-              data-testid="pos-close-shift"
-              size="small"
-              variant="outlined"
-              color="warning"
-              :loading="shiftLoading"
-              @click="requestCloseShift"
-            >
-              <v-icon start size="16">mdi-cash-lock</v-icon>
-              إغلاق الوردية
-            </v-btn>
-          </template>
-          <template v-else>
-            <v-chip
-              size="small"
-              :color="canOpenShift ? 'warning' : 'error'"
-              variant="flat"
-              prepend-icon="mdi-alert-circle-outline"
-            >
-              {{ canOpenShift ? 'لا توجد وردية مفتوحة' : shiftBlockReason }}
-            </v-chip>
-            <v-spacer />
-            <v-btn
-              data-testid="pos-open-shift"
-              size="small"
-              color="primary"
-              variant="elevated"
-              :loading="shiftLoading"
-              :title="canOpenShift ? '' : shiftBlockReason"
-              @click="onOpenShiftClick"
-            >
-              <v-icon start size="16">mdi-cash-register</v-icon>
-              فتح وردية
-            </v-btn>
-          </template>
-        </div>
-
         <div class="toolbar__row">
           <v-text-field
             data-testid="pos-search"
@@ -184,7 +125,7 @@
           </div>
         </div>
 
-        <button
+        <v-card
           v-for="p in filteredProducts"
           v-else
           :key="p.id"
@@ -196,34 +137,53 @@
           :class="{
             'product--out': !isSellable(p),
             'product--featured': isFeatured(p),
+            'product--disabled': !isSellable(p) || expiryStatusOf(p) === 'منتهي',
           }"
-          :disabled="!isSellable(p) || expiryStatusOf(p) === 'منتهي'"
           :title="p.name"
           :tabindex="!isSellable(p) || expiryStatusOf(p) === 'منتهي' ? -1 : 0"
           role="gridcell"
-          @click="addProduct(p)"
-          @keydown.enter.prevent="addProduct(p)"
-          @keydown.space.prevent="addProduct(p)"
+          hover
+          :ripple="isSellable(p) && expiryStatusOf(p) !== 'منتهي'"
+          @click="isSellable(p) && expiryStatusOf(p) !== 'منتهي' && addProduct(p)"
+          @keydown.enter.prevent="isSellable(p) && expiryStatusOf(p) !== 'منتهي' && addProduct(p)"
+          @keydown.space.prevent="isSellable(p) && expiryStatusOf(p) !== 'منتهي' && addProduct(p)"
         >
           <span v-if="isFeatured(p)" class="product__badge" aria-label="مميّز">
             <v-icon size="14">mdi-star</v-icon>
           </span>
-          <div class="product__name">{{ p.name }}</div>
-          <div v-if="p.category" class="product__cat">{{ p.category }}</div>
-          <div v-if="expiryStatusOf(p)" class="product__expiry">
-            <v-chip size="x-small" variant="tonal" :color="expiryColor(expiryStatusOf(p))">
-              {{ expiryStatusOf(p) }}
-            </v-chip>
-            <span v-if="nearestExpiryOf(p)" class="product__expiry-date">
-              أقرب انتهاء: {{ nearestExpiryOf(p) }}
-            </span>
-          </div>
-          <div class="product__foot">
-            <span class="product__price">{{ formatMoney(p.sellingPrice, p.currency) }}</span>
-            <span v-if="isService(p)" class="product__stock product__stock--service">خدمة</span>
-            <span v-else class="product__stock" :class="stockClass(p)">{{ availableOf(p) }}</span>
-          </div>
-        </button>
+
+          <v-card-text class="product__body">
+            <div class="product__main">
+              <div class="product__name">{{ p.name }}</div>
+
+              <div v-if="p.category" class="product__cat">
+                {{ p.category }}
+              </div>
+
+              <div v-if="expiryStatusOf(p)" class="product__expiry">
+                <v-chip size="x-small" variant="tonal" :color="expiryColor(expiryStatusOf(p))">
+                  {{ expiryStatusOf(p) }}
+                </v-chip>
+
+                <span v-if="nearestExpiryOf(p)" class="product__expiry-date">
+                  أقرب انتهاء: {{ nearestExpiryOf(p) }}
+                </span>
+              </div>
+            </div>
+
+            <div class="product__foot">
+              <span class="product__price">
+                {{ formatMoney(p.sellingPrice, p.currency) }}
+              </span>
+
+              <span v-if="isService(p)" class="product__stock product__stock--service"> خدمة </span>
+
+              <span v-else class="product__stock" :class="stockClass(p)">
+                {{ availableOf(p) }}
+              </span>
+            </div>
+          </v-card-text>
+        </v-card>
       </div>
     </section>
 
@@ -858,23 +818,6 @@
       @confirm="confirmReplaceWithDraft"
     />
 
-    <!-- Cash session: open/close shift dialogs -->
-    <OpenShiftDialog
-      v-model="openShiftDialog"
-      :loading="shiftLoading"
-      :default-currency="currency"
-      :cancelable="hasOpenSession"
-      @confirm="onOpenShiftConfirm"
-      @cancel="openShiftDialog = false"
-    />
-    <CloseShiftDialog
-      v-model="closeShiftDialog"
-      :loading="shiftLoading"
-      :session="currentSession"
-      @confirm="onCloseShiftConfirm"
-      @cancel="closeShiftDialog = false"
-    />
-
     <!-- Blocking dialog (spec §6): shown when a period-gated action is attempted
          without a usable open period. Routes to المالية → القيود المحاسبية. -->
     <v-dialog v-model="mustOpenPeriodDialog" max-width="460">
@@ -885,9 +828,7 @@
         </v-card-title>
         <v-divider />
         <v-card-text class="pt-4">
-          <p class="text-body-1 mb-2">
-            لا يمكن فتح وردية أو إتمام عمليات البيع قبل فتح قيد محاسبي.
-          </p>
+          <p class="text-body-1 mb-2">لا يمكن إتمام عمليات البيع قبل فتح قيد محاسبي.</p>
           <p class="text-body-2 text-medium-emphasis mb-0">{{ shiftBlockReason }}</p>
         </v-card-text>
         <v-divider />
@@ -920,14 +861,11 @@ import {
   useNotificationStore,
   useSaleStore,
 } from '@/stores';
-import { useCashSessionStore, SHIFT_ERROR_MESSAGES } from '@/stores/cashSession';
 import { useAccountingPeriodStore } from '@/stores/accountingPeriod';
 import { useAuthStore } from '@/stores/auth';
 import { usePosCart } from '@/composables/usePosCart';
 import { useFeatureGate } from '@/composables/useFeatureGate';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
-import OpenShiftDialog from '@/components/cashSession/OpenShiftDialog.vue';
-import CloseShiftDialog from '@/components/cashSession/CloseShiftDialog.vue';
 import EmptyState from '@/components/EmptyState.vue';
 import api from '@/plugins/axios';
 import { formatCurrency as formatMoney } from '@/utils/formatters';
@@ -940,7 +878,6 @@ const inventoryStore = useInventoryStore();
 const settingsStore = useSettingsStore();
 const notify = useNotificationStore();
 const saleStore = useSaleStore();
-const cashSessionStore = useCashSessionStore();
 const accountingPeriodStore = useAccountingPeriodStore();
 const authStore = useAuthStore();
 
@@ -960,19 +897,7 @@ const route = useRoute();
 // creating a brand-new sale (and leaving the draft orphaned in the DB).
 const currentDraftId = ref(null);
 
-// ── Cash session / shift state ─────────────────────────────────────────────
-// `currentSession` mirrors the open shift for the acting user. The POS cannot
-// record cash sales without one, so we surface explicit Open/Close dialogs.
-const openShiftDialog = ref(false);
-const closeShiftDialog = ref(false);
-const shiftLoading = ref(false);
-const currentSession = computed(() => cashSessionStore.current);
-const hasOpenSession = computed(() => cashSessionStore.hasOpenSession);
-
-// A shift can ONLY open when the accounting-period (القيد المحاسبي) system is
-// enabled AND an open period exists for the active branch — the backend rejects
-// otherwise. We mirror that here so the cashier gets a clear Arabic message and
-// we never fire a POST that's guaranteed to 422.
+// Selling is gated by the accounting period only (shifts were removed).
 const accountingPeriodsEnabled = computed(
   () => authStore.hasFeature?.('accountingPeriods') === true
 );
@@ -1003,17 +928,16 @@ const hasOpenPeriodForBranch = computed(() => {
 const hasActivePeriod = computed(
   () => !accountingPeriodsEnabled.value || hasOpenPeriodForBranch.value
 );
-const canOpenShift = computed(() => hasActivePeriod.value);
 
-// The specific Arabic reason a shift can't be opened ('' when it can).
+// The specific Arabic reason selling is blocked ('' when it can proceed).
 const shiftBlockReason = computed(() => {
-  if (!accountingPeriodsEnabled.value) return SHIFT_ERROR_MESSAGES.ACCOUNTING_PERIOD_DISABLED;
-  if (!activeAccountingPeriod.value) return SHIFT_ERROR_MESSAGES.NO_OPEN_ACCOUNTING_PERIOD;
+  if (!accountingPeriodsEnabled.value) return 'نظام القيد المحاسبي غير مفعّل.';
+  if (!activeAccountingPeriod.value) return 'لا يوجد قيد محاسبي مفتوح — افتح قيداً أولاً.';
   if (
     multiBranchEnabled.value &&
     Number(activeAccountingPeriod.value.branchId) !== Number(currentBranchId.value)
   ) {
-    return SHIFT_ERROR_MESSAGES.NO_OPEN_ACCOUNTING_PERIOD_FOR_BRANCH;
+    return 'لا يوجد قيد محاسبي مفتوح لهذا الفرع.';
   }
   return '';
 });
@@ -1042,71 +966,12 @@ const goToPeriodFix = () => {
   router.push(shiftBlockAction.value.to);
 };
 
-const refreshCurrentSession = async () => {
-  await cashSessionStore.fetchCurrent();
-};
-
 const refreshCurrentAccountingPeriod = async () => {
   if (!accountingPeriodsEnabled.value) {
     accountingPeriodStore.current = null; // drop stale state when the system is off
     return;
   }
   await accountingPeriodStore.fetchCurrent(currentBranchId.value || undefined).catch(() => {});
-};
-
-const onOpenShiftClick = async () => {
-  // Refresh the active period right before opening — it may have changed.
-  await refreshCurrentAccountingPeriod();
-  // No usable open period (disabled / none / wrong branch) → show the blocking
-  // dialog and never open the shift dialog or fire the (guaranteed-422) POST.
-  if (!ensureActivePeriodOrWarn()) return;
-  openShiftDialog.value = true;
-};
-
-const onOpenShiftConfirm = async ({ openingCash, currency: cur, notes, cashboxId, branchId }) => {
-  shiftLoading.value = true;
-  try {
-    // The dialog decides the branch: a switcher's chosen branch, or null for
-    // branch-bound users / branches-off (the backend's central resolver then
-    // binds the shift to the assigned or default branch). We never force a
-    // possibly-stale selectedBranchId onto a non-switcher.
-    await cashSessionStore.openSession({
-      openingCash,
-      currency: cur,
-      notes,
-      branchId: branchId || null,
-      cashboxId: cashboxId || null,
-    });
-    openShiftDialog.value = false;
-  } catch {
-    /* notification already raised by the store */
-  } finally {
-    shiftLoading.value = false;
-  }
-};
-
-const onCloseShiftConfirm = async ({ closingCash, notes }) => {
-  if (!currentSession.value?.id) return;
-  shiftLoading.value = true;
-  try {
-    await cashSessionStore.closeSession(currentSession.value.id, { closingCash, notes });
-    closeShiftDialog.value = false;
-  } catch {
-    /* notification already raised by the store */
-  } finally {
-    shiftLoading.value = false;
-  }
-};
-
-const requestCloseShift = async () => {
-  // Refresh totals before showing the dialog so the cashier sees the latest
-  // expectedCash figure (newly recorded sales since they last looked).
-  await refreshCurrentSession();
-  if (!hasOpenSession.value) {
-    openShiftDialog.value = true;
-    return;
-  }
-  closeShiftDialog.value = true;
 };
 
 const { mobile: isMobile } = useDisplay();
@@ -1551,14 +1416,6 @@ const checkout = async () => {
   // No usable open accounting period → block the sale (backend rejects too) and
   // point the cashier at opening a period. This is the root container check.
   if (!ensureActivePeriodOrWarn()) return;
-  // Cash POS sales require an open shift. Card sales bypass this check —
-  // the drawer doesn't move on a card transaction.
-  const isCashSale = payment.method === 'cash' && Number(payment.paidAmount) > 0;
-  if (isCashSale && !hasOpenSession.value) {
-    notify.warning('افتح وردية قبل تسجيل بيع نقدي');
-    openShiftDialog.value = true;
-    return;
-  }
   try {
     const sale = await submit();
     // If we resumed a draft, remove it now that a real sale has replaced it.
@@ -1571,8 +1428,6 @@ const checkout = async () => {
       }
       currentDraftId.value = null;
     }
-    // Refresh shift totals so the header chip reflects the new cash-in.
-    refreshCurrentSession();
     if (sale?.id) {
       notify.success('تم حفظ البيع بنجاح');
       clear();
@@ -1855,15 +1710,8 @@ onMounted(async () => {
 
   await hydrateFromDraft();
 
-  // Cash session: load the user's open shift; if there isn't one, surface
-  // the Open Shift dialog before the cashier tries to ring up a sale — but
-  // only when a shift can actually be opened (an open accounting period exists,
-  // or the period feature is off). Otherwise the shift bar shows the
-  // "open an accounting period first" prompt instead.
-  await Promise.all([refreshCurrentSession(), refreshCurrentAccountingPeriod()]);
-  if (!hasOpenSession.value && canOpenShift.value) {
-    openShiftDialog.value = true;
-  }
+  // Selling only needs a usable open accounting period (no shifts).
+  await refreshCurrentAccountingPeriod();
 
   window.addEventListener('keydown', onKeydown);
   nextTick(() => barcodeRef.value?.focus?.());
@@ -2152,47 +2000,35 @@ onUnmounted(() => {
     box-shadow 0.15s ease,
     border-color 0.15s ease,
     background 0.15s ease;
-  content-visibility: auto;
-  contain-intrinsic-size: 104px;
 
-  &:hover:not(:disabled) {
+  &:hover:not(.product--disabled) {
     transform: translateY(-1px);
     border-color: var(--pos-primary);
     background: var(--pos-primary-soft);
     box-shadow: 0 4px 14px rgba(var(--v-theme-primary), 0.14);
   }
+
   &:focus-visible {
     outline: 2px solid var(--pos-primary);
     outline-offset: 2px;
     border-color: var(--pos-primary);
   }
-  &:active:not(:disabled) {
+
+  &:active:not(.product--disabled) {
     transform: translateY(0);
     background: var(--pos-primary-hover);
   }
-  &--out,
-  &:disabled {
+
+  &--disabled,
+  &--out {
     opacity: 0.6;
     cursor: not-allowed;
   }
-  /* Out-of-stock: badge gets an error fill (its number is already red via
-     the `stock-out` class set by stockClass()). */
+
   &--out .product__stock {
     background: rgba(var(--v-theme-error), 0.12);
   }
-  &--skeleton {
-    height: 104px;
-    background: linear-gradient(
-      90deg,
-      var(--pos-surface-soft) 0%,
-      var(--pos-surface-tint) 50%,
-      var(--pos-surface-soft) 100%
-    );
-    background-size: 200% 100%;
-    animation: shimmer 1.4s infinite ease-in-out;
-    border: 1px solid var(--pos-border);
-    pointer-events: none;
-  }
+
   &--featured {
     background: linear-gradient(
       135deg,

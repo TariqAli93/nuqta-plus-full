@@ -3,32 +3,31 @@ import { z } from 'zod';
 
 const userService = new UserService();
 
-const ROLE_ENUM = z.enum([
-  'global_admin',
-  'admin',
-  'branch_admin',
-  'branch_manager',
-  'manager',
-  'cashier',
-  'viewer',
-]);
+// Role is a dynamic RBAC code (table `roles`), not a fixed enum. The shape is
+// validated here; existence + active status are enforced in userService against
+// the DB, so any active role added on the Roles & permissions page is accepted.
+const ROLE_CODE = z.string().trim().min(1, 'الدور مطلوب');
 
 const createUserSchema = z.object({
   username: z.string().min(3),
   password: z.string().min(8),
   fullName: z.string().min(2),
   phone: z.string().optional(),
-  role: ROLE_ENUM.default('cashier'),
+  role: ROLE_CODE.default('cashier'),
   assignedBranchId: z.union([z.number().int().positive(), z.null()]).optional(),
+  // Many-to-many branch assignment. First entry (or assignedBranchId) is the
+  // primary branch; omit for single-branch behaviour.
+  branchIds: z.array(z.number().int().positive()).optional(),
   assignedWarehouseId: z.union([z.number().int().positive(), z.null()]).optional(),
 });
 
 const updateUserSchema = z.object({
   fullName: z.string().min(2).optional(),
   phone: z.string().optional(),
-  role: ROLE_ENUM.optional(),
+  role: ROLE_CODE.optional(),
   isActive: z.boolean().optional(),
   assignedBranchId: z.union([z.number().int().positive(), z.null()]).optional(),
+  branchIds: z.array(z.number().int().positive()).optional(),
   assignedWarehouseId: z.union([z.number().int().positive(), z.null()]).optional(),
 });
 
@@ -57,14 +56,14 @@ export class UserController {
 
   async create(request, reply) {
     const data = createUserSchema.parse(request.body);
-    const user = await userService.create(data, request.user.id);
+    const user = await userService.create(data, request.user);
     return reply.code(201).send({ success: true, data: user, message: 'User created' });
   }
 
   async update(request, reply) {
     const { id } = request.params;
     const data = updateUserSchema.parse(request.body);
-    const user = await userService.update(Number(id), data, request.user.id);
+    const user = await userService.update(Number(id), data, request.user);
     return reply.send({ success: true, data: user, message: 'User updated' });
   }
 

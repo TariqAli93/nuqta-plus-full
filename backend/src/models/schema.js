@@ -31,6 +31,35 @@ export const users = pgTable('users', {
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 
+// ── User ↔ Branch assignments (many-to-many) ───────────────────────────────
+// A user may be assigned to MORE THAN ONE branch (especially branch_manager).
+// `users.assignedBranchId` stays as the user's PRIMARY/default branch (used to
+// bind new operations when no branch is requested); this table holds the FULL
+// set of branches the user is allowed to see and act on — including the
+// primary one. A user assigned to a single branch has exactly one row here, so
+// behaviour is identical to the legacy single-branch model.
+//
+// Only a global admin may create/edit these rows. Backfilled from the existing
+// `assigned_branch_id` in the join-table migration.
+export const userBranches = pgTable(
+  'user_branches',
+  {
+    id: serial('id').primaryKey(),
+    userId: integer('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    branchId: integer('branch_id')
+      .notNull()
+      .references(() => branches.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (t) => ({
+    userBranchIdx: uniqueIndex('user_branches_user_branch_idx').on(t.userId, t.branchId),
+    userIdx: index('user_branches_user_idx').on(t.userId),
+    branchIdx: index('user_branches_branch_idx').on(t.branchId),
+  })
+);
+
 // ── Customers ─────────────────────────────────────────────────────────────
 export const customers = pgTable('customers', {
   id: serial('id').primaryKey(),
@@ -434,6 +463,13 @@ export const sales = pgTable('sales', {
   // | 'agent' (مفرد | جملة | وكيل). NULL on legacy rows → treated as 'retail'.
   // Audit only — the per-line price already lives in sale_items.unitPrice.
   priceType: text('price_type'),
+  // ── Online-order linkage (الطلبات الأونلاين) ──────────────────────────────
+  // Set only when this sale was converted FROM an online order: the originating
+  // sales channel (preserves the channel source) and a UNIQUE link back to the
+  // order (one sale per order → prevents double conversion). NULL on every
+  // normal POS/NewSale invoice. See migration 0016.
+  channelId: integer('channel_id'),
+  onlineOrderId: integer('online_order_id'),
   // ────────────────────────────────────────────────────────────────────────
   paidAmount: numeric('paid_amount', { precision: 18, scale: 4 }).default('0'),
   remainingAmount: numeric('remaining_amount', { precision: 18, scale: 4 }).default('0'),
@@ -1470,5 +1506,323 @@ export const installmentActions = pgTable(
     installmentIdx: index('installment_actions_installment_idx').on(t.installmentId),
     customerIdx: index('installment_actions_customer_idx').on(t.customerId),
     createdAtIdx: index('installment_actions_created_at_idx').on(t.createdAt),
+  })
+);
+
+// ── Sales Channels (قنوات البيع) ──────────────────────────────────────────
+// Reference/lookup table describing WHERE an order originated commercially
+// (Facebook, Instagram, WhatsApp, website, walk-in, …). Operator-extensible
+// so new channels are added at runtime without a migration. This is a
+// standalone module: NOTHING references it yet — sales/invoices are left
+// untouched on purpose. A future phase adds an optional `channel_id` on sales.
+export const salesChannels = pgTable(
+  'sales_channels',
+  {
+    id: serial('id').primaryKey(),
+    // Stable machine code (UPPER_SNAKE), unique. Seeded codes: FACEBOOK,
+    // INSTAGRAM, WHATSAPP, WEBSITE, TIKTOK, TELEGRAM, PHONE, WALK_IN, OTHER.
+    code: text('code').notNull().unique(),
+    // Human display label (Arabic).
+    name: text('name').notNull(),
+    isActive: boolean('is_active').notNull().default(true),
+    // UI hints — hex color (e.g. '#25D366') and an mdi icon (e.g. 'mdi-whatsapp').
+    color: text('color'),
+    icon: text('icon'),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (t) => ({
+    activeIdx: index('sales_channels_active_idx').on(t.isActive),
+  })
+);
+
+// ── Online Orders (الطلبات الأونلاين) ─────────────────────────────────────
+// Order intake captured BEFORE an invoice exists: a customer's request from a
+// sales channel (Facebook/Instagram/WhatsApp/…) moving through a fulfilment
+// workflow (NEW → CONFIRMED → … → DELIVERED, with RETURNED/CANCELLED exits).
+// Intentionally decoupled from `sales` — converting an order into an invoice
+// is a later phase. `order_number` is auto-filled by a DB default backed by
+// the `online_orders_number_seq` sequence (see migration 0014), so the app
+// never has to allocate it.
+export const onlineOrders = pgTable(
+  'online_orders',
+  {
+    id: serial('id').primaryKey(),
+    orderNumber: text('order_number').notNull().unique(),
+    // Originating sales channel. SET NULL on channel delete so an order is
+    // never lost; the create path requires a channel at the validation layer.
+    channelId: integer('channel_id').references(() => salesChannels.id, { onDelete: 'set null' }),
+    customerName: text('customer_name').notNull(),
+    customerPhone: text('customer_phone'),
+    customerAddress: text('customer_address'),
+    province: text('province'),
+    notes: text('notes'),
+    // Workflow state — see src/constants/orders.js. Validated at the app layer.
+    status: text('status').notNull().default('NEW'),
+    // Authoritative total = Σ item.subtotal when items exist (computed by the
+    // service); a manual value is allowed for item-less intake.
+    totalAmount: numeric('total_amount', { precision: 18, scale: 4 }).notNull().default('0'),
+    createdBy: integer('created_by').references(() => users.id),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (t) => ({
+    statusIdx: index('online_orders_status_idx').on(t.status),
+    channelIdx: index('online_orders_channel_idx').on(t.channelId),
+    createdAtIdx: index('online_orders_created_at_idx').on(t.createdAt),
+    phoneIdx: index('online_orders_phone_idx').on(t.customerPhone),
+  })
+);
+
+// ── Online Order Items ────────────────────────────────────────────────────
+// Line items for an online order. Mirrors the sale_items product-snapshot
+// convention so an order line survives a later catalog change; `productId` is
+// nullable so an intake can reference a product not yet in the catalog (the
+// agent just types the name).
+export const onlineOrderItems = pgTable(
+  'online_order_items',
+  {
+    id: serial('id').primaryKey(),
+    orderId: integer('order_id')
+      .notNull()
+      .references(() => onlineOrders.id, { onDelete: 'cascade' }),
+    productId: integer('product_id').references(() => products.id, { onDelete: 'set null' }),
+    productName: text('product_name').notNull(),
+    productSku: text('product_sku'),
+    quantity: integer('quantity').notNull().default(1),
+    unitPrice: numeric('unit_price', { precision: 18, scale: 4 }).notNull().default('0'),
+    subtotal: numeric('subtotal', { precision: 18, scale: 4 }).notNull().default('0'),
+    notes: text('notes'),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (t) => ({
+    orderIdx: index('online_order_items_order_idx').on(t.orderId),
+    productIdx: index('online_order_items_product_idx').on(t.productId),
+  })
+);
+
+// ── Online Order Status History (سجل حالات الطلب) ──────────────────────────
+// Append-only audit trail of every workflow transition for an order. One row
+// per status change (plus an initial row at creation where `from_status` is
+// NULL → 'NEW'). Written in the same transaction as the status change so the
+// history can never drift from the order's current status.
+export const onlineOrderStatusHistory = pgTable(
+  'online_order_status_history',
+  {
+    id: serial('id').primaryKey(),
+    orderId: integer('order_id')
+      .notNull()
+      .references(() => onlineOrders.id, { onDelete: 'cascade' }),
+    // NULL on the creation record; the previous status on every later change.
+    fromStatus: text('from_status'),
+    toStatus: text('to_status').notNull(),
+    note: text('note'),
+    changedBy: integer('changed_by').references(() => users.id),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (t) => ({
+    orderIdx: index('online_order_status_history_order_idx').on(t.orderId),
+    createdAtIdx: index('online_order_status_history_created_at_idx').on(t.createdAt),
+  })
+);
+
+// ── Delivery Providers (شركات التوصيل) ─────────────────────────────────────
+// Registry of delivery companies. `adapter_key` selects which code adapter
+// drives this provider (defaults to `code`), so several rows can share one
+// adapter (e.g. many CUSTOM couriers). Secrets are stored encrypted at rest
+// (AES-GCM via the notifications crypto helper); non-secret settings — base
+// URL, endpoint overrides, status map — live in `config`.
+export const deliveryProviders = pgTable(
+  'delivery_providers',
+  {
+    id: serial('id').primaryKey(),
+    code: text('code').notNull().unique(),
+    name: text('name').notNull(),
+    adapterKey: text('adapter_key').notNull().default('CUSTOM'),
+    isActive: boolean('is_active').notNull().default(true),
+    config: jsonb('config'),
+    apiKeyEncrypted: text('api_key_encrypted'),
+    apiSecretEncrypted: text('api_secret_encrypted'),
+    webhookSecretEncrypted: text('webhook_secret_encrypted'),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+    createdBy: integer('created_by').references(() => users.id),
+  },
+  (t) => ({
+    activeIdx: index('delivery_providers_active_idx').on(t.isActive),
+  })
+);
+
+// ── Delivery Shipments (شحنات التوصيل) ─────────────────────────────────────
+// One shipment per dispatch of an online order (and its converted sale, if
+// any). `status` is the canonical model (src/constants/delivery.js); the
+// adapter maps the provider's own status onto it. `shipment_number` is filled
+// by a DB default backed by a sequence (see migration 0017). Recipient fields
+// are a snapshot taken at create time so the shipment is self-contained.
+export const deliveryShipments = pgTable(
+  'delivery_shipments',
+  {
+    id: serial('id').primaryKey(),
+    shipmentNumber: text('shipment_number').notNull().unique(),
+    providerId: integer('provider_id').references(() => deliveryProviders.id, {
+      onDelete: 'set null',
+    }),
+    onlineOrderId: integer('online_order_id').references(() => onlineOrders.id, {
+      onDelete: 'set null',
+    }),
+    saleId: integer('sale_id').references(() => sales.id, { onDelete: 'set null' }),
+    status: text('status').notNull().default('PENDING'),
+    // The provider's own identifiers for this shipment.
+    providerShipmentId: text('provider_shipment_id'), // Boxy UID
+    platformCode: text('platform_code'), // Boxy merchant-facing platform code
+    providerStatus: text('provider_status'), // provider's latest raw status
+    trackingNumber: text('tracking_number'), // tracking / auth code
+    trackingUrl: text('tracking_url'),
+    // Recipient snapshot (from the order/sale at create time).
+    recipientName: text('recipient_name'),
+    recipientPhone: text('recipient_phone'),
+    secondaryPhone: text('secondary_phone'),
+    province: text('province'),
+    region: text('region'),
+    recipientAddress: text('recipient_address'),
+    // Boxy dispatch attributes (from the "إرسال إلى Boxy" dialog).
+    description: text('description'),
+    size: text('size'), // 'S' | 'M' | 'L' | 'XL'
+    fragile: boolean('fragile').notNull().default(false),
+    readyToPickup: boolean('ready_to_pickup').notNull().default(false),
+    paymentType: text('payment_type').notNull().default('COLLECT_ON_DELIVERY'), // | 'PREPAID'
+    feeType: text('fee_type').notNull().default('BY_MERCHANT'), // | 'BY_CUSTOMER'
+    codAmount: numeric('cod_amount', { precision: 18, scale: 4 }).default('0'),
+    deliveryFee: numeric('delivery_fee', { precision: 18, scale: 4 }).default('0'),
+    currency: text('currency').notNull().default('IQD'),
+    notes: text('notes'),
+    lastSyncedAt: timestamp('last_synced_at'),
+    // Last request/response exchanged with the provider (debugging/audit).
+    requestPayload: jsonb('request_payload'),
+    responsePayload: jsonb('response_payload'),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+    createdBy: integer('created_by').references(() => users.id),
+  },
+  (t) => ({
+    providerIdx: index('delivery_shipments_provider_idx').on(t.providerId),
+    orderIdx: index('delivery_shipments_order_idx').on(t.onlineOrderId),
+    saleIdx: index('delivery_shipments_sale_idx').on(t.saleId),
+    statusIdx: index('delivery_shipments_status_idx').on(t.status),
+    trackingIdx: index('delivery_shipments_tracking_idx').on(t.trackingNumber),
+  })
+);
+
+// ── Delivery Events (أحداث الشحنة) ─────────────────────────────────────────
+// Append-only log of everything that happens to a shipment: local actions
+// (CREATED/CANCELLED), polled syncs (SYNC), inbound provider webhooks
+// (WEBHOOK) and errors (ERROR). `payload` keeps the raw provider body so a
+// mis-mapped status can always be re-derived.
+export const deliveryEvents = pgTable(
+  'delivery_events',
+  {
+    id: serial('id').primaryKey(),
+    shipmentId: integer('shipment_id')
+      .notNull()
+      .references(() => deliveryShipments.id, { onDelete: 'cascade' }),
+    eventType: text('event_type').notNull(),
+    status: text('status'), // canonical status at this event (nullable)
+    providerStatus: text('provider_status'), // raw provider status string
+    message: text('message'),
+    payload: jsonb('payload'),
+    occurredAt: timestamp('occurred_at'), // provider-reported time, if any
+    // Stable per-event key for idempotent webhook processing. Partial-unique
+    // (where not null) — declared in migration 0018. Null for local events.
+    dedupeKey: text('dedupe_key'),
+    createdAt: timestamp('created_at').defaultNow(),
+    createdBy: integer('created_by').references(() => users.id),
+  },
+  (t) => ({
+    shipmentIdx: index('delivery_events_shipment_idx').on(t.shipmentId),
+    createdAtIdx: index('delivery_events_created_at_idx').on(t.createdAt),
+  })
+);
+
+// ── Delivery Webhook Logs (سجلّ الـ Webhook — للتشخيص) ─────────────────────
+// Debugging audit of EVERY inbound provider webhook attempt — including those
+// that never reached a shipment (bad signature, unparseable, unmatched). Unlike
+// delivery_events, a row is written even when processing fails. `status` is
+// 'processed' | 'failed'; `raw_payload` keeps the exact body received.
+export const deliveryWebhookLogs = pgTable(
+  'delivery_webhook_logs',
+  {
+    id: serial('id').primaryKey(),
+    providerId: integer('provider_id').references(() => deliveryProviders.id, {
+      onDelete: 'set null',
+    }),
+    providerCode: text('provider_code'),
+    shipmentId: integer('shipment_id').references(() => deliveryShipments.id, {
+      onDelete: 'set null',
+    }),
+    status: text('status').notNull(), // 'processed' | 'failed'
+    providerStatus: text('provider_status'),
+    normalizedStatus: text('normalized_status'),
+    errorMessage: text('error_message'),
+    payload: jsonb('raw_payload'),
+    createdAt: timestamp('created_at').defaultNow(), // received at
+  },
+  (t) => ({
+    providerIdx: index('delivery_webhook_logs_provider_idx').on(t.providerId),
+    statusIdx: index('delivery_webhook_logs_status_idx').on(t.status),
+    createdAtIdx: index('delivery_webhook_logs_created_at_idx').on(t.createdAt),
+    shipmentIdx: index('delivery_webhook_logs_shipment_idx').on(t.shipmentId),
+  })
+);
+
+// ── Dynamic RBAC: Permissions catalog (الصلاحيات) ──────────────────────────
+// Every grantable permission. `key` is the stable internal identifier used in
+// code/DB only; the UI shows `name_ar` grouped by `group_ar`. Seeded (and kept
+// in sync) from src/auth/permissionCatalog.js by rbacService.ensureSeed().
+export const permissions = pgTable('permissions', {
+  id: serial('id').primaryKey(),
+  key: text('key').notNull().unique(),
+  nameAr: text('name_ar').notNull(),
+  descriptionAr: text('description_ar'),
+  groupAr: text('group_ar').notNull(),
+  isActive: boolean('is_active').notNull().default(true), // false = hidden from UI
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// ── Dynamic RBAC: Roles (الأدوار) ──────────────────────────────────────────
+// `code` is the stable identifier stored on users.role (string). `scope`
+// preserves branch data-scoping ('global' | 'branch'). `is_system` marks the
+// seeded roles (rename allowed, delete blocked). `all_permissions` = the global
+// admin: always granted every permission, including future ones.
+export const roles = pgTable('roles', {
+  id: serial('id').primaryKey(),
+  code: text('code').notNull().unique(),
+  nameAr: text('name_ar').notNull(),
+  descriptionAr: text('description_ar'),
+  scope: text('scope').notNull().default('branch'),
+  isSystem: boolean('is_system').notNull().default(false),
+  allPermissions: boolean('all_permissions').notNull().default(false),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+  createdBy: integer('created_by').references(() => users.id),
+});
+
+// ── Dynamic RBAC: Role ↔ Permission grants ─────────────────────────────────
+export const rolePermissions = pgTable(
+  'role_permissions',
+  {
+    id: serial('id').primaryKey(),
+    roleId: integer('role_id')
+      .notNull()
+      .references(() => roles.id, { onDelete: 'cascade' }),
+    permissionId: integer('permission_id')
+      .notNull()
+      .references(() => permissions.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at').defaultNow(),
+  },
+  (t) => ({
+    rolePermUnique: uniqueIndex('role_permissions_role_perm_unique').on(t.roleId, t.permissionId),
+    roleIdx: index('role_permissions_role_idx').on(t.roleId),
   })
 );

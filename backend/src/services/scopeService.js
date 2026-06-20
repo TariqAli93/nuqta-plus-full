@@ -1,6 +1,6 @@
 import { getDb } from '../db.js';
-import { warehouses, branches } from '../models/index.js';
-import { eq, and, asc } from 'drizzle-orm';
+import { warehouses, branches, userBranches } from '../models/index.js';
+import { eq, and, asc, inArray } from 'drizzle-orm';
 import { AuthorizationError, ValidationError } from '../utils/errors.js';
 import featureFlagsService from './featureFlagsService.js';
 import { ensureDefaultBranch, getDefaultBranchId } from './systemDefaultsService.js';
@@ -9,12 +9,15 @@ import { ensureDefaultBranch, getDefaultBranchId } from './systemDefaultsService
  * Branch-aware auth scope helpers.
  *
  * - `global_admin` / legacy `admin`  → full cross-branch access, can switch context.
- * - `branch_admin`                   → bound to users.assignedBranchId.
- * - `branch_manager`                 → bound to users.assignedBranchId, but
- *                                      may switch active warehouse within it
- *                                      and update the branch default warehouse.
- * - `manager` / `cashier` / `viewer` → bound to their assigned branch (and to their
- *                                      assigned warehouse if one is set).
+ * - `branch_admin` / `branch_manager` / `manager` / `cashier` / `viewer`
+ *      → bound to the SET of branches assigned to them (many-to-many, via the
+ *        user_branches join table). A user with one branch behaves exactly like
+ *        the legacy single-branch model; a user with several may view/act on ALL
+ *        of them and switch the active branch between them. `assignedBranchId`
+ *        is the PRIMARY branch that new operations default to.
+ *        branch_manager additionally may switch active warehouse and set the
+ *        branch default warehouse; a fixed `assignedWarehouseId` still locks the
+ *        user to one warehouse.
  *
  * When the `multiBranch` feature flag is OFF, branches are effectively a no-op:
  * everyone shares the global warehouse list and branch enforcement is skipped.
@@ -34,6 +37,57 @@ export function isBranchAdmin(user) {
 
 export function isBranchManager(user) {
   return !!user && BRANCH_MANAGER_ROLES.has(user.role);
+}
+
+/**
+ * The branch ids a (non-global) user is allowed to act on, derived SYNCHRONOUSLY
+ * from the user object. Prefers `user.allowedBranchIds` (attached at auth time
+ * from the user_branches join table); falls back to the single primary
+ * `assignedBranchId` when the list isn't attached — so any acting-user object
+ * built without the join-table load still scopes correctly to its one branch
+ * (identical to the legacy single-branch behaviour).
+ *
+ * Global admins are unrestricted — callers must check `isGlobalAdmin` first;
+ * this returns the EXPLICIT list regardless of role.
+ */
+export function effectiveBranchIds(user) {
+  if (Array.isArray(user?.allowedBranchIds)) {
+    const ids = [...new Set(user.allowedBranchIds.map(Number).filter(Boolean))];
+    if (ids.length) return ids;
+  }
+  if (user?.assignedBranchId) return [Number(user.assignedBranchId)];
+  return [];
+}
+
+/**
+ * The user's PRIMARY/default branch id — the one new operations bind to when no
+ * branch is requested. The explicit `assignedBranchId` when it's part of the
+ * allowed set; otherwise the first allowed branch.
+ */
+export function primaryBranchId(user) {
+  const ids = effectiveBranchIds(user);
+  if (!ids.length) return null;
+  const assigned = user?.assignedBranchId ? Number(user.assignedBranchId) : null;
+  if (assigned && ids.includes(assigned)) return assigned;
+  return ids[0];
+}
+
+/**
+ * Load (from the DB) the full set of branch ids assigned to a user via the
+ * user_branches join table, falling back to the primary `assignedBranchId` when
+ * no join rows exist yet. Async — used at auth time to attach
+ * `user.allowedBranchIds` so the synchronous helpers above can run without I/O.
+ */
+export async function loadUserBranchIds(user) {
+  if (!user?.id) return user?.assignedBranchId ? [Number(user.assignedBranchId)] : [];
+  const db = await getDb();
+  const rows = await db
+    .select({ branchId: userBranches.branchId })
+    .from(userBranches)
+    .where(eq(userBranches.userId, user.id));
+  const ids = [...new Set(rows.map((r) => Number(r.branchId)).filter(Boolean))];
+  if (ids.length) return ids;
+  return user.assignedBranchId ? [Number(user.assignedBranchId)] : [];
 }
 
 /**
@@ -115,8 +169,11 @@ export async function resolveUserScope(user) {
     };
   }
 
-  // Non-global users must have an assigned branch
-  const branchId = user.assignedBranchId || null;
+  // Non-global users: load the FULL set of branches they're assigned to
+  // (many-to-many). The primary branch is the default-for-new-operations; the
+  // active context branch is the primary by default.
+  const allowedBranchIds = await loadUserBranchIds(user);
+  const branchId = primaryBranchId(user.allowedBranchIds ? user : { ...user, allowedBranchIds });
   let allowedWarehouseIds = [];
   let defaultWarehouseId = null;
   let hasDefaultWarehouse = false;
@@ -129,11 +186,16 @@ export async function resolveUserScope(user) {
       .limit(1);
     defaultWarehouseId = branchRow?.defaultWarehouseId || null;
     hasDefaultWarehouse = !!defaultWarehouseId;
+  }
 
+  // Warehouses span EVERY allowed branch (so a multi-branch manager sees all of
+  // them and can switch between them); for a single-branch user this is exactly
+  // that branch's warehouses.
+  if (allowedBranchIds.length) {
     const whs = await db
       .select({ id: warehouses.id })
       .from(warehouses)
-      .where(and(eq(warehouses.branchId, branchId), eq(warehouses.isActive, true)));
+      .where(and(inArray(warehouses.branchId, allowedBranchIds), eq(warehouses.isActive, true)));
     allowedWarehouseIds = whs.map((w) => w.id);
   }
 
@@ -161,9 +223,11 @@ export async function resolveUserScope(user) {
     warehouseId: activeWarehouseId,
     defaultWarehouseId,
     hasDefaultWarehouse,
-    allowedBranchIds: branchId ? [branchId] : [],
+    allowedBranchIds,
     allowedWarehouseIds: visibleWarehouseIds,
-    canSwitchBranch: false,
+    // A user assigned to more than one branch may switch the active branch
+    // context between them (single-branch users have nothing to switch).
+    canSwitchBranch: allowedBranchIds.length > 1,
     // A user with only one visible warehouse has nothing to switch between.
     canSwitchWarehouse: !fixedWarehouseId && visibleWarehouseIds.length > 1,
     branchFeatureEnabled: true,
@@ -171,14 +235,15 @@ export async function resolveUserScope(user) {
 }
 
 /**
- * Whether a user may target a branch OTHER than the one assigned to their
- * account. Today only global admins switch branch context; branch-bound users
- * (branch_admin / branch_manager / manager / cashier / viewer) are always
- * pinned to `assignedBranchId`. Kept as a named helper so the rule lives in one
- * place and can be widened later (e.g. a "regional manager" capability).
+ * Whether a user may target more than one branch context. Global admins switch
+ * across ALL branches; a branch-bound user may switch only when they're
+ * assigned to more than one branch (many-to-many). A user pinned to a single
+ * branch cannot switch. The choice of WHICH branches are reachable is enforced
+ * in {@link resolveBranchIdForOperation}, not here.
  */
 export function canSwitchBranch(user) {
-  return isGlobalAdmin(user);
+  if (isGlobalAdmin(user)) return true;
+  return effectiveBranchIds(user).length > 1;
 }
 
 /**
@@ -255,8 +320,8 @@ export async function resolveBranchIdForOperation(user, requestedBranchId = null
     return id;
   }
 
-  // ── Branches ON, user may switch branch (global admin) ─────────────────────
-  if (canSwitchBranch(user)) {
+  // ── Branches ON, global admin → may target ANY active branch ───────────────
+  if (isGlobalAdmin(user)) {
     if (!requestedBranchId) {
       const def = await resolveDefaultActiveBranchId(db, { ensure });
       if (!def) {
@@ -278,23 +343,41 @@ export async function resolveBranchIdForOperation(user, requestedBranchId = null
     return row.id;
   }
 
-  // ── Branches ON, branch-bound user → their assigned branch only ────────────
-  const assigned = user?.assignedBranchId ? Number(user.assignedBranchId) : null;
-  if (!assigned) {
+  // ── Branches ON, branch-bound user → only branches assigned to them ────────
+  // Single-branch users behave exactly as before; multi-branch users (e.g. a
+  // branch_manager over several branches) may target any branch in their set.
+  const allowed = effectiveBranchIds(user);
+  if (!allowed.length) {
     throw new AuthorizationError('لا يوجد فرع صالح مرتبط بحسابك. يرجى مراجعة المدير.');
   }
-  if (requestedBranchId && Number(requestedBranchId) !== assigned) {
-    throw new AuthorizationError('لا يمكنك تنفيذ العملية على فرع آخر');
+
+  // A requested branch must be one the user is assigned to.
+  if (requestedBranchId) {
+    const req = Number(requestedBranchId);
+    if (!allowed.includes(req)) {
+      throw new AuthorizationError('لا يمكنك تنفيذ العملية على فرع آخر');
+    }
+    const [row] = await db
+      .select({ id: branches.id, isActive: branches.isActive })
+      .from(branches)
+      .where(eq(branches.id, req))
+      .limit(1);
+    if (!row || row.isActive === false) throw new ValidationError('الفرع المحدد غير نشط');
+    return row.id;
   }
-  const [row] = await db
-    .select({ id: branches.id, isActive: branches.isActive })
+
+  // No explicit request → bind to the primary branch (or the first allowed one
+  // that's still active).
+  const activeRows = await db
+    .select({ id: branches.id })
     .from(branches)
-    .where(eq(branches.id, assigned))
-    .limit(1);
-  if (!row || row.isActive === false) {
+    .where(and(inArray(branches.id, allowed), eq(branches.isActive, true)));
+  const activeIds = activeRows.map((r) => Number(r.id));
+  if (!activeIds.length) {
     throw new AuthorizationError('لا يوجد فرع صالح مرتبط بحسابك. يرجى مراجعة المدير.');
   }
-  return row.id;
+  const preferred = primaryBranchId(user);
+  return preferred && activeIds.includes(preferred) ? preferred : activeIds[0];
 }
 
 /**
@@ -320,10 +403,11 @@ export async function resolveEffectiveBranchId({ user = null, requestedBranchId 
 export function enforceBranchScope(user, resourceBranchId) {
   if (isGlobalAdmin(user)) return;
   if (!resourceBranchId) return; // legacy rows without a branch — let them through
-  if (!user?.assignedBranchId) {
+  const allowed = effectiveBranchIds(user);
+  if (!allowed.length) {
     throw new AuthorizationError('User has no branch assigned');
   }
-  if (Number(user.assignedBranchId) !== Number(resourceBranchId)) {
+  if (!allowed.includes(Number(resourceBranchId))) {
     throw new AuthorizationError('Resource belongs to a different branch');
   }
 }
@@ -363,6 +447,42 @@ export async function getAllowedWarehouseIds(user) {
 }
 
 /**
+ * Branch scope for INVOICE (sales / returns) reads & writes — feature-flag aware
+ * and multi-branch aware. Returns:
+ *   - `null`  → NO restriction. The multiBranch feature is OFF (branches are a
+ *               no-op, single-branch shop) OR the user is a global admin.
+ *   - `[]`    → the user has NO assigned branch → must see NOTHING.
+ *   - `[ids]` → restrict invoice queries to exactly these branch ids.
+ *
+ * This is the single source of truth for "which invoices may this user see",
+ * so list, search, detail, edit, cancel, return, print and every invoice
+ * statistic enforce the SAME rule and can't drift apart.
+ */
+export async function invoiceBranchScope(user) {
+  const flags = await featureFlagsService.getFeatureFlags();
+  if (flags.multiBranch === false) return null; // branches off → no scoping
+  if (isGlobalAdmin(user)) return null; // super admin sees everything
+  return effectiveBranchIds(user);
+}
+
+/**
+ * Throw unless `user` may access an invoice/return tied to `branchId`. Mirrors
+ * {@link invoiceBranchScope}: unrestricted when the feature is off or the user
+ * is global; otherwise the branch MUST be one of the user's assigned branches.
+ * A NULL/foreign branch is rejected — closing the "open it by raw ID" bypass.
+ */
+export async function enforceInvoiceBranchScope(user, branchId) {
+  const allowed = await invoiceBranchScope(user);
+  if (allowed === null) return;
+  if (!allowed.length) {
+    throw new AuthorizationError('لا توجد فروع مرتبطة بحسابك لعرض الفواتير');
+  }
+  if (branchId == null || !allowed.includes(Number(branchId))) {
+    throw new AuthorizationError('لا يمكنك الوصول إلى فاتورة تابعة لفرع غير مصرح به');
+  }
+}
+
+/**
  * Resolve the branch a resource inherits from a warehouse id. Handy for sale
  * creation when the caller only passes warehouseId.
  */
@@ -387,20 +507,24 @@ export async function getBranchIdForWarehouse(warehouseId) {
  */
 export function branchFilterFor(user) {
   if (isGlobalAdmin(user)) return null;
-  if (!user?.assignedBranchId) return [];
-  return [user.assignedBranchId];
+  return effectiveBranchIds(user);
 }
 
 export default {
   isGlobalAdmin,
   isBranchAdmin,
   isBranchManager,
+  effectiveBranchIds,
+  primaryBranchId,
+  loadUserBranchIds,
   resolveUserScope,
   canSwitchBranch,
   resolveBranchIdForOperation,
   resolveEffectiveBranchId,
   enforceBranchScope,
   enforceWarehouseScope,
+  invoiceBranchScope,
+  enforceInvoiceBranchScope,
   getAllowedWarehouseIds,
   getBranchIdForWarehouse,
   branchFilterFor,

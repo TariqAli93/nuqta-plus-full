@@ -335,7 +335,7 @@ const handleSaveCompany = async () => {
   } catch (error) {
     const errorMessage =
       error.response?.data?.errors?.[0]?.message ||
-      error.response?.data?.message ||
+      error?.message ||
       'تعذر حفظ معلومات الشركة. يرجى المحاولة مرة أخرى.';
     notification.error(errorMessage);
     tempToken.value = null;

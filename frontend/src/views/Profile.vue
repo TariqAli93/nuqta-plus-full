@@ -34,10 +34,10 @@
                 <v-list-item-subtitle>
                   <v-chip
                     size="small"
-                    :color="getRoleColor(authStore.currentUser?.role?.name)"
+                    :color="getRoleColor(authStore.currentUser?.role)"
                     class="mt-1"
                   >
-                    {{ authStore.currentUser?.role?.name || 'غير محدد' }}
+                    {{ authStore.currentUser?.role || 'غير محدد' }}
                   </v-chip>
                 </v-list-item-subtitle>
               </v-list-item>
@@ -187,15 +187,17 @@ const userPermissions = computed(() => {
   return authStore.currentUser?.permissions || [];
 });
 
-const getRoleColor = (roleName) => {
-  const colors = {
-    مدير: 'error',
-    محاسب: 'primary',
-    مبيعات: 'success',
-    مستخدم: 'info',
-  };
-  return colors[roleName] || 'grey';
-};
+const roleColors = ['primary', 'success', 'warning', 'error', 'info', 'secondary'];
+
+function getRoleColor(role) {
+  if (!role) return 'secondary';
+
+  if (role.allPermissions) {
+    return 'error'; // المدير العام دائماً أحمر
+  }
+
+  return roleColors[role.id % roleColors.length];
+}
 
 const formatDate = (dateString) => {
   if (!dateString) return 'غير محدد';

@@ -46,13 +46,6 @@ const PERMISSION_MATRIX = {
   'sales:delete': MANAGER,
   'sales.override_credit_limit': MANAGER,
 
-  // ── Cash sessions / shift closing ────────────────────────────────────────
-  // Any cashier (and above) opens / closes their own shift. Reading a session
-  // is allowed for everyone in scope so reports and audit screens render.
-  'cash_sessions:open': CASHIER,
-  'cash_sessions:close': CASHIER,
-  'cash_sessions:read': ALL,
-
   // ── Accounting periods (القيد المحاسبي) ──────────────────────────────────
   // Global admins manage any period; branch admins manage their own branch's
   // (scope enforced in the service). Cashiers do not open/close by default.
@@ -77,6 +70,46 @@ const PERMISSION_MATRIX = {
   'categories:read': ALL,
   'categories:update': MANAGER,
   'categories:delete': [...GLOBAL, ROLES.MANAGER],
+
+  // ── Sales channels (قنوات البيع) ─────────────────────────────────────────
+  // Managing the channel list is an admin/manager concern; everyone in scope
+  // may read it so order/POS screens can show the channel picker later.
+  'sales_channels:create': MANAGER,
+  'sales_channels:read': ALL,
+  'sales_channels:update': MANAGER,
+  'sales_channels:delete': [...GLOBAL, ROLES.MANAGER],
+  'view:sales_channels': MANAGER,
+
+  // ── Online orders (الطلبات الأونلاين) ────────────────────────────────────
+  // Order intake before invoicing. Cashiers take and progress orders; deleting
+  // is manager-level. Status changes share the same operational scope as create.
+  'online_orders:create': CASHIER,
+  'online_orders:read': ALL,
+  'online_orders:update': CASHIER,
+  'online_orders:update_status': CASHIER,
+  // Converting an order creates a real invoice → same scope as sales:create.
+  'online_orders:convert': CASHIER,
+  'online_orders:delete': MANAGER,
+  'view:online_orders': ALL,
+
+  // ── Delivery integration (التوصيل) ───────────────────────────────────────
+  // Provider config holds credentials → branch-admin+. Shipments are an
+  // operational concern handled by cashiers and above. Webhooks are public
+  // (verified by a per-provider secret, not RBAC).
+  'delivery_providers:read': MANAGER,
+  'delivery_providers:manage': BRANCH_ADMIN,
+  // Webhook logs are a debugging surface (raw payloads) → admin-level.
+  'delivery_webhooks:view': BRANCH_ADMIN,
+  'delivery_shipments:read': ALL,
+  'delivery_shipments:create': CASHIER,
+  'delivery_shipments:update': CASHIER,
+  'view:delivery': MANAGER,
+
+  // ── Online commerce reports (تقارير التجارة الأونلاين) ───────────────────
+  // Channel/order analytics → manager-level; profit-by-channel reuses the
+  // existing profit gate (reports:read_profit).
+  'online_commerce_reports:read': MANAGER,
+  'view:online_commerce_reports': MANAGER,
 
   // ── Frontend view permissions ───────────────────────────────────────────
   'view:dashboard': ALL,
@@ -137,6 +170,9 @@ const PERMISSION_MATRIX = {
   // ── Reports ──────────────────────────────────────────────────────────────
   // Profit-sensitive aggregates require manager-level role.
   'reports:read_profit': MANAGER,
+  // Managers may see every user's operations in reports; lower roles are scoped
+  // to their own operations in the service layer.
+  'reports:view_all_users': MANAGER,
   'view:expenses': MANAGER,
 
   // ── Inventory ────────────────────────────────────────────────────────────
@@ -209,22 +245,29 @@ export function isGlobalRole(role) {
   return role === ROLES.GLOBAL_ADMIN || role === ROLES.ADMIN;
 }
 
+// Dynamic, DB-backed checker injected by rbacService once the RBAC cache is
+// loaded. Until then (early boot), the static matrix below is the fallback.
+// Injection (not import) avoids a permissionMatrix ↔ rbacService cycle.
+let _dynamicChecker = null;
+export function setDynamicChecker(fn) {
+  _dynamicChecker = typeof fn === 'function' ? fn : null;
+}
+
 /**
- * Check if a role has a specific permission.
+ * Check if a role has a specific permission. Delegates to the dynamic DB-backed
+ * RBAC cache when available; falls back to the static matrix during early boot.
  */
 export function hasPermission(permission, role) {
   if (!permission || !role) return false;
 
-  // Global admins have everything.
+  // Global admins always have everything (incl. future permissions).
   if (isGlobalRole(role)) return true;
 
-  const allowedRoles = PERMISSION_MATRIX[permission];
-  if (!allowedRoles) {
-    // Unknown permission — deny by default (fail secure).
-    console.warn(`Unknown permission: ${permission}`);
-    return false;
-  }
+  if (_dynamicChecker) return _dynamicChecker(role, permission) === true;
 
+  // Pre-boot fallback: static matrix (fail secure on unknown keys).
+  const allowedRoles = PERMISSION_MATRIX[permission];
+  if (!allowedRoles) return false;
   return allowedRoles.includes(role);
 }
 

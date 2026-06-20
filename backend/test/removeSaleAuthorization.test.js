@@ -11,7 +11,9 @@ import { SaleController } from '../src/controllers/saleController.js';
  *   - branch scope (controller): a branch-restricted user may only delete sales
  *     from their own branch; global admins may delete any.
  *   - write-protection (service, saleService.assertSaleWritable): a sale tied to
- *     a CLOSED accounting period or a CLOSED shift can never be deleted.
+ *     a CLOSED accounting period can never be deleted. (The legacy CLOSED-shift
+ *     guard was removed with the shift system; test 5 now asserts a sale carrying
+ *     a legacy cash_session_id CAN be deleted.)
  *
  * We drive the real controller method with a minimal request/reply so the full
  * path (getById → enforceBranchScope → saleService.removeSale) is exercised.
@@ -74,7 +76,7 @@ before(async () => {
 
   const { rows } = await pool.query("SELECT value FROM settings WHERE key='feature_flags'");
   originalFlags = rows[0]?.value ?? null;
-  // accountingPeriods ON so the closed-SHIFT guard (assertShiftWritable) fires.
+  // accountingPeriods ON so the closed-PERIOD guard (assertWritable) fires.
   await setFlags(pool, {
     inventory: true, pos: true, installments: true, creditScore: true, draftInvoices: true,
     multiBranch: true, multiWarehouse: false, warehouseTransfers: false,
@@ -103,7 +105,8 @@ before(async () => {
   ids.cashierId = cashier.rows[0].id;
   branchUser = { id: ids.cashierId, role: 'cashier', username: 'rmsale-cashier', assignedBranchId: ids.branchA };
 
-  // A closed period and a closed shift to validate the write-protection guards.
+  // A closed period validates the period write-guard; a legacy closed shift
+  // (cash_sessions retained for archive only) validates that shifts NO LONGER gate.
   const closedPeriod = await pool.query(
     `INSERT INTO accounting_periods (type, scope_type, status, opened_by_user_id, closed_at, closed_by_user_id)
      VALUES ('daily', 'global', 'closed', $1, now(), $1) RETURNING id`,
@@ -137,7 +140,7 @@ test('branch user CANNOT remove a sale from another branch (test 1)', async () =
   const saleId = await insertSale(pool, { branchId: ids.branchB });
   await assert.rejects(
     () => controller.removeSale({ user: branchUser, params: { id: saleId } }, makeReply()),
-    /different branch/i
+    /غير مصرح به|different branch/i
   );
   // Still present — the guard blocked the delete.
   const { rows } = await pool.query('SELECT 1 FROM sales WHERE id=$1', [saleId]);
@@ -176,13 +179,15 @@ test('removing a sale in a CLOSED accounting period still fails (test 4)', async
   assert.equal(rows.length, 1, 'sale in a closed period must not be deleted');
 });
 
-test('removing a sale in a CLOSED shift still fails (test 5)', async () => {
+test('removing a sale tied to a legacy CLOSED shift now SUCCEEDS (test 5)', async () => {
+  // The shift system was removed: cash sessions no longer gate writes, so a sale
+  // that still carries a legacy cash_session_id (with an open/no accounting
+  // period) must be deletable. Only the accounting-period guard remains (test 4).
   const pool = await getPool();
   const saleId = await insertSale(pool, { branchId: ids.branchA, shiftId: ids.closedShiftId });
-  await assert.rejects(
-    () => controller.removeSale({ user: adminUser, params: { id: saleId } }, makeReply()),
-    /وردية مغلقة/
-  );
+  const reply = makeReply();
+  await controller.removeSale({ user: adminUser, params: { id: saleId } }, reply);
+  assert.equal(reply.body?.success, true, 'a legacy closed-shift sale should now delete');
   const { rows } = await pool.query('SELECT 1 FROM sales WHERE id=$1', [saleId]);
-  assert.equal(rows.length, 1, 'sale in a closed shift must not be deleted');
+  assert.equal(rows.length, 0, 'closed shift no longer blocks deletion');
 });

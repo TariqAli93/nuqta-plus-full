@@ -57,7 +57,7 @@
                 @click:append-inner="regenerateSKU"
               ></v-text-field>
             </v-col>
-            <v-col cols="12" md="6">
+            <v-col v-if="canReadCategories" cols="12" md="6">
               <v-autocomplete
                 data-testid="product-category"
                 v-model="formData.categoryId"
@@ -76,6 +76,7 @@
                 <template #no-data>
                   <v-list-item
                     v-if="
+                      canCreateCategories &&
                       categorySearch &&
                       categorySearch.trim() &&
                       !creatingCategory &&
@@ -584,6 +585,7 @@ import { useCategoryStore } from '@/stores/category';
 import { useAuthStore } from '@/stores/auth';
 import { useNotificationStore } from '@/stores/notification';
 import { useSettingsStore } from '@/stores/settings';
+import { usePermissions } from '@/composables/usePermissions';
 import api from '@/plugins/axios';
 import PageHeader from '@/components/PageHeader.vue';
 
@@ -594,6 +596,15 @@ const categoryStore = useCategoryStore();
 const authStore = useAuthStore();
 const notification = useNotificationStore();
 const settingsStore = useSettingsStore();
+const { can } = usePermissions();
+
+// Categories are a secondary/optional feature on the product form: the
+// category picker loads the categories list (categories:read) and the
+// "create on Enter" affordance creates one (categories:create) — both are
+// DIFFERENT permissions than products. Guard the fetch + UI so users without
+// them never trigger a 403 toast and never see the picker.
+const canReadCategories = computed(() => can('categories:read'));
+const canCreateCategories = computed(() => can('categories:create'));
 
 const form = ref(null);
 const adminForm = ref(null);
@@ -1001,7 +1012,9 @@ const handleCategoryKeydown = async (event) => {
     return;
   }
 
-  // إنشاء التصنيف الجديد
+  // إنشاء التصنيف الجديد — يتطلب صلاحية categories:create. بدونها لا نرسل
+  // الطلب إطلاقاً حتى لا يظهر تنبيه 403 من المعترض العام.
+  if (!canCreateCategories.value) return;
   if (creatingCategory.value) return; // منع الطلبات المتعددة
 
   creatingCategory.value = true;
@@ -1129,9 +1142,14 @@ onMounted(async () => {
     // استخدام القيم الافتراضية
   }
 
-  await categoryStore.fetchCategories();
-  // تحديث القائمة المحلية من الـ store
-  categories.value = Array.isArray(categoryStore.categories) ? [...categoryStore.categories] : [];
+  // Optional feature: only load categories when the user can read them.
+  if (canReadCategories.value) {
+    await categoryStore.fetchCategories();
+    // تحديث القائمة المحلية من الـ store
+    categories.value = Array.isArray(categoryStore.categories)
+      ? [...categoryStore.categories]
+      : [];
+  }
 
   if (isEdit.value) {
     loading.value = true;

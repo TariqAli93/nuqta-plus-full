@@ -63,18 +63,14 @@ import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { useReportStore } from '@/stores/report';
-import { useCashSessionStore } from '@/stores/cashSession';
 import { formatCurrency } from '@/utils/formatters';
 
 const router = useRouter();
 const authStore = useAuthStore();
 const reportStore = useReportStore();
-const cashSession = useCashSessionStore();
 
 const summary = ref(null);
 const loaded = ref(false);
-
-const hasOpenShift = computed(() => cashSession.hasOpenSession);
 
 // ── Quick action buttons (gated by permission/feature/capability) ───────────
 const actions = computed(() => [
@@ -117,14 +113,6 @@ const actions = computed(() => [
     color: 'orange',
     show: authStore.hasPermission('expenses:create'),
     to: '/expenses?new=1',
-  },
-  {
-    key: 'shift',
-    title: hasOpenShift.value ? 'غلق الوردية' : 'فتح الوردية',
-    icon: hasOpenShift.value ? 'mdi-lock-clock' : 'mdi-clock-start',
-    color: 'teal',
-    show: authStore.hasPermission('cash_sessions:open'),
-    to: '/sales/pos',
   },
   {
     key: 'search',
@@ -179,10 +167,6 @@ const unpaidInvoices = computed(() => {
   return s ? Number(s.unpaidBalances || 0) : 0;
 });
 const lowStockCount = computed(() => summary.value?.inventory?.lowStockProducts?.length || 0);
-const cashInBox = computed(() => {
-  const cur = cashSession.current;
-  return cur && cur.status === 'open' ? Number(cur.expectedCash ?? cur.openingCash ?? 0) : null;
-});
 
 const cards = computed(() => [
   {
@@ -203,17 +187,6 @@ const cards = computed(() => [
     show: authStore.hasPermission('reports:read_profit'),
     valueClass: todayProfit.value < 0 ? 'text-error' : '',
     action: { label: 'التقارير', to: '/reports/simple' },
-  },
-  {
-    key: 'cash',
-    title: 'بالصندوق الآن',
-    value: cashInBox.value == null ? 'لا توجد وردية' : formatCurrency(cashInBox.value, 'IQD'),
-    icon: 'mdi-safe-square-outline',
-    color: 'teal',
-    show: authStore.hasPermission('view:sales'),
-    action: hasOpenShift.value
-      ? { label: 'كشف الوردية', to: '/sales/shifts' }
-      : { label: 'فتح وردية', to: '/sales/pos' },
   },
   {
     key: 'customer-debt',
@@ -248,9 +221,14 @@ const cards = computed(() => [
 const visibleCards = computed(() => cards.value.filter((c) => c.show));
 
 onMounted(async () => {
+  // The dashboard summary endpoint requires `sales:read`. Skip the fetch
+  // entirely for users without it so the global 403 interceptor never fires.
+  if (!authStore.hasPermission('sales:read')) {
+    loaded.value = true;
+    return;
+  }
   try {
     await Promise.all([
-      cashSession.fetchCurrent().catch(() => {}),
       reportStore
         .fetchDashboard()
         .then((d) => {

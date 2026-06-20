@@ -29,7 +29,7 @@ export const useCategoryStore = defineStore('category', {
         } else {
           this.categories = [];
         }
-        
+
         // Ensure pagination values are numbers
         if (response?.data?.meta) {
           this.pagination = {
@@ -39,10 +39,10 @@ export const useCategoryStore = defineStore('category', {
             totalPages: Number(response.data.meta.totalPages) || this.pagination.totalPages,
           };
         }
-        
+
         return response;
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل تحميل التصنيفات');
+        notificationStore.error(error?.message || 'فشل تحميل التصنيفات');
         throw error;
       } finally {
         this.loading = false;
@@ -57,7 +57,7 @@ export const useCategoryStore = defineStore('category', {
         this.currentCategory = response.data;
         return response;
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل تحميل بيانات التصنيف');
+        notificationStore.error(error?.message || 'فشل تحميل بيانات التصنيف');
         throw error;
       } finally {
         this.loading = false;
@@ -77,7 +77,7 @@ export const useCategoryStore = defineStore('category', {
         notificationStore.success('تم إضافة التصنيف بنجاح');
         return response;
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل إضافة التصنيف');
+        notificationStore.error(error?.message || 'فشل إضافة التصنيف');
         throw error;
       } finally {
         this.loading = false;
@@ -96,7 +96,7 @@ export const useCategoryStore = defineStore('category', {
         notificationStore.success('تم تحديث التصنيف بنجاح');
         return response;
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل تحديث التصنيف');
+        notificationStore.error(error?.message || 'فشل تحديث التصنيف');
         throw error;
       } finally {
         this.loading = false;
@@ -112,7 +112,7 @@ export const useCategoryStore = defineStore('category', {
         notificationStore.success('تم حذف التصنيف بنجاح');
         return response;
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل حذف التصنيف');
+        notificationStore.error(error?.message || 'فشل حذف التصنيف');
         throw error;
       } finally {
         this.loading = false;

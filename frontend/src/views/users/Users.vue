@@ -5,7 +5,13 @@
       subtitle="إدارة حسابات الموظفين، الصلاحيات والفروع المعيّنة"
       icon="mdi-account-multiple"
     >
-      <v-btn color="primary" prepend-icon="mdi-plus" size="default" @click="openForm()">
+      <v-btn
+        v-if="can('users:create')"
+        color="primary"
+        prepend-icon="mdi-plus"
+        size="default"
+        @click="openForm()"
+      >
         مستخدم جديد
       </v-btn>
     </PageHeader>
@@ -28,6 +34,7 @@
           <v-select
             v-model="store.filters.role"
             :items="roleOptions"
+            :loading="rbacStore.loading"
             label="الدور"
             item-title="title"
             item-value="value"
@@ -35,6 +42,7 @@
             density="comfortable"
             hide-details
             clearable
+            no-data-text="لا توجد أدوار"
           />
         </v-col>
         <v-col cols="12" md="3">
@@ -70,7 +78,6 @@
         :headers="headers"
         :items-per-page="store.limit"
         density="comfortable"
-        hide-default-footer
       >
         <template #loading>
           <TableSkeleton :rows="5" :columns="headers.length" />
@@ -95,6 +102,7 @@
         </template>
         <template #[`item.actions`]="{ item }">
           <v-btn
+            v-if="can('users:update')"
             icon="mdi-pencil"
             size="small"
             variant="text"
@@ -105,6 +113,7 @@
             <v-icon size="20">mdi-pencil</v-icon>
           </v-btn>
           <v-btn
+            v-if="can('users:update')"
             icon="mdi-lock-reset"
             size="small"
             variant="text"
@@ -115,6 +124,7 @@
             <v-icon size="20">mdi-lock-reset</v-icon>
           </v-btn>
           <v-btn
+            v-if="can('users:delete')"
             icon="mdi-delete"
             size="small"
             variant="text"
@@ -173,6 +183,7 @@
                 <v-select
                   v-model="form.role"
                   :items="roleOptions"
+                  :loading="rbacStore.loading"
                   item-title="title"
                   item-value="value"
                   label="الدور"
@@ -180,20 +191,42 @@
                   density="comfortable"
                   prepend-inner-icon="mdi-shield-account"
                   required
+                  no-data-text="لا توجد أدوار"
                 />
               </v-col>
               <v-col v-if="!isGlobalRole(form.role)" cols="12" md="6">
                 <v-select
-                  v-model="form.assignedBranchId"
+                  v-model="form.branchIds"
                   :items="inventoryStore.branches"
                   item-title="name"
                   item-value="id"
-                  label="الفرع المعيّن"
+                  label="الفروع المخصصة"
+                  hint="يمكن تعيين أكثر من فرع — مثل مدير الفرع"
+                  persistent-hint
+                  multiple
+                  chips
+                  closable-chips
                   variant="outlined"
                   density="comfortable"
                   prepend-inner-icon="mdi-source-branch"
-                  :rules="[rules.required]"
+                  :rules="[rules.atLeastOneBranch]"
                   @update:model-value="onBranchChange"
+                />
+              </v-col>
+              <v-col v-if="!isGlobalRole(form.role) && form.branchIds.length > 1" cols="12" md="6">
+                <v-select
+                  v-model="form.assignedBranchId"
+                  :items="primaryBranchOptions"
+                  item-title="name"
+                  item-value="id"
+                  label="الفرع الرئيسي (الافتراضي)"
+                  hint="يُستخدم افتراضياً للعمليات الجديدة"
+                  persistent-hint
+                  variant="outlined"
+                  density="comfortable"
+                  prepend-inner-icon="mdi-star"
+                  :rules="[rules.required]"
+                  @update:model-value="onPrimaryBranchChange"
                 />
               </v-col>
               <v-col v-if="!isGlobalRole(form.role) && form.assignedBranchId" cols="12" md="6">
@@ -306,6 +339,8 @@ import { ref, onMounted, reactive, computed } from 'vue';
 import { useUsersStore } from '@/stores/users';
 import { useInventoryStore } from '@/stores/inventory';
 import { useNotificationStore } from '@/stores/notification';
+import { useRbacStore } from '@/stores/rbac';
+import { usePermissions } from '@/composables/usePermissions';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import PageHeader from '@/components/PageHeader.vue';
 import EmptyState from '@/components/EmptyState.vue';
@@ -314,14 +349,50 @@ import TableSkeleton from '@/components/TableSkeleton.vue';
 const store = useUsersStore();
 const inventoryStore = useInventoryStore();
 const notification = useNotificationStore();
+const rbacStore = useRbacStore();
+const { can } = usePermissions();
 
-const isGlobalRole = (role) => role === 'admin' || role === 'global_admin';
+// Role options come ENTIRELY from the dynamic RBAC system — any role created on
+// the Roles & permissions page appears here automatically, no code change. The
+// backend binds a user to a role by its string `code` (users.role), so the
+// option value is `role.code`. Only active roles are offered.
+const roleOptions = computed(() =>
+  rbacStore.roles
+    .filter((role) => role.isActive)
+    .map((role) => ({ title: role.nameAr, value: role.code }))
+);
+
+// Whether the selected role spans all branches (no branch assignment needed).
+// Derived from the role's RBAC `scope` so a custom global-scoped role works too;
+// the legacy `admin`/`global_admin` codes are kept as a fallback for safety
+// while roles are still loading or for pre-RBAC accounts.
+const isGlobalRole = (code) => {
+  const scope = rbacStore.roles.find((r) => r.code === code)?.scope;
+  if (scope) return scope === 'global';
+  return code === 'admin' || code === 'global_admin';
+};
 
 const warehousesForForm = computed(() =>
   inventoryStore.warehouses.filter((w) => w.branchId === form.assignedBranchId)
 );
 
+// Primary-branch picker only offers branches that are actually assigned.
+const primaryBranchOptions = computed(() =>
+  inventoryStore.branches.filter((b) => form.branchIds.includes(b.id))
+);
+
+// Keep the primary branch consistent with the assigned set: when the set
+// changes, drop a primary that's no longer included and default to the first
+// selected branch. Resetting the warehouse on any branch change avoids a stale
+// warehouse from a branch that's no longer selected.
 const onBranchChange = () => {
+  if (!form.branchIds.includes(form.assignedBranchId)) {
+    form.assignedBranchId = form.branchIds[0] ?? null;
+  }
+  form.assignedWarehouseId = null;
+};
+
+const onPrimaryBranchChange = () => {
   form.assignedWarehouseId = null;
 };
 
@@ -343,16 +414,6 @@ const statusOptions = [
   { title: 'معطل', value: false },
 ];
 
-const roleOptions = [
-  { title: 'مدير عام', value: 'global_admin' },
-  { title: 'مدير فرع', value: 'branch_admin' },
-  { title: 'مسؤول فرع', value: 'branch_manager' },
-  { title: 'مدير متجر', value: 'manager' },
-  { title: 'كاشير', value: 'cashier' },
-  { title: 'مشاهد', value: 'viewer' },
-  { title: 'مدير (قديم)', value: 'admin' },
-];
-
 const showForm = ref(false);
 const formRef = ref(null);
 const resetPwDialog = ref(false);
@@ -360,6 +421,7 @@ const resetPwRef = ref(null);
 
 const rules = {
   required: (value) => !!value || 'هذا الحقل مطلوب.',
+  atLeastOneBranch: (value) => (Array.isArray(value) && value.length > 0) || 'يجب تعيين فرع واحد على الأقل.',
   minLength: (value) => value.length >= 6 || 'يجب أن تكون كلمة المرور 6 أحرف على الأقل.',
   confirmPassword: (value) =>
     value === resetPwInfo.confirmPassword || 'كلمتا المرور غير متطابقتين.',
@@ -374,6 +436,7 @@ const form = reactive({
   password: '',
   isActive: true,
   assignedBranchId: null,
+  branchIds: [],
   assignedWarehouseId: null,
 });
 const resetPwInfo = reactive({
@@ -383,15 +446,33 @@ const resetPwInfo = reactive({
 });
 
 function getRoleName(role) {
-  const roleOption = roleOptions.find((r) => r.value === role);
-  return roleOption ? roleOption.title : role || '-';
+  // Resolve the Arabic name from the dynamic RBAC roles; fall back to the raw
+  // code (e.g. a legacy role no longer in the list) so the cell is never empty.
+  const match = rbacStore.roles.find((r) => r.code === role);
+  return match ? match.nameAr : role || '-';
 }
 
-function openForm(item) {
+async function openForm(item) {
   if (item) {
+    // The list row only carries the primary branch; fetch the full record so
+    // the multi-branch picker shows the user's COMPLETE assigned set.
+    try {
+      item = await store.getById(item.id);
+    } catch {
+      /* fall back to the list row if the fetch fails */
+    }
+    // `branchIds` is the many-to-many set; fall back to the single primary
+    // branch for legacy rows / list payloads that only carry assignedBranchId.
+    const branchIds =
+      Array.isArray(item.branchIds) && item.branchIds.length
+        ? [...item.branchIds]
+        : item.assignedBranchId
+          ? [item.assignedBranchId]
+          : [];
     Object.assign(form, {
       ...item,
-      assignedBranchId: item.assignedBranchId ?? null,
+      assignedBranchId: item.assignedBranchId ?? branchIds[0] ?? null,
+      branchIds,
       assignedWarehouseId: item.assignedWarehouseId ?? null,
       password: '',
     });
@@ -405,6 +486,7 @@ function openForm(item) {
       password: '',
       isActive: true,
       assignedBranchId: null,
+      branchIds: [],
       assignedWarehouseId: null,
     });
   }
@@ -424,10 +506,14 @@ function closeResetPwDialog() {
 }
 
 async function save() {
+  // The primary branch defaults to the first selected branch when the user
+  // didn't explicitly pick one (the primary picker only shows for >1 branch).
+  const primaryBranchId = form.assignedBranchId ?? form.branchIds[0] ?? null;
   const assignedPayload = isGlobalRole(form.role)
-    ? { assignedBranchId: null, assignedWarehouseId: null }
+    ? { assignedBranchId: null, branchIds: [], assignedWarehouseId: null }
     : {
-        assignedBranchId: form.assignedBranchId,
+        assignedBranchId: primaryBranchId,
+        branchIds: [...form.branchIds],
         assignedWarehouseId: form.assignedWarehouseId || null,
       };
 
@@ -485,6 +571,11 @@ onMounted(async () => {
     store.fetch(),
     inventoryStore.fetchBranches(),
     inventoryStore.fetchWarehouses(),
+    // Dynamic role list for the filter + create/edit form is an OPTIONAL secondary
+    // load gated by `roles:read` (different from the page's `view:users`). Skip the
+    // request entirely without it — the global axios interceptor would otherwise
+    // toast the 403 before the store's .catch() could swallow it.
+    can('roles:read') ? rbacStore.fetchRoles().catch(() => {}) : Promise.resolve(),
   ]);
 });
 </script>

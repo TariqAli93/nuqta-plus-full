@@ -27,11 +27,7 @@ import { buildSearch, ncol, RANK } from '../utils/searchBuilder.js';
 const log = createLogger('ProductService');
 import alertBus from '../events/alertBus.js';
 import inventoryService from './inventoryService.js';
-import {
-  replaceProductUnits,
-  ensureBaseUnit,
-  listProductUnits,
-} from './productUnitService.js';
+import { replaceProductUnits, ensureBaseUnit, listProductUnits } from './productUnitService.js';
 
 async function withTransaction(callback) {
   const pool = await getPool();
@@ -64,17 +60,83 @@ function priceEq(column, raw) {
 // name, SKU, barcode, category name, unit, notes(description), purchase + sale
 // price. (Brand intentionally omitted — no brand entity exists.)
 const PRODUCT_SEARCH_TARGETS = [
-  { label: 'barcode', rank: RANK.BARCODE_EXACT, kind: 'codeExact', norm: ncol('products', 'search_barcode'), value: products.barcode },
-  { label: 'sku', rank: RANK.SKU_EXACT, kind: 'codeExact', norm: ncol('products', 'search_sku'), value: products.sku },
-  { label: 'name', rank: RANK.NAME_EXACT, kind: 'textExact', norm: ncol('products', 'search_name'), value: products.name },
-  { label: 'sku', rank: RANK.CODE_PARTIAL, kind: 'codePartial', norm: ncol('products', 'search_sku'), value: products.sku },
-  { label: 'name', rank: RANK.NAME_PARTIAL, kind: 'textPartial', norm: ncol('products', 'search_name'), value: products.name },
-  { label: 'category', rank: RANK.FIELD_MATCH, kind: 'textPartial', norm: ncol('categories', 'search_name'), value: categories.name },
-  { label: 'unit', rank: RANK.FIELD_MATCH, kind: 'textPartial', norm: ncol('products', 'search_unit'), value: products.unit },
-  { label: 'supplier', rank: RANK.FIELD_MATCH, kind: 'textPartial', norm: ncol('products', 'search_supplier'), value: products.supplier },
-  { label: 'salePrice', rank: RANK.FIELD_MATCH, kind: 'custom', value: products.sellingPrice, predicate: ({ raw }) => priceEq(products.sellingPrice, raw) },
-  { label: 'purchasePrice', rank: RANK.FIELD_MATCH, kind: 'custom', value: products.costPrice, predicate: ({ raw }) => priceEq(products.costPrice, raw) },
-  { label: 'notes', rank: RANK.DETAILS, kind: 'textPartial', norm: ncol('products', 'search_description'), value: products.description },
+  {
+    label: 'barcode',
+    rank: RANK.BARCODE_EXACT,
+    kind: 'codeExact',
+    norm: ncol('products', 'search_barcode'),
+    value: products.barcode,
+  },
+  {
+    label: 'sku',
+    rank: RANK.SKU_EXACT,
+    kind: 'codeExact',
+    norm: ncol('products', 'search_sku'),
+    value: products.sku,
+  },
+  {
+    label: 'name',
+    rank: RANK.NAME_EXACT,
+    kind: 'textExact',
+    norm: ncol('products', 'search_name'),
+    value: products.name,
+  },
+  {
+    label: 'sku',
+    rank: RANK.CODE_PARTIAL,
+    kind: 'codePartial',
+    norm: ncol('products', 'search_sku'),
+    value: products.sku,
+  },
+  {
+    label: 'name',
+    rank: RANK.NAME_PARTIAL,
+    kind: 'textPartial',
+    norm: ncol('products', 'search_name'),
+    value: products.name,
+  },
+  {
+    label: 'category',
+    rank: RANK.FIELD_MATCH,
+    kind: 'textPartial',
+    norm: ncol('categories', 'search_name'),
+    value: categories.name,
+  },
+  {
+    label: 'unit',
+    rank: RANK.FIELD_MATCH,
+    kind: 'textPartial',
+    norm: ncol('products', 'search_unit'),
+    value: products.unit,
+  },
+  {
+    label: 'supplier',
+    rank: RANK.FIELD_MATCH,
+    kind: 'textPartial',
+    norm: ncol('products', 'search_supplier'),
+    value: products.supplier,
+  },
+  {
+    label: 'salePrice',
+    rank: RANK.FIELD_MATCH,
+    kind: 'custom',
+    value: products.sellingPrice,
+    predicate: ({ raw }) => priceEq(products.sellingPrice, raw),
+  },
+  {
+    label: 'purchasePrice',
+    rank: RANK.FIELD_MATCH,
+    kind: 'custom',
+    value: products.costPrice,
+    predicate: ({ raw }) => priceEq(products.costPrice, raw),
+  },
+  {
+    label: 'notes',
+    rank: RANK.DETAILS,
+    kind: 'textPartial',
+    norm: ncol('products', 'search_description'),
+    value: products.description,
+  },
 ];
 
 export class ProductService {
@@ -121,7 +183,11 @@ export class ProductService {
       } else {
         // No units supplied — guarantee a base unit so downstream flows
         // (inventory, sale, return) can always resolve a conversionFactor.
-        await ensureBaseUnit(tx, created.id, productOnly.unit && productOnly.unit !== 'piece' ? productOnly.unit : 'قطعة');
+        await ensureBaseUnit(
+          tx,
+          created.id,
+          productOnly.unit && productOnly.unit !== 'piece' ? productOnly.unit : 'قطعة'
+        );
       }
       return created;
     });
@@ -145,8 +211,18 @@ export class ProductService {
 
   async getAll(filters = {}) {
     const db = await getDb();
-    const { page = 1, limit = 10, search, categoryId, warehouseId, status, unit, minPrice, maxPrice, productType } =
-      filters;
+    const {
+      page = 1,
+      limit = 10,
+      search,
+      categoryId,
+      warehouseId,
+      status,
+      unit,
+      minPrice,
+      maxPrice,
+      productType,
+    } = filters;
 
     // Centralized, ranked, Arabic/English-aware search. Empty term => inactive,
     // and we fall back to the default catalogue list (req #11).
@@ -286,7 +362,12 @@ export class ProductService {
       const unitRows = await db
         .select()
         .from(productUnits)
-        .where(sql`${productUnits.productId} IN (${sql.join(productIds.map((id) => sql`${id}`), sql`, `)})`);
+        .where(
+          sql`${productUnits.productId} IN (${sql.join(
+            productIds.map((id) => sql`${id}`),
+            sql`, `
+          )})`
+        );
       for (const u of unitRows) {
         const list = unitsByProduct.get(u.productId) || [];
         list.push({
@@ -418,7 +499,11 @@ export class ProductService {
       if (Array.isArray(unitsInput)) {
         await replaceProductUnits(tx, row.id, unitsInput);
       } else {
-        await ensureBaseUnit(tx, row.id, safeUpdate.unit && safeUpdate.unit !== 'piece' ? safeUpdate.unit : 'قطعة');
+        await ensureBaseUnit(
+          tx,
+          row.id,
+          safeUpdate.unit && safeUpdate.unit !== 'piece' ? safeUpdate.unit : 'قطعة'
+        );
       }
       return row;
     });
@@ -541,10 +626,7 @@ export class ProductService {
         await tx.delete(productUnits).where(eq(productUnits.productId, productId));
 
         // Finally the product row itself.
-        const [deleted] = await tx
-          .delete(products)
-          .where(eq(products.id, productId))
-          .returning();
+        const [deleted] = await tx.delete(products).where(eq(products.id, productId)).returning();
         if (!deleted) {
           throw new NotFoundError('Product');
         }
@@ -605,9 +687,7 @@ export class ProductService {
       .map((r) => ({ ...r, stock: Number(r.stock) || 0 }))
       .filter((r) => {
         const threshold =
-          r.lowStockThreshold && r.lowStockThreshold > 0
-            ? r.lowStockThreshold
-            : r.minStock || 0;
+          r.lowStockThreshold && r.lowStockThreshold > 0 ? r.lowStockThreshold : r.minStock || 0;
         return r.stock <= threshold;
       });
   }

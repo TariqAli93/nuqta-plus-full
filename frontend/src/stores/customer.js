@@ -43,7 +43,7 @@ export const useCustomerStore = defineStore('customer', {
       } catch (error) {
         if (isCanceledRequest(error)) throw error;
         if (!silent) {
-          notificationStore.error(error.response?.data?.message || 'فشل تحميل العملاء');
+          notificationStore.error(error?.message || 'فشل تحميل العملاء');
           this.customers = [];
         }
         throw error;
@@ -60,7 +60,7 @@ export const useCustomerStore = defineStore('customer', {
         this.currentCustomer = response?.data || null;
         return response;
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل تحميل بيانات العميل');
+        notificationStore.error(error?.message || 'فشل تحميل بيانات العميل');
         this.currentCustomer = null;
         throw error;
       } finally {
@@ -101,7 +101,7 @@ export const useCustomerStore = defineStore('customer', {
         // dialog, retries with allowDuplicatePhone). Don't toast it here
         // or the user will see the error twice.
         if (error.response?.data?.code !== 'CUSTOMER_PHONE_DUPLICATE') {
-          notificationStore.error(error.response?.data?.message || 'فشل إضافة العميل');
+          notificationStore.error(error?.message || 'فشل إضافة العميل');
         }
         throw error;
       }
@@ -130,7 +130,7 @@ export const useCustomerStore = defineStore('customer', {
           this.customers[index] = originalCustomer;
         }
         if (error.response?.data?.code !== 'CUSTOMER_PHONE_DUPLICATE') {
-          notificationStore.error(error.response?.data?.message || 'فشل تحديث العميل');
+          notificationStore.error(error?.message || 'فشل تحديث العميل');
         }
         throw error;
       }
@@ -155,7 +155,7 @@ export const useCustomerStore = defineStore('customer', {
         if (index !== -1 && deletedCustomer) {
           this.customers.splice(index, 0, deletedCustomer);
         }
-        notificationStore.error(error.response?.data?.message || 'فشل حذف العميل');
+        notificationStore.error(error?.message || 'فشل حذف العميل');
         throw error;
       }
     },

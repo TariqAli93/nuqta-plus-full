@@ -372,6 +372,15 @@ async function initDB() {
     bootstrapState.migrationsApplied = true;
   }
 
+  // Publish the ready drizzle handle BEFORE the post-migration steps below
+  // (search infra, RBAC seed) run. Those steps — and anything they call —
+  // resolve `getDb()` to this instance instead of awaiting `dbPromise`, which is
+  // still pending on THIS function. (rbacService.ensureSeed awaits getDb(); if
+  // dbInstance weren't set yet, getDb→dbPromise→initDB→ensureSeed would deadlock
+  // and hang the entire bootstrap.) Migrations are verified above, so the handle
+  // is safe to expose now.
+  dbInstance = db;
+
   // ── Search infrastructure ────────────────────────────────────────────────
   // Idempotent: pg_trgm extension, nuqta_normalize() functions, generated
   // search_* columns, and trigram/btree indexes powering the search system.
@@ -385,6 +394,19 @@ async function initDB() {
     logBootstrapEvent('warn', REASON.MIGRATIONS_DONE,
       `Search infrastructure setup encountered an error (continuing): ${searchErr.message}`,
       { error: searchErr });
+  }
+
+  // ── Dynamic RBAC seed ────────────────────────────────────────────────────
+  // Idempotent: self-provisions the roles/permissions tables and seeds the
+  // permission catalog + system roles (migrating the static matrix into the
+  // DB without data loss). Dynamic import avoids a db.js ↔ rbacService cycle.
+  try {
+    const { default: rbacService } = await import('./services/rbacService.js');
+    await rbacService.ensureSeed();
+    logBootstrapEvent('info', REASON.MIGRATIONS_DONE, 'RBAC roles/permissions seeded');
+  } catch (rbacErr) {
+    logBootstrapEvent('warn', REASON.MIGRATIONS_DONE,
+      `RBAC seed encountered an error (continuing): ${rbacErr.message}`, { error: rbacErr });
   }
 
   setReason(REASON.READY);

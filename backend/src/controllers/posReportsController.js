@@ -2,9 +2,11 @@ import posReportsService from '../services/posReportsService.js';
 
 /**
  * Thin controllers for the dashboard "quick question" report windows. Each maps
- * the shared query string (from/to/branchId/warehouseId/cashSessionId/page/
+ * the shared query string (from/to/branchId/warehouseId/userId/page/
  * limit/search + report-specific type/filter/customerId) to its service call.
- * Branch scoping + RBAC are enforced in the service / route layer.
+ * Branch + per-user scoping and RBAC are enforced in the service layer — a
+ * requested `userId` is only honoured for privileged users; everyone else is
+ * forced to their own operations regardless of what the client sends.
  */
 function parse(q = {}) {
   return {
@@ -12,7 +14,7 @@ function parse(q = {}) {
     to: q.to || q.dateTo || null,
     branchId: q.branchId ? Number(q.branchId) : null,
     warehouseId: q.warehouseId ? Number(q.warehouseId) : null,
-    cashSessionId: q.cashSessionId ? Number(q.cashSessionId) : null,
+    userId: q.userId ? Number(q.userId) : null,
     customerId: q.customerId ? Number(q.customerId) : null,
     page: q.page ? Number(q.page) : 1,
     limit: q.limit ? Number(q.limit) : 50,

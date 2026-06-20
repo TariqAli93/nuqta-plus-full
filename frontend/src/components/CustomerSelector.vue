@@ -123,6 +123,7 @@
 import { ref, computed, watch, onMounted } from 'vue';
 import { useCustomerStore } from '@/stores/customer';
 import { useNotificationStore } from '@/stores/notification';
+import { usePermissions } from '@/composables/usePermissions';
 import { normalizeIraqPhone } from '@/utils/phone';
 
 const props = defineProps({
@@ -134,6 +135,14 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue', 'customer-selected']);
 const customerStore = useCustomerStore();
 const notification = useNotificationStore();
+const { can } = usePermissions();
+
+// The selector is an OPTIONAL sub-feature of whatever page embeds it (POS,
+// installment sale, opening balances…). Reading customers needs `customers:read`,
+// which may differ from the host page's permission — so we never fire the lookup
+// without it (avoids a spurious 403 toast for a role that can sell but not read
+// the customer directory).
+const canReadCustomers = computed(() => can('customers:read'));
 
 // State
 const showSelector = ref(!props.modelValue);
@@ -197,6 +206,12 @@ async function handleSearch(query) {
   searchQuery.value = query || '';
   if (query === null || query === undefined) {
     query = '';
+  }
+
+  // No customers:read → keep the list empty silently (no request, no toast).
+  if (!canReadCustomers.value) {
+    customers.value = [];
+    return;
   }
 
   loading.value = true;
@@ -338,6 +353,9 @@ watch(
 
 // Initialize
 onMounted(async () => {
+  // Both the preselected-customer load and the initial search hit
+  // `customers:read`; skip entirely without it so no 403 surfaces.
+  if (!canReadCustomers.value) return;
   if (props.modelValue) {
     await loadCustomer(props.modelValue);
   }

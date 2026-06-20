@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 
 import { getPool, closeDatabase } from '../src/db.js';
 import accountingPeriodService from '../src/services/accountingPeriodService.js';
-import cashSessionService from '../src/services/cashSessionService.js';
 import expensesService from '../src/services/expensesService.js';
 import reportService from '../src/services/reportService.js';
 import { SaleService } from '../src/services/saleService.js';
@@ -14,9 +13,15 @@ const saleService = new SaleService();
  * End-to-end lifecycle test for the accounting period (القيد المحاسبي) system.
  *
  * Runs with the feature flag ON and multi-branch OFF (single global period).
- * Real service wiring is exercised for opening, shift linking and expense
- * stamping; the close snapshot / P&L is verified against a controlled fixture
+ * Real service wiring is exercised for opening, expense stamping and write
+ * guards; the close snapshot / P&L is verified against a controlled fixture
  * (currency 'ACP', year 2099 — isolated from real data).
+ *
+ * NOTE: the cash-session (shift) system was removed. Accounting periods are now
+ * fully INDEPENDENT of shifts — operations bind to the acting user (created_by),
+ * not to a shift. This suite therefore only asserts period behaviour; the old
+ * shift↔period enforcement tests were dropped. The period write guards
+ * (assertWritable, resolvePeriodIdForWrite) are unchanged and still enforced.
  *
  * Fixture P&L:
  *   sale 5 × 30 = 150, cost 10/unit → COGS 50
@@ -30,6 +35,14 @@ const DAY = '2099-06-15';
 const ids = {};
 let originalFlags = null;
 let user;
+
+// Full feature set with accounting periods ON, multi-branch OFF. Reused on every
+// restore so a test that flips flags can't leave a partial set behind.
+const FLAGS_ON = {
+  inventory: true, pos: true, installments: true, creditScore: true, draftInvoices: true,
+  multiBranch: false, multiWarehouse: false, warehouseTransfers: false,
+  alerts: true, liveOperations: true, accountingPeriods: true,
+};
 
 async function setFlags(pool, obj) {
   await pool.query(
@@ -79,7 +92,6 @@ async function cleanupPriorTestData(pool) {
     await tryDel('DELETE FROM sale_return_items WHERE return_id IN (SELECT id FROM sale_returns WHERE accounting_period_id = ANY($1))', [pids]);
     await tryDel('DELETE FROM sale_returns WHERE accounting_period_id = ANY($1)', [pids]);
     await tryDel('DELETE FROM payments WHERE sale_id IN (SELECT id FROM sales WHERE accounting_period_id = ANY($1))', [pids]);
-    await tryDel('DELETE FROM payments WHERE cash_session_id IN (SELECT shift_id FROM accounting_period_shifts WHERE accounting_period_id = ANY($1))', [pids]);
     await tryDel('DELETE FROM sale_items WHERE sale_id IN (SELECT id FROM sales WHERE accounting_period_id = ANY($1))', [pids]);
     await tryDel('DELETE FROM sales WHERE accounting_period_id = ANY($1)', [pids]);
     await tryDel('DELETE FROM expenses WHERE accounting_period_id = ANY($1)', [pids]);
@@ -97,11 +109,7 @@ before(async () => {
   await cleanupPriorTestData(pool);
   const { rows } = await pool.query("SELECT value FROM settings WHERE key='feature_flags'");
   originalFlags = rows[0]?.value ?? null;
-  await setFlags(pool, {
-    inventory: true, pos: true, installments: true, creditScore: true, draftInvoices: true,
-    multiBranch: false, multiWarehouse: false, warehouseTransfers: false,
-    alerts: true, liveOperations: true, accountingPeriods: true,
-  });
+  await setFlags(pool, FLAGS_ON);
 
   const u = await pool.query(
     `INSERT INTO users (username, password, full_name, role, is_active)
@@ -131,7 +139,7 @@ after(async () => {
   // Each delete is independent so one FK hiccup can't skip the rest.
   const tryDel = async (text, params) => { try { await pool.query(text, params); } catch { /* ignore */ } };
   // User-scoped cleanup: covers every period this user opened (incl. the extra
-  // periods the shift-enforcement tests create), so nothing leaks.
+  // periods the report tests create), so nothing leaks.
   let pid = [];
   if (ids.userId) {
     const r = await pool.query('SELECT id FROM accounting_periods WHERE opened_by_user_id=$1', [ids.userId]);
@@ -139,15 +147,28 @@ after(async () => {
   }
   if (ids.returnId) await tryDel('DELETE FROM sale_return_items WHERE return_id=$1', [ids.returnId]);
   if (ids.returnId) await tryDel('DELETE FROM sale_returns WHERE id=$1', [ids.returnId]);
+  if (pid.length) await tryDel('DELETE FROM payments WHERE sale_id IN (SELECT id FROM sales WHERE accounting_period_id = ANY($1))', [pid]);
   if (pid.length) await tryDel('DELETE FROM sale_items WHERE sale_id IN (SELECT id FROM sales WHERE accounting_period_id = ANY($1))', [pid]);
   if (pid.length) await tryDel('DELETE FROM sales WHERE accounting_period_id = ANY($1)', [pid]);
   for (const sid of [ids.saleId, ids.sale2Id].filter(Boolean)) {
+    await tryDel('DELETE FROM payments WHERE sale_id=$1', [sid]);
     await tryDel('DELETE FROM sale_items WHERE sale_id=$1', [sid]);
     await tryDel('DELETE FROM sales WHERE id=$1', [sid]);
   }
   if (pid.length) await tryDel('DELETE FROM expenses WHERE accounting_period_id = ANY($1)', [pid]);
   if (pid.length) await tryDel('DELETE FROM accounting_period_shifts WHERE accounting_period_id = ANY($1)', [pid]);
   if (ids.userId) await tryDel('DELETE FROM cash_sessions WHERE user_id=$1', [ids.userId]);
+  // Catch-all: orphaned rows this user created whose period was already deleted
+  // (the sales.accounting_period_id FK is ON DELETE SET NULL, so deleting a
+  // period nulls the link and the by-period sweep above would miss them).
+  if (ids.userId) {
+    await tryDel('DELETE FROM sale_return_items WHERE return_id IN (SELECT id FROM sale_returns WHERE created_by=$1)', [ids.userId]);
+    await tryDel('DELETE FROM sale_returns WHERE created_by=$1', [ids.userId]);
+    await tryDel('DELETE FROM payments WHERE sale_id IN (SELECT id FROM sales WHERE created_by=$1)', [ids.userId]);
+    await tryDel('DELETE FROM sale_items WHERE sale_id IN (SELECT id FROM sales WHERE created_by=$1)', [ids.userId]);
+    await tryDel('DELETE FROM sales WHERE created_by=$1', [ids.userId]);
+    await tryDel('DELETE FROM expenses WHERE created_by=$1', [ids.userId]);
+  }
   // Snapshot rows cascade when their period is deleted (FK ON DELETE cascade).
   if (pid.length) await tryDel('DELETE FROM accounting_periods WHERE id = ANY($1)', [pid]);
   // Throwaway branch used by the multi-branch / branch-report tests. Its sales
@@ -162,6 +183,8 @@ after(async () => {
   await closeDatabase().catch(() => {});
 });
 
+// ── Period lifecycle ─────────────────────────────────────────────────────────
+
 test('open a global accounting period binds the default branch (multiBranch off)', async () => {
   const period = await accountingPeriodService.open({ type: 'monthly' }, user);
   ids.periodId = period.id;
@@ -169,8 +192,7 @@ test('open a global accounting period binds the default branch (multiBranch off)
   assert.equal(period.status, 'open');
   // scope_type stays 'global' when branches are off …
   assert.equal(period.scopeType, 'global');
-  // … but branch_id is the internal default branch, never null, so a shift can
-  // match it. (Old behavior stored null and broke shift↔period branch matching.)
+  // … but branch_id is the internal default branch, never null.
   assert.notEqual(period.branchId, null, 'off-mode period carries the default branch, not null');
 });
 
@@ -181,24 +203,8 @@ test('cannot open a second period for the same scope', async () => {
   );
 });
 
-test('opening a shift links to the open period AND shares its branch (multiBranch off)', async () => {
-  const session = await cashSessionService.open({ openingCash: 0, currency: CUR }, user);
-  ids.sessionId = session.id;
-  const pool = await getPool();
-  const { rows } = await pool.query(
-    'SELECT accounting_period_id, branch_id FROM cash_sessions WHERE id=$1', [session.id]
-  );
-  assert.equal(Number(rows[0].accounting_period_id), ids.periodId);
-  // The whole point of the fix: shift.branch_id === accounting_period.branch_id.
-  assert.equal(Number(rows[0].branch_id), Number(ids.periodBranchId), 'shift branch matches period branch');
-  const { rows: link } = await pool.query(
-    'SELECT 1 FROM accounting_period_shifts WHERE accounting_period_id=$1 AND shift_id=$2',
-    [ids.periodId, session.id]
-  );
-  assert.equal(link.length, 1, 'shift linked to period');
-});
-
-test('an expense created while open is stamped with the period', async () => {
+test('an expense created while a period is open is stamped with the period (no shift needed)', async () => {
+  // Shifts are gone: an open accounting period is the ONLY gate for a write.
   const exp = await expensesService.create(
     { amount: 20, category: 'misc', currency: CUR, expenseDate: DAY }, user
   );
@@ -206,15 +212,15 @@ test('an expense created while open is stamped with the period', async () => {
   assert.equal(Number(exp.accountingPeriodId), ids.periodId);
 });
 
-test('closing computes a frozen P&L snapshot and auto-closes open shifts', async () => {
+test('closing computes a frozen P&L snapshot', async () => {
   // Controlled sale + return stamped to the period (currency ACP, 2099).
   const pool = await getPool();
   const sale = await pool.query(
     `INSERT INTO sales (invoice_number, subtotal, total, currency, payment_type, status,
-                        paid_amount, remaining_amount, created_at, issued_at, accounting_period_id)
-     VALUES ($1, 150, 150, $2, 'cash', 'completed', 90, 0, $3::timestamp, $3::timestamp, $4)
+                        paid_amount, remaining_amount, created_at, issued_at, accounting_period_id, created_by)
+     VALUES ($1, 150, 150, $2, 'cash', 'completed', 90, 0, $3::timestamp, $3::timestamp, $4, $5)
      RETURNING id`,
-    [`ACP-${Date.now()}`, CUR, DAY, ids.periodId]
+    [`ACP-${Date.now()}`, CUR, DAY, ids.periodId, ids.userId]
   );
   ids.saleId = sale.rows[0].id;
   const si = await pool.query(
@@ -224,9 +230,9 @@ test('closing computes a frozen P&L snapshot and auto-closes open shifts', async
   );
   const ret = await pool.query(
     `INSERT INTO sale_returns (sale_id, returned_value, refund_amount, refund_method, currency,
-                               accounting_period_id, created_at)
-     VALUES ($1, 60, 60, 'cash', $2, $3, $4::timestamp) RETURNING id`,
-    [ids.saleId, CUR, ids.periodId, DAY]
+                               accounting_period_id, created_at, created_by)
+     VALUES ($1, 60, 60, 'cash', $2, $3, $4::timestamp, $5) RETURNING id`,
+    [ids.saleId, CUR, ids.periodId, DAY, ids.userId]
   );
   ids.returnId = ret.rows[0].id;
   await pool.query(
@@ -250,11 +256,6 @@ test('closing computes a frozen P&L snapshot and auto-closes open shifts', async
   assert.equal(cur.grossProfit, 60);
   assert.equal(cur.expenses, 20);
   assert.equal(cur.netProfit, 40);
-  assert.ok(closed.totals.shiftsClosed >= 1, 'open shift auto-closed');
-
-  // The linked shift is now closed.
-  const { rows } = await pool.query('SELECT status FROM cash_sessions WHERE id=$1', [ids.sessionId]);
-  assert.equal(rows[0].status, 'closed');
 });
 
 test('closing writes an immutable snapshot row and links it via snapshot_id', async () => {
@@ -276,8 +277,6 @@ test('closing writes an immutable snapshot row and links it via snapshot_id', as
   assert.equal(cur.netProfit, 40);
   // Richer frozen summaries the spec requires.
   assert.ok(Array.isArray(snap[0].snapshot_json.productSalesSummary), 'has product sales summary');
-  assert.ok(Array.isArray(snap[0].snapshot_json.shiftSummary), 'has shift summary');
-  assert.ok(snap[0].snapshot_json.shiftSummary.length >= 1, 'shift summary lists the closed shift');
 });
 
 test('the snapshot table row is frozen — later row edits do not change it', async () => {
@@ -289,17 +288,6 @@ test('the snapshot table row is frozen — later row edits do not change it', as
   );
   assert.equal(rows[0].snapshot_json.byCurrency[CUR].netSales, 150, 'frozen snapshot row unchanged');
   await pool.query('UPDATE sales SET total = 150 WHERE id=$1', [ids.saleId]); // restore
-});
-
-test('auto-closed shift gets frozen per-shift closing totals (totals_json)', async () => {
-  const pool = await getPool();
-  const { rows } = await pool.query('SELECT totals_json, expected_cash FROM cash_sessions WHERE id=$1', [ids.sessionId]);
-  assert.ok(rows[0].totals_json, 'shift carries frozen closing totals');
-  const t = rows[0].totals_json;
-  assert.equal(typeof t.expectedCash, 'number');
-  assert.equal(typeof t.salesTotal, 'number');
-  assert.equal(typeof t.openingBalance, 'number');
-  assert.equal(t.autoClosed, true);
 });
 
 test('snapshot is frozen — later row edits do not change the closed totals', async () => {
@@ -337,63 +325,16 @@ test('writes inside a closed period are blocked; a new period can be opened', as
   await accountingPeriodService.assertWritable(ids.period2Id); // resolves (open)
 });
 
-// ── Strict shift ↔ period ↔ sale/expense enforcement (uses the open period2) ──
-
-test('open period but NO open shift → sale & expense are blocked (SHIFT_REQUIRED)', async () => {
-  // period2 is open but the earlier shift was auto-closed at the first close.
-  await assert.rejects(
-    () => accountingPeriodService.requireOpenShift(user, ids.period2Id),
-    /وردية مفتوحة/
-  );
-  await assert.rejects(
-    () => expensesService.create({ amount: 5, category: 'misc', currency: CUR }, user),
-    /وردية مفتوحة/
-  );
-});
-
-test('with an open shift → expense records and is bound to period + shift', async () => {
-  const session = await cashSessionService.open({ openingCash: 0, currency: CUR }, user);
-  ids.shift2Id = session.id;
-
-  assert.equal(
-    await accountingPeriodService.requireOpenShift(user, ids.period2Id),
-    ids.shift2Id,
-    'requireOpenShift resolves the open shift'
-  );
-  const exp = await expensesService.create(
-    { amount: 5, category: 'misc', currency: CUR, expenseDate: DAY }, user
-  );
-  ids.expense2Id = exp.id;
-  assert.equal(Number(exp.accountingPeriodId), ids.period2Id);
-  assert.equal(Number(exp.cashSessionId), ids.shift2Id, 'expense bound to the shift');
-});
-
-test('after the shift is closed (period still open) → writes are locked', async () => {
-  await cashSessionService.close(ids.shift2Id, { closingCash: 0 }, user);
-
-  await assert.rejects(
-    () => accountingPeriodService.assertShiftWritable(ids.shift2Id),
-    /وردية مغلقة/
-  );
-  await assert.rejects(
-    () => accountingPeriodService.requireOpenShift(user, ids.period2Id),
-    /وردية مفتوحة/
-  );
-  await assert.rejects(
-    () => expensesService.update(ids.expense2Id, { amount: 7 }, user),
-    /وردية مغلقة/
-  );
-});
-
-test('cancel / return of a sale in a closed shift is blocked (period still open)', async () => {
+test('a payment is blocked once the sale\'s accounting period is closed', async () => {
+  // Stamp a sale to the still-open period2, then close the period: the sale now
+  // lives in a CLOSED period and any further write (addPayment) must be rejected.
   const pool = await getPool();
   const s = await pool.query(
     `INSERT INTO sales (invoice_number, subtotal, total, currency, payment_type, status,
-                        paid_amount, remaining_amount, created_at, issued_at,
-                        accounting_period_id, cash_session_id)
-     VALUES ($1, 10, 10, $2, 'cash', 'completed', 10, 0, $3::timestamp, $3::timestamp, $4, $5)
+                        paid_amount, remaining_amount, created_at, issued_at, accounting_period_id, created_by)
+     VALUES ($1, 10, 10, $2, 'credit', 'completed', 5, 5, $3::timestamp, $3::timestamp, $4, $5)
      RETURNING id`,
-    [`ACP-SHIFT-${Date.now()}`, CUR, DAY, ids.period2Id, ids.shift2Id]
+    [`ACP-PAY-${Date.now()}`, CUR, DAY, ids.period2Id, ids.userId]
   );
   ids.sale2Id = s.rows[0].id;
   await pool.query(
@@ -402,126 +343,34 @@ test('cancel / return of a sale in a closed shift is blocked (period still open)
     [ids.sale2Id]
   );
 
-  await assert.rejects(() => saleService.cancel(ids.sale2Id, user.id), /وردية مغلقة/);
-  await assert.rejects(
-    () => saleService.createReturn(ids.sale2Id, { items: [], refundMethod: 'cash' }, user),
-    /وردية مغلقة/
-  );
-});
-
-// ── Strict "no shift without an open period" rule (FLAG-INDEPENDENT) ──────────
-// These exercise cashSessionService.open directly. Note period2 is CLOSED only
-// after test 13 closes it; sequencing matters.
-
-test('with the accounting-period feature OFF, a shift opens WITHOUT a period (legacy POS)', async () => {
-  // The requirement is feature-gated: when OFF, POS behaves as before — a shift
-  // opens with accounting_period_id = null and no period is required.
-  const pool = await getPool();
-  await setFlags(pool, { multiBranch: false, accountingPeriods: false });
-  const session = await cashSessionService.open({ openingCash: 0, currency: CUR }, user);
-  const { rows } = await pool.query('SELECT accounting_period_id FROM cash_sessions WHERE id=$1', [session.id]);
-  assert.equal(rows[0].accounting_period_id, null, 'no period required or linked when the feature is off');
-  // Close it so the next test starts from a no-open-shift state.
-  await cashSessionService.close(session.id, { closingCash: 0 }, user);
-  // restore feature ON for the remaining tests
-  await setFlags(pool, { multiBranch: false, accountingPeriods: true });
-});
-
-test('opening a shift is blocked when the only period is closed', async () => {
-  // Close the still-open period2 so the scope has a period, but it is closed.
   await accountingPeriodService.close(ids.period2Id, user);
+
   await assert.rejects(
-    () => cashSessionService.open({ openingCash: 0, currency: CUR }, user),
-    /القيد المحاسبي مغلق/
+    () => saleService.addPayment(ids.sale2Id, { amount: 5, paymentMethod: 'cash' }, user.id),
+    /مغلق/
   );
 });
 
-test('opening a shift succeeds with an open period and is bound to it (non-null)', async () => {
-  const period3 = await accountingPeriodService.open({ type: 'daily' }, user);
-  ids.period3Id = period3.id;
-  const session = await cashSessionService.open({ openingCash: 0, currency: CUR }, user);
-
+test('with the accounting-period feature OFF, an expense records WITHOUT a period (legacy POS)', async () => {
+  // Period enforcement is feature-gated: when OFF, POS behaves as before — an
+  // expense (or sale) is accepted with no open period required. Confirms the
+  // shift removal did not couple writes to anything but the optional period.
   const pool = await getPool();
-  const { rows } = await pool.query('SELECT accounting_period_id FROM cash_sessions WHERE id=$1', [session.id]);
-  assert.equal(Number(rows[0].accounting_period_id), ids.period3Id, 'shift bound to the open period');
-  assert.notEqual(rows[0].accounting_period_id, null, 'accounting_period_id is never null');
-  // close it so the next test starts from a no-open-shift state
-  await cashSessionService.close(session.id, { closingCash: 0 }, user);
-  await accountingPeriodService.close(ids.period3Id, user);
-});
-
-test('multi-branch: a shift only opens under the same branch open period; reports filter by branch + period', async () => {
-  const pool = await getPool();
-  await setFlags(pool, { multiBranch: true, accountingPeriods: true });
+  await setFlags(pool, { ...FLAGS_ON, accountingPeriods: false });
   try {
-    // A dedicated throwaway branch so the test never collides with seed/dev data.
-    const b = await pool.query(
-      `INSERT INTO branches (name, is_active) VALUES ($1, true) RETURNING id`,
-      [`ACP-Branch-${Date.now()}`]
+    const exp = await expensesService.create(
+      { amount: 5, category: 'misc', currency: CUR, expenseDate: DAY }, user
     );
-    ids.branchBId = b.rows[0].id;
-
-    const bp = await accountingPeriodService.open({ type: 'daily', branchId: ids.branchBId }, user);
-    ids.branchPeriodId = bp.id;
-
-    // Same branch resolves to its open period…
-    const ok = await accountingPeriodService.resolvePeriodForNewShift(user, ids.branchBId);
-    assert.equal(ok.id, ids.branchPeriodId);
-    // …a branch with no open period is rejected (test 14).
-    await assert.rejects(
-      () => accountingPeriodService.resolvePeriodForNewShift(user, 999999),
-      /لا يوجد قيد محاسبي مفتوح/
-    );
-
-    // A shift opens only under the SAME branch period, and shares its branch.
-    const branchShift = await cashSessionService.open(
-      { openingCash: 0, currency: CUR, branchId: ids.branchBId }, user
-    );
-    const { rows: bs } = await pool.query(
-      'SELECT accounting_period_id, branch_id FROM cash_sessions WHERE id=$1', [branchShift.id]
-    );
-    assert.equal(Number(bs[0].accounting_period_id), ids.branchPeriodId);
-    assert.equal(Number(bs[0].branch_id), Number(ids.branchBId), 'branch-mode shift branch matches its period branch');
-    await cashSessionService.close(branchShift.id, { closingCash: 0 }, user);
-
-    // ── Report filtering by BOTH accounting_period_id AND branch_id (test 15) ──
-    // 70 → this branch, this period (should count).
-    await pool.query(
-      `INSERT INTO sales (invoice_number, subtotal, total, currency, payment_type, status,
-         paid_amount, remaining_amount, created_at, issued_at, accounting_period_id, branch_id)
-       VALUES ($1, 70, 70, $2, 'cash', 'completed', 70, 0, $3::timestamp, $3::timestamp, $4, $5)`,
-      [`ACP-BR-IN-${Date.now()}`, CUR, DAY, ids.branchPeriodId, ids.branchBId]
-    );
-    // 50 → this period but ANOTHER branch (excluded by branch filter).
-    await pool.query(
-      `INSERT INTO sales (invoice_number, subtotal, total, currency, payment_type, status,
-         paid_amount, remaining_amount, created_at, issued_at, accounting_period_id, branch_id)
-       VALUES ($1, 50, 50, $2, 'cash', 'completed', 50, 0, $3::timestamp, $3::timestamp, $4, 1)`,
-      [`ACP-BR-OTHER-${Date.now()}`, CUR, DAY, ids.branchPeriodId]
-    );
-    // 30 → this branch but a DIFFERENT (closed) period (excluded by period filter).
-    await pool.query(
-      `INSERT INTO sales (invoice_number, subtotal, total, currency, payment_type, status,
-         paid_amount, remaining_amount, created_at, issued_at, accounting_period_id, branch_id)
-       VALUES ($1, 30, 30, $2, 'cash', 'completed', 30, 0, $3::timestamp, $3::timestamp, $4, $5)`,
-      [`ACP-BR-OLD-${Date.now()}`, CUR, DAY, ids.periodId, ids.branchBId]
-    );
-
-    // A branch-bound cashier scoped to branch B sees only its own open period.
-    const branchUser = { id: ids.userId, role: 'cashier', username: 'acp-branch', assignedBranchId: ids.branchBId };
-    const rep = await reportService.getProfitReport({ currency: CUR }, branchUser);
-    assert.equal(rep.meta.accountingPeriodId, ids.branchPeriodId, 'scoped to the branch open period');
-    assert.equal(rep.meta.noOpenPeriod, false);
-    assert.equal(rep.totals.byCurrency[CUR]?.revenue, 70, 'only same-branch same-period sales count');
-
-    if (ids.branchPeriodId) await accountingPeriodService.close(ids.branchPeriodId, user);
+    assert.ok(exp.id, 'expense recorded with the period feature off');
+    assert.equal(exp.accountingPeriodId ?? null, null, 'no period linked when the feature is off');
+    // Clean it up immediately (no period to scope the after-hook cleanup to).
+    await pool.query('DELETE FROM expenses WHERE id=$1', [exp.id]);
   } finally {
-    await setFlags(pool, { multiBranch: false, accountingPeriods: true });
+    await setFlags(pool, FLAGS_ON); // restore enforcement for the remaining tests
   }
 });
 
 // ── Live report active-period scoping (القيد المحاسبي) — global scope ─────────
-// Runs with multiBranch OFF (restored by the multi-branch test's finally).
 
 test('live report starts from zero when a fresh accounting period is opened (test 8)', async () => {
   const period = await accountingPeriodService.open({ type: 'daily' }, user);
@@ -537,9 +386,9 @@ test('live report includes only data from the active open period (test 9)', asyn
   const pool = await getPool();
   await pool.query(
     `INSERT INTO sales (invoice_number, subtotal, total, currency, payment_type, status,
-       paid_amount, remaining_amount, created_at, issued_at, accounting_period_id)
-     VALUES ($1, 100, 100, $2, 'cash', 'completed', 100, 0, $3::timestamp, $3::timestamp, $4)`,
-    [`ACP-RPT-${Date.now()}`, CUR, DAY, ids.reportPeriodId]
+       paid_amount, remaining_amount, created_at, issued_at, accounting_period_id, created_by)
+     VALUES ($1, 100, 100, $2, 'cash', 'completed', 100, 0, $3::timestamp, $3::timestamp, $4, $5)`,
+    [`ACP-RPT-${Date.now()}`, CUR, DAY, ids.reportPeriodId, ids.userId]
   );
   const rep = await reportService.getProfitReport({ currency: CUR }, user);
   // The old closed period's ACP sale (150) is excluded — only the 100 here counts.
@@ -557,15 +406,16 @@ test('live report returns zero when there is no open accounting period (test 7)'
 test('off-mode report ignores a non-admin branch and counts default-branch data', async () => {
   // Regression: branchFilterFor is flag-unaware and returns a non-admin user's
   // assignedBranchId; in OFF mode all data is under the default branch, so the
-  // report must NOT branch-filter or it would wrongly zero out.
+  // report must NOT branch-filter or it would wrongly zero out. The sale is
+  // stamped with created_by = this user so per-user report scoping keeps it.
   const period = await accountingPeriodService.open({ type: 'daily' }, user);
   const defBranch = Number(period.branchId);
   const pool = await getPool();
   await pool.query(
     `INSERT INTO sales (invoice_number, subtotal, total, currency, payment_type, status,
-       paid_amount, remaining_amount, created_at, issued_at, accounting_period_id, branch_id)
-     VALUES ($1, 40, 40, $2, 'cash', 'completed', 40, 0, $3::timestamp, $3::timestamp, $4, $5)`,
-    [`ACP-OFFBR-${Date.now()}`, CUR, DAY, period.id, defBranch]
+       paid_amount, remaining_amount, created_at, issued_at, accounting_period_id, branch_id, created_by)
+     VALUES ($1, 40, 40, $2, 'cash', 'completed', 40, 0, $3::timestamp, $3::timestamp, $4, $5, $6)`,
+    [`ACP-OFFBR-${Date.now()}`, CUR, DAY, period.id, defBranch, ids.userId]
   );
   const mismatchedUser = { id: ids.userId, role: 'cashier', username: 'acp-off', assignedBranchId: defBranch + 9999 };
   const rep = await reportService.getProfitReport({ currency: CUR }, mismatchedUser);
@@ -573,9 +423,10 @@ test('off-mode report ignores a non-admin branch and counts default-branch data'
   await accountingPeriodService.close(period.id, user);
 });
 
-// ── Cannot create a SALE in a closed shift / closed period (tests 10 & 11) ────
-// saleService.create rejects at the period/shift guards (before any stock work),
-// so a minimal dummy item is enough to drive the guard.
+// ── Cannot create a SALE / EXPENSE when the accounting period is closed ───────
+// saleService.create rejects at the period guard (before any stock work), so a
+// minimal dummy item is enough to drive the guard. (The legacy "closed shift"
+// variants of these tests were removed — shifts no longer gate writes.)
 const dummySaleInput = () => ({
   items: [{ productId: 1, quantity: 1, unitPrice: 10 }],
   paymentMethod: 'cash',
@@ -583,50 +434,71 @@ const dummySaleInput = () => ({
   currency: CUR,
 });
 
-test('cannot create a sale when the shift is closed (period still open) (test 10)', async () => {
-  const p = await accountingPeriodService.open({ type: 'daily' }, user);
-  const shift = await cashSessionService.open({ openingCash: 0, currency: CUR }, user);
-  await cashSessionService.close(shift.id, { closingCash: 0 }, user);
-  // Period is open, but its only shift is closed → no open shift → sale blocked.
-  await assert.rejects(() => saleService.create(dummySaleInput(), user), /وردية/);
-  await accountingPeriodService.close(p.id, user);
-});
-
 test('cannot create a sale when the accounting period is closed (test 11)', async () => {
-  // After the previous test there is no open period for the scope.
+  // No open global period at this point (every one opened above is closed).
   await assert.rejects(
     () => saleService.create(dummySaleInput(), user),
     /قيد محاسبي مفتوح/
   );
 });
 
-// ── Cannot create an EXPENSE in a closed shift / closed period (tests 12 & 13) ─
-
-test('cannot create an expense when the shift is closed (period still open) (test 12)', async () => {
-  const p = await accountingPeriodService.open({ type: 'daily' }, user);
-  const shift = await cashSessionService.open({ openingCash: 0, currency: CUR }, user);
-  await cashSessionService.close(shift.id, { closingCash: 0 }, user);
-  await assert.rejects(
-    () => expensesService.create({ amount: 5, category: 'misc', currency: CUR, expenseDate: DAY }, user),
-    /وردية/
-  );
-  await accountingPeriodService.close(p.id, user);
-});
-
 test('cannot create an expense when the accounting period is closed (test 13)', async () => {
-  // After the previous test there is no open period for the scope.
   await assert.rejects(
     () => expensesService.create({ amount: 5, category: 'misc', currency: CUR }, user),
     /قيد محاسبي مفتوح/
   );
 });
 
-test('addPayment is blocked when the sale accounting period is closed', async () => {
-  // sale2Id was stamped to period2 (closed) and shift2 (closed) earlier.
-  await assert.rejects(
-    () => saleService.addPayment(ids.sale2Id, { amount: 5, paymentMethod: 'cash' }, user.id),
-    /مغلق/
-  );
+// ── Multi-branch: reports filter by BOTH accounting_period_id AND branch_id ────
+
+test('multi-branch: reports filter by branch + period (test 15)', async () => {
+  const pool = await getPool();
+  await setFlags(pool, { ...FLAGS_ON, multiBranch: true });
+  try {
+    // A dedicated throwaway branch so the test never collides with seed/dev data.
+    const b = await pool.query(
+      `INSERT INTO branches (name, is_active) VALUES ($1, true) RETURNING id`,
+      [`ACP-Branch-${Date.now()}`]
+    );
+    ids.branchBId = b.rows[0].id;
+
+    const bp = await accountingPeriodService.open({ type: 'daily', branchId: ids.branchBId }, user);
+    ids.branchPeriodId = bp.id;
+
+    // 70 → this branch, this period (should count). created_by = this user so the
+    // per-user report scope (a branch cashier sees only their own ops) keeps it.
+    await pool.query(
+      `INSERT INTO sales (invoice_number, subtotal, total, currency, payment_type, status,
+         paid_amount, remaining_amount, created_at, issued_at, accounting_period_id, branch_id, created_by)
+       VALUES ($1, 70, 70, $2, 'cash', 'completed', 70, 0, $3::timestamp, $3::timestamp, $4, $5, $6)`,
+      [`ACP-BR-IN-${Date.now()}`, CUR, DAY, ids.branchPeriodId, ids.branchBId, ids.userId]
+    );
+    // 50 → this period but ANOTHER branch (excluded by branch filter).
+    await pool.query(
+      `INSERT INTO sales (invoice_number, subtotal, total, currency, payment_type, status,
+         paid_amount, remaining_amount, created_at, issued_at, accounting_period_id, branch_id, created_by)
+       VALUES ($1, 50, 50, $2, 'cash', 'completed', 50, 0, $3::timestamp, $3::timestamp, $4, 1, $5)`,
+      [`ACP-BR-OTHER-${Date.now()}`, CUR, DAY, ids.branchPeriodId, ids.userId]
+    );
+    // 30 → this branch but a DIFFERENT (closed) period (excluded by period filter).
+    await pool.query(
+      `INSERT INTO sales (invoice_number, subtotal, total, currency, payment_type, status,
+         paid_amount, remaining_amount, created_at, issued_at, accounting_period_id, branch_id, created_by)
+       VALUES ($1, 30, 30, $2, 'cash', 'completed', 30, 0, $3::timestamp, $3::timestamp, $4, $5, $6)`,
+      [`ACP-BR-OLD-${Date.now()}`, CUR, DAY, ids.periodId, ids.branchBId, ids.userId]
+    );
+
+    // A branch-bound cashier scoped to branch B sees only its own open period.
+    const branchUser = { id: ids.userId, role: 'cashier', username: 'acp-branch', assignedBranchId: ids.branchBId };
+    const rep = await reportService.getProfitReport({ currency: CUR }, branchUser);
+    assert.equal(rep.meta.accountingPeriodId, ids.branchPeriodId, 'scoped to the branch open period');
+    assert.equal(rep.meta.noOpenPeriod, false);
+    assert.equal(rep.totals.byCurrency[CUR]?.revenue, 70, 'only same-branch same-period sales count');
+
+    if (ids.branchPeriodId) await accountingPeriodService.close(ids.branchPeriodId, user);
+  } finally {
+    await setFlags(pool, FLAGS_ON);
+  }
 });
 
 test('migration 0005 repair binds an open null-branch period to the default branch (test 9b)', async () => {

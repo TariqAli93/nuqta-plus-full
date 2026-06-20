@@ -2,7 +2,6 @@ import { defineStore } from 'pinia';
 import api from '@/plugins/axios';
 import { useNotificationStore } from '@/stores/notification';
 import { buildArabicErrorMessage } from '@/utils/errorTranslator';
-import { hasPermission, matchesPermissionPattern } from '@/auth/permissionMatrix.js';
 
 function readJSON(key) {
   try {
@@ -63,12 +62,15 @@ export const useAuthStore = defineStore('auth', {
   getters: {
     currentUser: (state) => state.user,
     userRole: (state) => state.user?.role || null,
+    // Dynamic: the global admin is the role flagged with all_permissions by the
+    // backend. (Role-code fallback kept only for resilience against a stale cache.)
     isGlobalAdmin: (state) =>
-      state.user?.role === 'global_admin' || state.user?.role === 'admin',
+      state.user?.allPermissions === true ||
+      state.user?.role === 'global_admin' ||
+      state.user?.role === 'admin',
     canSwitchBranch: (state) => state.scope?.canSwitchBranch === true,
     canSwitchWarehouse: (state) => state.scope?.canSwitchWarehouse === true,
-    assignedBranchId: (state) =>
-      state.scope?.branchId ?? state.user?.assignedBranchId ?? null,
+    assignedBranchId: (state) => state.scope?.branchId ?? state.user?.assignedBranchId ?? null,
     assignedWarehouseId: (state) =>
       state.scope?.warehouseId ?? state.user?.assignedWarehouseId ?? null,
     branchFeatureEnabled() {
@@ -128,8 +130,7 @@ export const useAuthStore = defineStore('auth', {
 
     /** Spec-aligned alias of `canUse`. */
     featureAndCapability() {
-      return (featureName, capabilityName) =>
-        this.canUse(featureName, capabilityName);
+      return (featureName, capabilityName) => this.canUse(featureName, capabilityName);
     },
 
     /**
@@ -162,61 +163,48 @@ export const useAuthStore = defineStore('auth', {
     isSimpleMode: (state) => state.appMode !== 'full',
 
     /**
-     * Check if user has a specific permission (RBAC matrix). Kept for
-     * backwards-compat with existing callers; prefer `can()` for new code.
-     * @param {string|Array} permission - Permission name or array of permissions
-     * @returns {boolean} True if user has the permission
+     * Dynamic permission check — relies ONLY on the granted-permission-keys
+     * list the backend issued for the current user (DB-backed RBAC). The global
+     * admin (`allPermissions`) is always allowed, incl. future permissions.
+     * No static matrix, no role hardcoding.
+     * @param {string|Array} permission - permission key, or array (ANY match)
      */
     hasPermission: (state) => (permission) => {
-      const userRole = state.user?.role;
-      if (!userRole) return false;
+      if (!state.user) return false;
+      if (state.user.allPermissions === true) return true;
+      const granted = state.user.permissions;
+      if (!Array.isArray(granted)) return false;
 
-      const permissionList = Array.isArray(permission) ? permission : [permission];
-
-      return permissionList.some((perm) => {
-        // Skip invalid permission values
+      const list = Array.isArray(permission) ? permission : [permission];
+      return list.some((perm) => {
         if (!perm || typeof perm !== 'string') return false;
-
-        // Check permission using matrix
-        if (hasPermission(perm, userRole)) return true;
-
-        // Check for manage:<resource> pattern
-        // If checking for 'create:sales' and user has 'manage:sales', allow
+        if (granted.includes(perm)) return true;
+        // Back-compat: a `create:x`/`view:x` check also passes if the user holds
+        // the broader `manage:x` grant (mirrors the legacy alias behaviour).
         const parts = perm.split(':');
-        if (parts.length === 2) {
-          const managePerm = `manage:${parts[1]}`;
-          if (hasPermission(managePerm, userRole)) return true;
-        }
-
-        // Check for manage:* pattern (admin only, but handled by matrix)
-        if (matchesPermissionPattern(perm, 'manage:*')) {
-          return hasPermission('manage:*', userRole);
-        }
-
+        if (parts.length === 2 && granted.includes(`manage:${parts[1]}`)) return true;
         return false;
       });
     },
 
-    /**
-     * Check if user has any of the provided permissions
-     */
+    /** True if the user holds ANY of the given permissions. */
     hasAnyPermission:
       (state) =>
       (permissions = []) => {
-        const userRole = state.user?.role;
-        if (!userRole) return false;
-        return permissions.some((perm) => hasPermission(perm, userRole));
+        if (state.user?.allPermissions === true) return true;
+        const granted = state.user?.permissions;
+        if (!Array.isArray(granted)) return false;
+        return permissions.some((perm) => granted.includes(perm));
       },
 
-    /**
-     * Check if user has all of the provided permissions
-     */
+    /** True if the user holds ALL of the given permissions. */
     hasAllPermissions:
       (state) =>
       (permissions = []) => {
-        const userRole = state.user?.role;
-        if (!userRole) return false;
-        return permissions.every((perm) => hasPermission(perm, userRole));
+        if (state.user?.allPermissions === true) return true;
+        const granted = state.user?.permissions;
+        if (!Array.isArray(granted)) return false;
+        return permissions.every((perm) => granted.includes(perm));
       },
   },
 
@@ -299,8 +287,7 @@ export const useAuthStore = defineStore('auth', {
         localStorage.setItem('token', response.data.token);
         api.defaults.headers.common['Authorization'] = `Bearer ${response.data.token}`;
 
-        const hasSessionPayload =
-          response.data.featureFlags && response.data.capabilities;
+        const hasSessionPayload = response.data.featureFlags && response.data.capabilities;
         if (hasSessionPayload) {
           // Hydrate from the login response — same shape as /auth/session.
           this._hydrateFromSession({
@@ -483,7 +470,7 @@ export const useAuthStore = defineStore('auth', {
 
         return response;
       } catch (error) {
-        const errorMessage = error.response?.data?.message || 'فشل تحميل بيانات المستخدم';
+        const errorMessage = error?.message || 'فشل تحميل بيانات المستخدم';
         notificationStore.error(errorMessage);
         throw error;
       }
@@ -509,28 +496,18 @@ export const useAuthStore = defineStore('auth', {
     /**
      * Logout user and clear ALL session-bound state — including feature flags
      * and capabilities — so the next login can never inherit a stale "feature
-     * X is on" assumption from the previous user/session.
-     *
-     * The server `/auth/logout` call runs FIRST and auto-closes any open shift
-     * for this user (records close time + closing balance). If that fails the
-     * shift could not be closed safely, so we surface a clear message and
-     * REJECT — local state is left intact and sign-out is blocked until the
-     * problem is resolved (e.g. the user closes the shift manually).
+     * X is on" assumption from the previous user/session. Logout is stateless
+     * (the shift system was removed).
      */
     async logout() {
       const notificationStore = useNotificationStore();
 
       if (this.token) {
+        // Best-effort server notify; never block sign-out on it.
         try {
-          // `silent` so we own the error UX (no double toast from the
-          // interceptor) and receive the full axios error on reject.
           await api.post('/auth/logout', null, { meta: { silent: true } });
-        } catch (err) {
-          const message =
-            err?.response?.data?.message ||
-            'تعذّر إغلاق الوردية المفتوحة. لا يمكن تسجيل الخروج حتى تتم معالجة المشكلة.';
-          notificationStore.error(message);
-          throw err;
+        } catch {
+          // ignore — proceed with local sign-out regardless
         }
       }
 
@@ -538,16 +515,7 @@ export const useAuthStore = defineStore('auth', {
 
       // Clear branch/warehouse state so the next login starts clean.
       // Lazy-imported to avoid a circular dependency.
-      import('@/stores/inventory')
-        .then((mod) => mod.useInventoryStore().reset())
-        .catch(() => {});
-
-      // Drop the cached open-shift so the next user doesn't inherit it.
-      import('@/stores/cashSession')
-        .then((mod) => {
-          mod.useCashSessionStore().current = null;
-        })
-        .catch(() => {});
+      import('@/stores/inventory').then((mod) => mod.useInventoryStore().reset()).catch(() => {});
 
       notificationStore.info('تم تسجيل الخروج بنجاح');
     },
@@ -562,7 +530,7 @@ export const useAuthStore = defineStore('auth', {
         notificationStore.success('تم تسجيل المستخدم بنجاح');
         return response;
       } catch (error) {
-        notificationStore.error(error.response?.data?.message || 'فشل تسجيل المستخدم');
+        notificationStore.error(error?.message || 'فشل تسجيل المستخدم');
         throw error;
       }
     },

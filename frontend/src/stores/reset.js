@@ -11,7 +11,7 @@ export const useResetStore = defineStore('reset', {
         const response = await api.post('/reset/database');
         return response;
       } catch (error) {
-        throw new Error(error.response?.data?.message || 'فشل في تصفير قاعدة البيانات');
+        throw new Error(error?.message || 'فشل في تصفير قاعدة البيانات');
       }
     },
   },

@@ -67,6 +67,7 @@ const kpiItems = [
 const sectionItems = [
   { key: 'quickActions', label: 'العمليات السريعة' },
   { key: 'performance', label: 'مؤشرات الأداء' },
+  { key: 'onlineCommerce', label: 'التجارة الأونلاين' },
   { key: 'alerts', label: 'مركز التنبيهات' },
   { key: 'activity', label: 'النشاط الحديث' },
 ];

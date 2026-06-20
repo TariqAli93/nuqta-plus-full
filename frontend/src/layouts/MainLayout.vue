@@ -137,6 +137,7 @@
 
         <!-- Alerts Badge -->
         <v-badge
+          v-if="perm('view:notifications')"
           :content="alertStore.unreadCount"
           :model-value="alertStore.unreadCount > 0"
           color="error"
@@ -227,7 +228,6 @@ import { useRouter, useRoute } from 'vue-router';
 import { useTheme, useDisplay } from 'vuetify';
 import { useAuthStore } from '@/stores/auth';
 import { useAlertStore } from '@/stores/alert';
-import { useCashSessionStore } from '@/stores/cashSession';
 import QuickSearch from '@/components/QuickSearch.vue';
 import HeaderQuickActions from '@/components/HeaderQuickActions.vue';
 import BranchWarehouseSelector from '@/components/BranchWarehouseSelector.vue';
@@ -240,10 +240,11 @@ const theme = useTheme();
 const { mobile: isMobile } = useDisplay();
 const authStore = useAuthStore();
 const alertStore = useAlertStore();
-const cashSession = useCashSessionStore();
 const { filteredMenu, getPageTitle } = useNavigationMenu();
 
 const transitionName = ref('fade');
+
+const perm = (p) => authStore.hasPermission(p);
 
 // Drawer state with persistence
 const DRAWER_STORAGE_KEY = 'nuqta-drawer-state';
@@ -447,8 +448,6 @@ onMounted(() => {
   // Connect realtime alerts when authenticated
   if (authStore.isAuthenticated) {
     alertStore.connectRealtime();
-    // Load the open shift so the header quick-action shows فتح/غلق correctly.
-    cashSession.fetchCurrent().catch(() => {});
   }
 
   // Expand whichever group contains the page we landed on.
