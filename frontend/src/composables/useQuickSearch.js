@@ -28,13 +28,49 @@ export function useQuickSearch() {
 
   // Shortcut screens shown when the query is empty.
   const SHORTCUTS = [
-    { title: 'بيع جديد', to: '/sales/pos', icon: 'mdi-cash-register', type: 'page', need: 'canUsePOS', cap: true },
-    { title: 'قبض الديون', to: '/collections', icon: 'mdi-hand-coin', type: 'page', need: 'view:sales' },
-    { title: 'العملاء', to: '/customers', icon: 'mdi-account-group', type: 'page', need: 'view:customers' },
-    { title: 'البضاعة', to: '/products', icon: 'mdi-package-variant', type: 'page', need: 'view:products' },
-    { title: 'المشتريات', to: '/purchases', icon: 'mdi-cart-arrow-down', type: 'page', need: 'view:purchases' },
-    { title: 'الصندوق', to: '/sales/shifts', icon: 'mdi-safe-square-outline', type: 'page', need: 'view:sales' },
-    { title: 'التقارير', to: '/reports/simple', icon: 'mdi-chart-box', type: 'page', need: 'view:reports' },
+    {
+      title: 'بيع جديد',
+      to: '/sales/pos',
+      icon: 'mdi-cash-register',
+      type: 'page',
+      need: 'canUsePOS',
+      cap: true,
+    },
+    {
+      title: 'قبض الديون',
+      to: '/collections',
+      icon: 'mdi-hand-coin',
+      type: 'page',
+      need: 'view:sales',
+    },
+    {
+      title: 'العملاء',
+      to: '/customers',
+      icon: 'mdi-account-group',
+      type: 'page',
+      need: 'view:customers',
+    },
+    {
+      title: 'البضاعة',
+      to: '/products',
+      icon: 'mdi-package-variant',
+      type: 'page',
+      need: 'view:products',
+    },
+    {
+      title: 'المشتريات',
+      to: '/purchases',
+      icon: 'mdi-cart-arrow-down',
+      type: 'page',
+      need: 'view:purchases',
+    },
+    {
+      title: 'الصندوق',
+      to: '/sales/shifts',
+      icon: 'mdi-safe-square-outline',
+      type: 'page',
+      need: 'view:sales',
+    },
   ];
 
   const allowedShortcuts = () =>
@@ -91,9 +127,19 @@ export function useQuickSearch() {
                 to: `/products/${p.id}/edit`,
                 actions: [
                   ...(authStore.can('canUsePOS')
-                    ? [{ label: 'إضافة للبيع', icon: 'mdi-cart-plus', handler: () => go(`/sales/pos?product=${p.id}`) }]
+                    ? [
+                        {
+                          label: 'إضافة للبيع',
+                          icon: 'mdi-cart-plus',
+                          handler: () => go(`/sales/pos?product=${p.id}`),
+                        },
+                      ]
                     : []),
-                  { label: 'فتح', icon: 'mdi-open-in-new', handler: () => go(`/products/${p.id}/edit`) },
+                  {
+                    label: 'فتح',
+                    icon: 'mdi-open-in-new',
+                    handler: () => go(`/products/${p.id}/edit`),
+                  },
                 ],
               }))
             )
@@ -111,19 +157,44 @@ export function useQuickSearch() {
                 return {
                   id: c.id,
                   title: c.name,
-                  subtitle: debt > 0 ? `الدين: ${formatCurrency(debt, 'IQD')}` : c.phone || 'لا يوجد دين',
+                  subtitle:
+                    debt > 0 ? `الدين: ${formatCurrency(debt, 'IQD')}` : c.phone || 'لا يوجد دين',
                   icon: 'mdi-account',
                   type: 'customer',
                   to: `/customers/${c.id}`,
                   actions: [
-                    { label: 'فتح', icon: 'mdi-open-in-new', handler: () => go(`/customers/${c.id}`) },
+                    {
+                      label: 'فتح',
+                      icon: 'mdi-open-in-new',
+                      handler: () => go(`/customers/${c.id}`),
+                    },
                     ...(authStore.hasPermission('view:sales')
-                      ? [{ label: 'قبض دين', icon: 'mdi-hand-coin', handler: () => go(`/collections?customer=${c.id}`) }]
+                      ? [
+                          {
+                            label: 'قبض دين',
+                            icon: 'mdi-hand-coin',
+                            handler: () => go(`/collections?customer=${c.id}`),
+                          },
+                        ]
                       : []),
                     ...(authStore.can('canUsePOS')
-                      ? [{ label: 'بيع له', icon: 'mdi-cash-register', handler: () => go(`/sales/pos?customer=${c.id}`) }]
+                      ? [
+                          {
+                            label: 'بيع له',
+                            icon: 'mdi-cash-register',
+                            handler: () => go(`/sales/pos?customer=${c.id}`),
+                          },
+                        ]
                       : []),
-                    ...(c.phone ? [{ label: 'واتساب', icon: 'mdi-whatsapp', handler: () => whatsapp(c.phone) }] : []),
+                    ...(c.phone
+                      ? [
+                          {
+                            label: 'واتساب',
+                            icon: 'mdi-whatsapp',
+                            handler: () => whatsapp(c.phone),
+                          },
+                        ]
+                      : []),
                   ],
                 };
               })
@@ -149,9 +220,19 @@ export function useQuickSearch() {
                   actions: [
                     { label: 'فتح', icon: 'mdi-open-in-new', handler: () => go(`/sales/${s.id}`) },
                     ...(remaining > 0 && authStore.hasPermission('view:sales')
-                      ? [{ label: 'قبض', icon: 'mdi-hand-coin', handler: () => go(`/sales/${s.id}?pay=1`) }]
+                      ? [
+                          {
+                            label: 'قبض',
+                            icon: 'mdi-hand-coin',
+                            handler: () => go(`/sales/${s.id}?pay=1`),
+                          },
+                        ]
                       : []),
-                    { label: 'طباعة', icon: 'mdi-printer', handler: () => go(`/sales/${s.id}?print=1`) },
+                    {
+                      label: 'طباعة',
+                      icon: 'mdi-printer',
+                      handler: () => go(`/sales/${s.id}?print=1`),
+                    },
                   ],
                 };
               })
@@ -170,14 +251,25 @@ export function useQuickSearch() {
                 return {
                   id: sup.id,
                   title: sup.name,
-                  subtitle: debt > 0 ? `المطلوب دفعه: ${formatCurrency(debt, 'IQD')}` : sup.phone || '',
+                  subtitle:
+                    debt > 0 ? `المطلوب دفعه: ${formatCurrency(debt, 'IQD')}` : sup.phone || '',
                   icon: 'mdi-truck',
                   type: 'supplier',
                   to: `/suppliers/${sup.id}`,
                   actions: [
-                    { label: 'فتح', icon: 'mdi-open-in-new', handler: () => go(`/suppliers/${sup.id}`) },
+                    {
+                      label: 'فتح',
+                      icon: 'mdi-open-in-new',
+                      handler: () => go(`/suppliers/${sup.id}`),
+                    },
                     ...(authStore.hasPermission('vouchers:create_payment')
-                      ? [{ label: 'دفع له', icon: 'mdi-cash-minus', handler: () => go(`/suppliers/${sup.id}?pay=1`) }]
+                      ? [
+                          {
+                            label: 'دفع له',
+                            icon: 'mdi-cash-minus',
+                            handler: () => go(`/suppliers/${sup.id}?pay=1`),
+                          },
+                        ]
                       : []),
                   ],
                 };

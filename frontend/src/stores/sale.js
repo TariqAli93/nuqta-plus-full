@@ -45,6 +45,8 @@ export const useSaleStore = defineStore('sale', {
 
         this.sales = response?.data || [];
 
+        console.log('Fetched sales data:', this.sales);
+
         // Ensure pagination values are numbers
         if (response?.meta) {
           this.pagination = {

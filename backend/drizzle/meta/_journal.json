@@ -15,6 +15,13 @@
       "when": 1781795383159,
       "tag": "0001_burly_longshot",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781970485613,
+      "tag": "0002_needy_malcolm_colcord",
+      "breakpoints": true
     }
   ]
 }

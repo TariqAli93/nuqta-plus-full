@@ -338,6 +338,10 @@
           </v-chip>
         </template>
 
+        <template #[`item.branch`]="{ item }">
+          {{ item?.branchName ?? item?.branch?.name ?? 'غير محدد' }}
+        </template>
+
         <template #[`item.actions`]="{ item }">
           <!-- أزرار المسودات -->
           <template v-if="item.status === 'draft'">
@@ -618,6 +622,7 @@ const headers = computed(() => [
   { title: 'الحالة', key: 'status' },
   { title: 'التاريخ', key: 'createdAt' },
   { title: 'بواسطة', key: 'createdBy', sortable: false },
+  { title: 'الفرع', key: 'branch', sortable: false },
   { title: 'الاجرائات', key: 'actions', sortable: false },
 ]);
 

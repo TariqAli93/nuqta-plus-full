@@ -31,12 +31,7 @@
       PDF
     </v-btn>
 
-    <v-snackbar
-      v-model="snackbar.show"
-      :color="snackbar.color"
-      :timeout="3500"
-      location="top"
-    >
+    <v-snackbar v-model="snackbar.show" :color="snackbar.color" :timeout="3500" location="top">
       {{ snackbar.text }}
     </v-snackbar>
   </div>
@@ -82,7 +77,7 @@ const built = computed(() =>
     branchLabel: props.branchLabel,
     userName: props.userName,
     generatedAt: props.generatedAt,
-  }),
+  })
 );
 
 const rowCount = computed(() => totalRowCount(built.value));
@@ -98,7 +93,7 @@ const buildFilename = (ext) => {
 const inspect = () => {
   if (!import.meta.env.DEV) return;
   const b = built.value;
-  console.debug('[report-export]', {
+  console.log('[report-export]', {
     reportType: b.reportType,
     sections: b.sections.map((s) => ({ id: s.id, rows: s.rows.length })),
     totalRows: rowCount.value,

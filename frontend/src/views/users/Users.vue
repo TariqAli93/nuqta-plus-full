@@ -421,7 +421,8 @@ const resetPwRef = ref(null);
 
 const rules = {
   required: (value) => !!value || 'هذا الحقل مطلوب.',
-  atLeastOneBranch: (value) => (Array.isArray(value) && value.length > 0) || 'يجب تعيين فرع واحد على الأقل.',
+  atLeastOneBranch: (value) =>
+    (Array.isArray(value) && value.length > 0) || 'يجب تعيين فرع واحد على الأقل.',
   minLength: (value) => value.length >= 6 || 'يجب أن تكون كلمة المرور 6 أحرف على الأقل.',
   confirmPassword: (value) =>
     value === resetPwInfo.confirmPassword || 'كلمتا المرور غير متطابقتين.',
@@ -452,30 +453,48 @@ function getRoleName(role) {
   return match ? match.nameAr : role || '-';
 }
 
-async function openForm(item) {
-  if (item) {
-    // The list row only carries the primary branch; fetch the full record so
-    // the multi-branch picker shows the user's COMPLETE assigned set.
+async function openForm(user = null) {
+  const id = user?.id ?? null;
+  const username = user?.username ?? '';
+
+  console.log(`Opening form for user: ${username} (ID: ${id})`);
+
+  if (user) {
     try {
-      item = await store.getById(item.id);
-    } catch {
-      /* fall back to the list row if the fetch fails */
-    }
-    // `branchIds` is the many-to-many set; fall back to the single primary
-    // branch for legacy rows / list payloads that only carry assignedBranchId.
-    const branchIds =
-      Array.isArray(item.branchIds) && item.branchIds.length
-        ? [...item.branchIds]
-        : item.assignedBranchId
-          ? [item.assignedBranchId]
+      const fetchedUser = await store.getById(id);
+
+      if (!fetchedUser || typeof fetchedUser !== 'object') {
+        notification.error('لم يتم العثور على بيانات المستخدم');
+        return;
+      }
+
+      const branchIds = Array.isArray(fetchedUser?.branchIds)
+        ? fetchedUser.branchIds.filter(Boolean)
+        : fetchedUser?.assignedBranchId
+          ? [fetchedUser.assignedBranchId]
           : [];
-    Object.assign(form, {
-      ...item,
-      assignedBranchId: item.assignedBranchId ?? branchIds[0] ?? null,
-      branchIds,
-      assignedWarehouseId: item.assignedWarehouseId ?? null,
-      password: '',
-    });
+
+      Object.assign(form, {
+        id: fetchedUser?.id ?? null,
+        username: fetchedUser?.username ?? '',
+        fullName: fetchedUser?.fullName ?? '',
+        phone: fetchedUser?.phone ?? '',
+        role: fetchedUser?.role ?? 'cashier',
+        isActive: fetchedUser?.isActive ?? true,
+
+        assignedBranchId: fetchedUser?.assignedBranchId ?? branchIds?.[0] ?? null,
+
+        branchIds,
+
+        assignedWarehouseId: fetchedUser?.assignedWarehouseId ?? null,
+
+        password: '',
+      });
+    } catch (error) {
+      console.error(error);
+      notification.error('فشل جلب بيانات المستخدم. حاول مرة أخرى.');
+      return;
+    }
   } else {
     Object.assign(form, {
       id: null,
@@ -490,6 +509,7 @@ async function openForm(item) {
       assignedWarehouseId: null,
     });
   }
+
   showForm.value = true;
 }
 

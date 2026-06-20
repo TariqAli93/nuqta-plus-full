@@ -365,6 +365,8 @@ export const saleItemSchema = z.object({
   unitPrice: z.coerce.number().positive('Unit price must be positive'),
   discount: z.coerce.number().nonnegative('Discount cannot be negative').optional(),
   unitId: z.number().int().positive().nullable().optional(),
+  // Per-line note (ملاحظة المنتج) — independent of the invoice-level note.
+  notes: z.string().trim().max(1000, 'ملاحظة المنتج طويلة جداً (الحد الأقصى 1000 حرف)').nullable().optional(),
 });
 
 export const saleSchema = z
@@ -408,7 +410,9 @@ export const saleSchema = z
       .nullable(),
     paidAmount: z.number().nonnegative('Paid amount cannot be negative').optional().default(0),
     installmentCount: z.number().int().positive('Installment count must be at least 1').optional(),
-    notes: z.string().nullable().optional(),
+    // Invoice-level note (ملاحظة الفاتورة). Trimmed and capped so an over-long
+    // value is rejected with a clear message instead of being silently stored.
+    notes: z.string().trim().max(1000, 'الملاحظة طويلة جداً (الحد الأقصى 1000 حرف)').nullable().optional(),
     paymentNotes: z.string().nullable().optional(),
     interestRate: z
       .number()

@@ -667,6 +667,8 @@ export class SaleService {
           baseQuantity: baseQty,
           unitCostPrice: String(perUnitCost || 0),
           priceType,
+          // Per-line note (ملاحظة المنتج). Blank/whitespace → NULL.
+          notes: item.notes && String(item.notes).trim() ? String(item.notes).trim() : null,
         }).returning({ id: saleItems.id });
 
         stockItems.push({
@@ -889,6 +891,11 @@ export class SaleService {
         customer: customers.name,
         customerPhone: customers.phone,
         customerId: sales.customerId,
+        // Branch shown explicitly in the list. branchName is NULL when the
+        // invoice has no branch or its branch row was removed — the UI renders
+        // "غير محدد" in that case.
+        branchId: sales.branchId,
+        branchName: branches.name,
         createdBy: users.username,
         itemCount: sql`(SELECT COUNT(*) FROM ${saleItems} WHERE ${saleItems.saleId} = ${sales.id})`,
         returnedTotal: sql`COALESCE((SELECT SUM(${saleReturns.returnedValue}::numeric) FROM ${saleReturns} WHERE ${saleReturns.saleId} = ${sales.id}), 0)`,
@@ -900,6 +907,7 @@ export class SaleService {
       .from(sales)
       .leftJoin(customers, eq(sales.customerId, customers.id))
       .leftJoin(users, eq(sales.createdBy, users.id))
+      .leftJoin(branches, eq(sales.branchId, branches.id))
       .orderBy(...orderBy)
       .limit(limit)
       .offset(offset);
@@ -1003,6 +1011,8 @@ export class SaleService {
         // products.cost_price * baseQuantity).
         unitCostPrice: saleItems.unitCostPrice,
         priceType: saleItems.priceType,
+        // Per-line note (ملاحظة المنتج). NULL on legacy rows / blank entries.
+        notes: saleItems.notes,
         // Profit visibility — uses the product's current cost_price. Returns
         // null when the product was deleted so the UI can render "n/a".
         costPrice: products.costPrice,
@@ -2383,6 +2393,9 @@ export class SaleService {
           discount: String(itemDiscountTotal),
           subtotal: String(parseFloat(itemSubtotal.toFixed(2))),
           priceType,
+          // Per-line note (ملاحظة المنتج) — carried on the draft so completing it
+          // later preserves what the cashier typed. Blank/whitespace → NULL.
+          notes: item.notes && String(item.notes).trim() ? String(item.notes).trim() : null,
         });
       }
 
@@ -2560,6 +2573,8 @@ export class SaleService {
           baseQuantity: baseQty,
           unitCostPrice: String(perUnitCost || 0),
           priceType,
+          // Per-line note (ملاحظة المنتج). Blank/whitespace → NULL.
+          notes: item.notes && String(item.notes).trim() ? String(item.notes).trim() : null,
         }).returning({ id: saleItems.id });
 
         stockItems.push({

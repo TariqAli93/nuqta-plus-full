@@ -21,14 +21,16 @@ export const TID = {
     openShift: 'pos-open-shift',
     closeShift: 'pos-close-shift',
     shiftChip: 'pos-shift-chip',
+    /** Unified search + barcode field. Enter resolves an exact barcode/SKU scan. */
     search: 'pos-search',
-    barcode: 'pos-barcode',
     /** A product tile in the grid. Carries data-product-id / data-product-name. */
     product: 'pos-product',
     cartEmpty: 'pos-cart-empty',
     total: 'pos-total',
     payFull: 'pos-pay-full',
     cardRef: 'pos-card-ref',
+    /** Invoice-level note (ملاحظة الفاتورة), inside the cart "خيارات" panel. */
+    saleNotes: 'pos-sale-notes',
     checkout: 'pos-checkout',
     /** Payment method radio (cash | card). */
     payMethod: (m: 'cash' | 'card') => `pos-pay-method-${m}`,
@@ -101,6 +103,8 @@ export const TID = {
 
   saleDetails: {
     invoiceNumber: 'sale-invoice-number',
+    /** Invoice-level note card (shown only when the sale has a note). */
+    notes: 'sale-notes',
     returnBtn: 'sale-return-btn',
     refundAmount: 'sale-refund-amount',
     refundMethod: 'sale-refund-method',

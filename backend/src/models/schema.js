@@ -550,6 +550,9 @@ export const saleItems = pgTable('sale_items', {
   // Pricing tier this line was sold at (snapshot of the invoice's price_type):
   // 'retail' | 'wholesale' | 'agent'. NULL on legacy rows → treated as 'retail'.
   priceType: text('price_type'),
+  // Per-line note (ملاحظة المنتج) — independent of the invoice-level note on
+  // sales.notes. NULL on legacy rows and whenever the cashier leaves it blank.
+  notes: text('notes'),
   createdAt: timestamp('created_at').defaultNow(),
 });
 

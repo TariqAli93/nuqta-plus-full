@@ -2,7 +2,9 @@
   <div>
     <!-- شنو تريد تسوي اليوم؟ -->
     <div class="text-h5 font-weight-bold mb-1">شنو تريد تسوي اليوم؟</div>
-    <div class="text-body-2 text-medium-emphasis mb-4">اختر العملية مباشرة، والباقي يتسجّل تلقائياً.</div>
+    <div class="text-body-2 text-medium-emphasis mb-4">
+      اختر العملية مباشرة، والباقي يتسجّل تلقائياً.
+    </div>
 
     <!-- Big action buttons -->
     <div class="action-grid mb-6">
@@ -33,7 +35,9 @@
           <v-icon :color="card.color" size="22">{{ card.icon }}</v-icon>
         </div>
         <div class="text-h5 font-weight-bold mb-1" :class="card.valueClass">{{ card.value }}</div>
-        <div v-if="card.subtitle" class="text-caption text-medium-emphasis mb-2">{{ card.subtitle }}</div>
+        <div v-if="card.subtitle" class="text-caption text-medium-emphasis mb-2">
+          {{ card.subtitle }}
+        </div>
         <div class="d-flex gap-2 mt-2">
           <v-btn
             v-if="card.action"
@@ -44,12 +48,7 @@
           >
             {{ card.action.label }}
           </v-btn>
-          <v-btn
-            v-if="card.action2"
-            size="small"
-            variant="text"
-            @click="goTo(card.action2.to)"
-          >
+          <v-btn v-if="card.action2" size="small" variant="text" @click="goTo(card.action2.to)">
             {{ card.action2.label }}
           </v-btn>
         </div>
@@ -186,7 +185,7 @@ const cards = computed(() => [
     color: 'success',
     show: authStore.hasPermission('reports:read_profit'),
     valueClass: todayProfit.value < 0 ? 'text-error' : '',
-    action: { label: 'التقارير', to: '/reports/simple' },
+    action: { label: 'التقارير', to: '/reports' },
   },
   {
     key: 'customer-debt',
@@ -196,7 +195,9 @@ const cards = computed(() => [
     color: 'warning',
     show: authStore.hasPermission('view:customers'),
     action: { label: 'عرض العملاء', to: '/customers' },
-    action2: authStore.hasPermission('view:sales') ? { label: 'قبض دين', to: '/collections' } : null,
+    action2: authStore.hasPermission('view:sales')
+      ? { label: 'قبض دين', to: '/collections' }
+      : null,
   },
   {
     key: 'unpaid',
@@ -258,19 +259,35 @@ onMounted(async () => {
   min-height: 116px;
   border-radius: 16px;
   color: #fff;
-  transition: transform 0.16s ease, box-shadow 0.16s ease;
+  transition:
+    transform 0.16s ease,
+    box-shadow 0.16s ease;
 }
 .action-tile:hover {
   transform: translateY(-2px);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
 }
-.action-tile--primary { background: linear-gradient(135deg, #1976d2, #1565c0); }
-.action-tile--success { background: linear-gradient(135deg, #2e7d32, #1b5e20); }
-.action-tile--indigo { background: linear-gradient(135deg, #3949ab, #283593); }
-.action-tile--deep-purple { background: linear-gradient(135deg, #6a3ab2, #4527a0); }
-.action-tile--orange { background: linear-gradient(135deg, #ef6c00, #e65100); }
-.action-tile--teal { background: linear-gradient(135deg, #00897b, #00695c); }
-.action-tile--blue-grey { background: linear-gradient(135deg, #546e7a, #37474f); }
+.action-tile--primary {
+  background: linear-gradient(135deg, #1976d2, #1565c0);
+}
+.action-tile--success {
+  background: linear-gradient(135deg, #2e7d32, #1b5e20);
+}
+.action-tile--indigo {
+  background: linear-gradient(135deg, #3949ab, #283593);
+}
+.action-tile--deep-purple {
+  background: linear-gradient(135deg, #6a3ab2, #4527a0);
+}
+.action-tile--orange {
+  background: linear-gradient(135deg, #ef6c00, #e65100);
+}
+.action-tile--teal {
+  background: linear-gradient(135deg, #00897b, #00695c);
+}
+.action-tile--blue-grey {
+  background: linear-gradient(135deg, #546e7a, #37474f);
+}
 
 .info-grid {
   display: grid;

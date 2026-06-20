@@ -34,7 +34,7 @@ export const useUsersStore = defineStore('users', {
       const notificationStore = useNotificationStore();
       try {
         const { data } = await api.get(`/users/${id}`);
-        this.current = data.data;
+        this.current = data;
         return this.current;
       } catch (error) {
         notificationStore.error(error?.message || 'فشل تحميل بيانات المستخدم');

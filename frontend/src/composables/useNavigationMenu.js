@@ -269,12 +269,6 @@ export function useNavigationMenu() {
       to: '#reports',
       group: {
         items: [
-          // {
-          //   title: 'التقارير السريعة',
-          //   icon: 'mdi-view-dashboard-variant',
-          //   to: '/reports/simple',
-          //   permission: 'view:reports',
-          // },
           {
             title: 'تقارير مفصّلة',
             icon: 'mdi-chart-box-outline',

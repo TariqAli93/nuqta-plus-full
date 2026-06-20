@@ -69,7 +69,7 @@ const allKpis = computed(() => [
     accent: '#16A34A',
     value: profitAvailable.value ? formatMoney(todayProfit.value) : '—',
     valueClass: profitAvailable.value && todayProfit.value < 0 ? 'text-error' : '',
-    to: '/reports/simple',
+    to: '/reports',
   },
   {
     key: 'invoices',
@@ -109,8 +109,7 @@ const allKpis = computed(() => [
     icon: 'mdi-account-arrow-left-outline',
     accent: '#D97706',
     value: formatMoney(customerDebt.value),
-    sub:
-      unpaidToday.value > 0 ? `غير مدفوع اليوم: ${formatMoney(unpaidToday.value)}` : null,
+    sub: unpaidToday.value > 0 ? `غير مدفوع اليوم: ${formatMoney(unpaidToday.value)}` : null,
     to: '/collections',
   },
 ]);
@@ -137,7 +136,10 @@ const visibleKpis = computed(() =>
   border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
   text-decoration: none;
   color: inherit;
-  transition: border-color 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease;
+  transition:
+    border-color 0.16s ease,
+    transform 0.16s ease,
+    box-shadow 0.16s ease;
   min-width: 0;
 }
 

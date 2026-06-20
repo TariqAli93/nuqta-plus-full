@@ -197,10 +197,8 @@
 
     <v-main class="bg-surface">
       <v-container fluid>
-        <router-view v-slot="{ Component, route: routeData }">
-          <transition :name="transitionName" mode="out-in">
-            <component :is="Component" :key="routeData.path" />
-          </transition>
+        <router-view v-slot="{ Component, route }">
+          <component v-if="Component" :is="Component" :key="route.fullPath" />
         </router-view>
       </v-container>
     </v-main>

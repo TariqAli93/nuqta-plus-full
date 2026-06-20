@@ -431,6 +431,9 @@ export function usePosCart() {
         baseQuantity: toBaseQuantity(i.qty, {
           conversionFactor: Number(i.unitConversionFactor) || 1,
         }),
+        // Per-line note (ملاحظة المنتج). Trimmed; whitespace-only → omitted so
+        // the backend stores NULL.
+        notes: i.note && String(i.note).trim() ? String(i.note).trim() : undefined,
       })),
       discount: discountValue.value,
       tax: taxPercent,
@@ -441,7 +444,9 @@ export function usePosCart() {
           ? (payment.reference?.trim() || null)
           : null,
       interestRate: 0,
-      notes: notes.value ? String(notes.value) : undefined,
+      // Invoice-level note (ملاحظة الفاتورة). Trim so a whitespace-only value is
+      // omitted (the backend stores `notes || null`).
+      notes: notes.value && String(notes.value).trim() ? String(notes.value).trim() : undefined,
       paymentNotes: payment.notes ? String(payment.notes) : undefined,
       branchId: inventoryStore.selectedBranchId || undefined,
       warehouseId: inventoryStore.selectedWarehouseId || undefined,
@@ -531,7 +536,9 @@ export function usePosCart() {
         originalCurrency: product?.currency || currency.value,
         qty: Math.min(qty, unitAvailable > 0 ? unitAvailable : qty),
         discount: Number(it.discount) || 0,
-        note: it.note ? String(it.note) : '',
+        // Draft line note (ملاحظة المنتج). getById returns it as `notes`;
+        // fall back to `note` for any in-memory draft shape.
+        note: it.notes ? String(it.notes) : it.note ? String(it.note) : '',
         currency: currency.value,
         availableStock: unitAvailable,
         baseAvailableStock: baseAvailable,

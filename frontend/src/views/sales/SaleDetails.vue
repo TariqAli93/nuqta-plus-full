@@ -1,550 +1,620 @@
 <template>
   <div class="page-shell">
-    <PageHeader
-      title="تفاصيل الفاتورة"
-      subtitle="عرض الفاتورة والمدفوعات والإرجاع"
-      icon="mdi-receipt-text"
-    >
-      <v-btn
-        color="primary"
-        prepend-icon="mdi-printer"
-        :loading="printing"
-        :disabled="isFullyReturned || isCancelled"
-        :title="isFullyReturned ? 'الطباعة معطلة — تم إرجاع جميع المنتجات' : ''"
-        @click="handlePrint"
-      >
-        طباعة
-      </v-btn>
+    <!-- Loading: the invoice is still being fetched. -->
+    <div v-if="loading" class="sale-state" role="status" aria-live="polite">
+      <v-progress-circular indeterminate size="56" color="primary" />
+      <div class="text-body-1 mt-4 text-medium-emphasis">جاري تحميل تفاصيل الفاتورة…</div>
+    </div>
 
-      <v-btn
-        color="primary"
-        variant="tonal"
-        prepend-icon="mdi-eye"
-        :disabled="isFullyReturned"
-        :title="isFullyReturned ? 'المعاينة معطلة — تم إرجاع جميع المنتجات' : ''"
-        @click="previewPrint"
-      >
-        معاينة الطباعة
-      </v-btn>
-
-      <v-btn
-        data-testid="sale-return-btn"
-        v-if="canReturn && canRecordReturn"
-        color="warning"
-        variant="tonal"
-        prepend-icon="mdi-keyboard-return"
-        :disabled="isFullyReturned"
-        :title="isFullyReturned ? 'تم إرجاع جميع المنتجات' : ''"
-        @click="openReturnDialog"
-      >
-        {{ isFullyReturned ? 'مُرجع كلياً' : 'إرجاع / استرداد' }}
-      </v-btn>
-
-      <select-printer />
-
-      <BoxyShipmentButton v-if="sale && canReadShipments" :sale="sale" check-on-mount />
-
-      <v-btn variant="text" prepend-icon="mdi-arrow-right" @click="router.go(-1)"> رجوع </v-btn>
-    </PageHeader>
-
-    <BoxyShipmentPanel v-if="sale && canReadShipments" :sale="sale" />
-
-    <v-card v-if="sale" class="mb-4">
-      <v-card-title class="d-flex justify-space-between align-center">
-        <div>
-          <div class="text-h5">
-            رقم الفاتورة:
-            <v-chip data-testid="sale-invoice-number">{{ sale.invoiceNumber }}</v-chip>
-          </div>
-          <div class="text-caption text-grey">{{ toYmdWithTime(sale.createdAt) }}</div>
-        </div>
-        <v-chip
-          v-if="sale.paymentType === 'installment'"
-          :color="getStatusColor(sale.status)"
-          size="large"
-        >
-          {{ getStatusText(sale.status) }}
-        </v-chip>
-      </v-card-title>
-      <v-divider></v-divider>
-      <v-card-text>
-        <v-row>
-          <v-col cols="12" md="4">
-            <div class="mb-2">
-              <v-icon color="primary" class="ml-2">mdi-account</v-icon>
-              <strong>معلومات العميل</strong>
-            </div>
-            <div class="mr-8 text-body-2">
-              <p class="mb-1"><strong>الاسم: </strong> {{ sale.customerName || 'زبون نقدي' }}</p>
-              <p v-if="sale.customer && sale.customer.phone" class="mb-1">
-                <strong>الهاتف: </strong> {{ sale.customer.phone }}
-              </p>
-            </div>
-          </v-col>
-
-          <v-col cols="12" md="4">
-            <div class="mb-2">
-              <v-icon color="primary" class="ml-2">mdi-cash-multiple</v-icon>
-              <strong>معلومات الدفع</strong>
-            </div>
-            <div class="mr-8 text-body-2">
-              <p class="mb-1">
-                <strong>نوع الدفع: </strong> {{ getPaymentTypeText(sale.paymentType) }}
-              </p>
-              <p v-if="agentPricingOn" class="mb-1">
-                <strong>نوع السعر: </strong> {{ priceTierLabel(sale.priceType) }}
-              </p>
-              <p class="mb-1"><strong>العملة:</strong> {{ sale.currency }}</p>
-              <p class="mb-1">
-                <strong>المدفوع: </strong>
-                <span class="text-success">{{
-                  formatCurrency(sale.paidAmount, sale.currency)
-                }}</span>
-              </p>
-              <p class="mb-1">
-                <strong>المتبقي: </strong>
-                <span :class="sale.remainingAmount > 0 ? 'text-error' : 'text-success'">
-                  {{ formatCurrency(sale.remainingAmount, sale.currency) }}
-                </span>
-              </p>
-              <p v-if="totalReturnedValue > 0" class="mb-0">
-                <strong>قيمة الإرجاع: </strong>
-                <span class="text-warning font-weight-bold">
-                  {{ formatCurrency(totalReturnedValue, sale.currency) }}
-                </span>
-              </p>
-            </div>
-          </v-col>
-
-          <v-col cols="12" md="4">
-            <div class="mb-2">
-              <v-icon color="primary" class="ml-2">mdi-chart-box</v-icon>
-              <strong>الملخص المالي</strong>
-            </div>
-            <div class="mr-8 text-body-2">
-              <!-- عرض المجموع الأساسي -->
-              <p v-if="sale.paymentType === 'installment' && sale.interestAmount > 0" class="mb-1">
-                <strong>إجمالي المنتجات: </strong>
-                <span class="text-primary">{{
-                  formatCurrency(sale.total - (sale.interestAmount || 0), sale.currency)
-                }}</span>
-              </p>
-              <!-- معلومات الفائدة -->
-              <p v-if="sale.paymentType === 'installment' && sale.interestRate > 0" class="mb-1">
-                <strong>نسبة الفائدة: </strong>
-                <span class="text-warning font-weight-bold">{{ sale.interestRate }}%</span>
-              </p>
-              <p v-if="sale.paymentType === 'installment' && sale.interestAmount > 0" class="mb-1">
-                <strong>قيمة الفائدة: </strong>
-                <span class="text-warning font-weight-bold">{{
-                  formatCurrency(sale.interestAmount, sale.currency)
-                }}</span>
-              </p>
-              <!-- عدد الأقساط للمبيعات التقسيطية -->
-              <p v-if="sale.paymentType === 'installment' && hasInstallments" class="mb-1">
-                <strong>عدد الأقساط: </strong>
-                <span class="text-info">{{ sale.installments.length }} قسط</span>
-              </p>
-
-              <!-- الإجمالي النهائي -->
-              <v-divider
-                v-if="sale.paymentType === 'installment' && sale.interestAmount > 0"
-                class="my-2"
-              ></v-divider>
-              <p class="mb-0">
-                <strong>الإجمالي النهائي: </strong>
-                <span class="text-h6 text-primary font-weight-bold">{{
-                  formatCurrency(sale.total, sale.currency)
-                }}</span>
-              </p>
-
-              <!-- Profit (manager+ only — column hidden for cashiers) -->
-              <p v-if="canViewProfit && sale.totalProfit != null" class="mb-0 mt-2">
-                <strong>الربح المحقق: </strong>
-                <span class="text-success font-weight-bold">{{
-                  formatCurrency(sale.totalProfit, sale.currency)
-                }}</span>
-              </p>
-              <p
-                v-else-if="canViewProfit && sale.profitAccurate === false"
-                class="mb-0 mt-2 text-caption text-medium-emphasis"
-              >
-                الربح غير متاح (تكلفة بعض المنتجات غير معروفة)
-              </p>
-            </div>
-          </v-col>
-        </v-row>
-      </v-card-text>
-    </v-card>
-
-    <!-- Interest Information Card for Installment Sales -->
-    <v-card
-      v-if="sale && sale.paymentType === 'installment' && sale.interestAmount > 0"
-      class="page-section"
-    >
-      <div class="section-title">
-        <span class="section-title__label">
-          <v-icon size="20" color="warning">mdi-calculator</v-icon>
-          <span>تفاصيل حساب الفائدة</span>
-        </span>
+    <!-- Error: fetch failed / not found / bad payload. The app stays usable —
+         the cashier can retry or jump straight back to POS or the sales list. -->
+    <div v-else-if="loadError" class="sale-state" data-testid="sale-load-error">
+      <v-icon size="64" color="error">mdi-alert-circle-outline</v-icon>
+      <div class="text-h6 mt-3">تعذر تحميل تفاصيل الفاتورة</div>
+      <div class="text-body-2 text-medium-emphasis mt-1 mb-5">
+        قد تكون الفاتورة غير موجودة أو حدث خطأ في الاتصال.
       </div>
-      <v-card-text>
-        <v-row>
-          <v-col cols="12" md="3">
-            <div class="text-center">
-              <div class="text-caption text-grey">إجمالي المنتجات</div>
-              <div class="text-h6 text-primary">
-                {{ formatCurrency(sale.total - (sale.interestAmount || 0), sale.currency) }}
-              </div>
-            </div>
-          </v-col>
-          <v-col cols="12" md="1" class="justify-center d-flex align-center">
-            <v-icon color="warning">mdi-plus</v-icon>
-          </v-col>
-          <v-col cols="12" md="3">
-            <div class="text-center">
-              <div class="text-caption text-grey">الفائدة ({{ sale.interestRate }}%)</div>
-              <div class="text-h6 text-warning">
-                {{ formatCurrency(sale.interestAmount, sale.currency) }}
-              </div>
-            </div>
-          </v-col>
-          <v-col cols="12" md="1" class="justify-center d-flex align-center">
-            <v-icon color="success">mdi-equal</v-icon>
-          </v-col>
-          <v-col cols="12" md="4">
-            <div class="text-center">
-              <div class="text-caption text-grey">الإجمالي النهائي</div>
-              <div class="text-h5 text-success font-weight-bold">
-                {{ formatCurrency(sale.total, sale.currency) }}
-              </div>
-              <div class="mt-1 text-caption text-grey">
-                {{ sale.installments.length }} أقساط ×
-                {{
-                  formatCurrency(
-                    sale.installments.length > 0 ? sale.total / sale.installments.length : 0,
-                    sale.currency
-                  )
-                }}
-              </div>
-            </div>
-          </v-col>
-        </v-row>
-      </v-card-text>
-    </v-card>
+      <div class="d-flex flex-wrap justify-center ga-3">
+        <v-btn color="primary" prepend-icon="mdi-refresh" @click="loadSale">إعادة المحاولة</v-btn>
+        <v-btn
+          color="primary"
+          variant="tonal"
+          prepend-icon="mdi-point-of-sale"
+          :to="{ name: 'PosScreen' }"
+        >
+          نقطة البيع
+        </v-btn>
+        <v-btn variant="text" prepend-icon="mdi-format-list-bulleted" :to="{ name: 'Sales' }">
+          قائمة الفواتير
+        </v-btn>
+      </div>
+    </div>
 
-    <!-- Products Table -->
-    <v-card v-if="sale && sale.items" class="mb-4">
-      <v-card-title>
-        <v-icon class="ml-2">mdi-package-variant</v-icon>
-        تفاصيل المنتجات
-      </v-card-title>
-      <v-divider></v-divider>
-      <v-card-text>
-        <v-table>
-          <thead>
-            <tr>
-              <th class="text-center">#</th>
-              <th class="text-center">المنتج</th>
-              <th class="text-center">الكمية</th>
-              <th v-if="hasReturns" class="text-center">المُعاد</th>
-              <th v-if="hasReturns" class="text-center">الصافي</th>
-              <th class="text-center">سعر الوحدة</th>
-              <th class="text-center">خصم على الوحدة</th>
-              <th class="text-center">الملاحظات</th>
-              <th class="text-center">المجموع</th>
-              <th v-if="canViewProfit" class="text-center">الربح</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="(item, index) in sale.items"
-              :key="item.id"
-              :class="
-                returnedQtyByItem[item.id] >= item.quantity
-                  ? 'bg-warning-lighten-5'
-                  : returnedQtyByItem[item.id] > 0
-                    ? 'bg-warning-lighten-5'
-                    : ''
-              "
-            >
-              <td class="text-center font-weight-bold">{{ index + 1 }}</td>
-              <td class="text-center">
-                <div class="font-weight-bold">{{ item.productName }}</div>
-                <div v-if="item.productDescription" class="text-caption text-grey mt-1">
-                  {{ item.productDescription }}
-                </div>
-              </td>
-              <td class="text-center">
-                <span
-                  :class="
-                    returnedQtyByItem[item.id] >= item.quantity
-                      ? 'text-decoration-line-through text-grey'
-                      : ''
-                  "
+    <!-- Loaded: the full invoice. Inner cards still gate on `sale` individually. -->
+    <template v-else-if="sale">
+      <PageHeader
+        title="تفاصيل الفاتورة"
+        subtitle="عرض الفاتورة والمدفوعات والإرجاع"
+        icon="mdi-receipt-text"
+      >
+        <v-btn
+          color="primary"
+          prepend-icon="mdi-printer"
+          :loading="printing"
+          :disabled="isFullyReturned || isCancelled"
+          :title="isFullyReturned ? 'الطباعة معطلة — تم إرجاع جميع المنتجات' : ''"
+          @click="handlePrint"
+        >
+          طباعة
+        </v-btn>
+
+        <v-btn
+          color="primary"
+          variant="tonal"
+          prepend-icon="mdi-eye"
+          :disabled="isFullyReturned"
+          :title="isFullyReturned ? 'المعاينة معطلة — تم إرجاع جميع المنتجات' : ''"
+          @click="previewPrint"
+        >
+          معاينة الطباعة
+        </v-btn>
+
+        <v-btn
+          v-if="canReturn && canRecordReturn"
+          data-testid="sale-return-btn"
+          color="warning"
+          variant="tonal"
+          prepend-icon="mdi-keyboard-return"
+          :disabled="isFullyReturned"
+          :title="isFullyReturned ? 'تم إرجاع جميع المنتجات' : ''"
+          @click="openReturnDialog"
+        >
+          {{ isFullyReturned ? 'مُرجع كلياً' : 'إرجاع / استرداد' }}
+        </v-btn>
+
+        <select-printer />
+
+        <BoxyShipmentButton v-if="sale && canReadShipments" :sale="sale" check-on-mount />
+
+        <v-btn variant="text" prepend-icon="mdi-arrow-right" @click="router.go(-1)"> رجوع </v-btn>
+      </PageHeader>
+
+      <BoxyShipmentPanel v-if="sale && canReadShipments" :sale="sale" />
+
+      <v-card v-if="sale" class="mb-4">
+        <v-card-title class="d-flex justify-space-between align-center">
+          <div>
+            <div class="text-h5">
+              رقم الفاتورة:
+              <v-chip data-testid="sale-invoice-number">{{ sale.invoiceNumber }}</v-chip>
+            </div>
+            <div class="text-caption text-grey">{{ toYmdWithTime(sale.createdAt) }}</div>
+            <div class="text-body-2 mt-1" data-testid="sale-branch">
+              <v-icon size="16" color="primary" class="ml-1">mdi-source-branch</v-icon>
+              <strong>الفرع: </strong>
+              {{ sale?.branchName ?? sale?.branch?.name ?? 'غير محدد' }}
+            </div>
+          </div>
+          <v-chip
+            v-if="sale.paymentType === 'installment'"
+            :color="getStatusColor(sale.status)"
+            size="large"
+          >
+            {{ getStatusText(sale.status) }}
+          </v-chip>
+        </v-card-title>
+        <v-divider></v-divider>
+        <v-card-text>
+          <v-row>
+            <v-col cols="12" md="4">
+              <div class="mb-2">
+                <v-icon color="primary" class="ml-2">mdi-account</v-icon>
+                <strong>معلومات العميل</strong>
+              </div>
+              <div class="mr-8 text-body-2">
+                <p class="mb-1"><strong>الاسم: </strong> {{ sale.customerName || 'زبون نقدي' }}</p>
+                <p v-if="sale.customer && sale.customer.phone" class="mb-1">
+                  <strong>الهاتف: </strong> {{ sale.customer.phone }}
+                </p>
+              </div>
+            </v-col>
+
+            <v-col cols="12" md="4">
+              <div class="mb-2">
+                <v-icon color="primary" class="ml-2">mdi-cash-multiple</v-icon>
+                <strong>معلومات الدفع</strong>
+              </div>
+              <div class="mr-8 text-body-2">
+                <p class="mb-1">
+                  <strong>نوع الدفع: </strong> {{ getPaymentTypeText(sale.paymentType) }}
+                </p>
+                <p v-if="agentPricingOn" class="mb-1">
+                  <strong>نوع السعر: </strong> {{ priceTierLabel(sale.priceType) }}
+                </p>
+                <p class="mb-1"><strong>العملة:</strong> {{ sale.currency }}</p>
+                <p class="mb-1">
+                  <strong>المدفوع: </strong>
+                  <span class="text-success">{{
+                    formatCurrency(sale.paidAmount, sale.currency)
+                  }}</span>
+                </p>
+                <p class="mb-1">
+                  <strong>المتبقي: </strong>
+                  <span :class="sale.remainingAmount > 0 ? 'text-error' : 'text-success'">
+                    {{ formatCurrency(sale.remainingAmount, sale.currency) }}
+                  </span>
+                </p>
+                <p v-if="totalReturnedValue > 0" class="mb-0">
+                  <strong>قيمة الإرجاع: </strong>
+                  <span class="text-warning font-weight-bold">
+                    {{ formatCurrency(totalReturnedValue, sale.currency) }}
+                  </span>
+                </p>
+              </div>
+            </v-col>
+
+            <v-col cols="12" md="4">
+              <div class="mb-2">
+                <v-icon color="primary" class="ml-2">mdi-chart-box</v-icon>
+                <strong>الملخص المالي</strong>
+              </div>
+              <div class="mr-8 text-body-2">
+                <!-- عرض المجموع الأساسي -->
+                <p
+                  v-if="sale.paymentType === 'installment' && sale.interestAmount > 0"
+                  class="mb-1"
                 >
-                  {{ item.quantity }}
+                  <strong>إجمالي المنتجات: </strong>
+                  <span class="text-primary">{{
+                    formatCurrency(sale.total - (sale.interestAmount || 0), sale.currency)
+                  }}</span>
+                </p>
+                <!-- معلومات الفائدة -->
+                <p v-if="sale.paymentType === 'installment' && sale.interestRate > 0" class="mb-1">
+                  <strong>نسبة الفائدة: </strong>
+                  <span class="text-warning font-weight-bold">{{ sale.interestRate }}%</span>
+                </p>
+                <p
+                  v-if="sale.paymentType === 'installment' && sale.interestAmount > 0"
+                  class="mb-1"
+                >
+                  <strong>قيمة الفائدة: </strong>
+                  <span class="text-warning font-weight-bold">{{
+                    formatCurrency(sale.interestAmount, sale.currency)
+                  }}</span>
+                </p>
+                <!-- عدد الأقساط للمبيعات التقسيطية -->
+                <p v-if="sale.paymentType === 'installment' && hasInstallments" class="mb-1">
+                  <strong>عدد الأقساط: </strong>
+                  <span class="text-info">{{ sale.installments.length }} قسط</span>
+                </p>
+
+                <!-- الإجمالي النهائي -->
+                <v-divider
+                  v-if="sale.paymentType === 'installment' && sale.interestAmount > 0"
+                  class="my-2"
+                ></v-divider>
+                <p class="mb-0">
+                  <strong>الإجمالي النهائي: </strong>
+                  <span class="text-h6 text-primary font-weight-bold">{{
+                    formatCurrency(sale.total, sale.currency)
+                  }}</span>
+                </p>
+
+                <!-- Profit (manager+ only — column hidden for cashiers) -->
+                <p v-if="canViewProfit && sale.totalProfit != null" class="mb-0 mt-2">
+                  <strong>الربح المحقق: </strong>
+                  <span class="text-success font-weight-bold">{{
+                    formatCurrency(sale.totalProfit, sale.currency)
+                  }}</span>
+                </p>
+                <p
+                  v-else-if="canViewProfit && sale.profitAccurate === false"
+                  class="mb-0 mt-2 text-caption text-medium-emphasis"
+                >
+                  الربح غير متاح (تكلفة بعض المنتجات غير معروفة)
+                </p>
+              </div>
+            </v-col>
+          </v-row>
+        </v-card-text>
+      </v-card>
+
+      <!-- Interest Information Card for Installment Sales -->
+      <v-card
+        v-if="sale && sale.paymentType === 'installment' && sale.interestAmount > 0"
+        class="page-section"
+      >
+        <div class="section-title">
+          <span class="section-title__label">
+            <v-icon size="20" color="warning">mdi-calculator</v-icon>
+            <span>تفاصيل حساب الفائدة</span>
+          </span>
+        </div>
+        <v-card-text>
+          <v-row>
+            <v-col cols="12" md="3">
+              <div class="text-center">
+                <div class="text-caption text-grey">إجمالي المنتجات</div>
+                <div class="text-h6 text-primary">
+                  {{ formatCurrency(sale.total - (sale.interestAmount || 0), sale.currency) }}
+                </div>
+              </div>
+            </v-col>
+            <v-col cols="12" md="1" class="justify-center d-flex align-center">
+              <v-icon color="warning">mdi-plus</v-icon>
+            </v-col>
+            <v-col cols="12" md="3">
+              <div class="text-center">
+                <div class="text-caption text-grey">الفائدة ({{ sale.interestRate }}%)</div>
+                <div class="text-h6 text-warning">
+                  {{ formatCurrency(sale.interestAmount, sale.currency) }}
+                </div>
+              </div>
+            </v-col>
+            <v-col cols="12" md="1" class="justify-center d-flex align-center">
+              <v-icon color="success">mdi-equal</v-icon>
+            </v-col>
+            <v-col cols="12" md="4">
+              <div class="text-center">
+                <div class="text-caption text-grey">الإجمالي النهائي</div>
+                <div class="text-h5 text-success font-weight-bold">
+                  {{ formatCurrency(sale.total, sale.currency) }}
+                </div>
+                <div class="mt-1 text-caption text-grey">
+                  {{ sale.installments.length }} أقساط ×
+                  {{
+                    formatCurrency(
+                      sale.installments.length > 0 ? sale.total / sale.installments.length : 0,
+                      sale.currency
+                    )
+                  }}
+                </div>
+              </div>
+            </v-col>
+          </v-row>
+        </v-card-text>
+      </v-card>
+
+      <!-- Invoice-level note (ملاحظة الفاتورة) — only shown when one was saved. -->
+      <v-card v-if="sale && sale.notes" class="mb-4" data-testid="sale-notes">
+        <v-card-title>
+          <v-icon class="ml-2">mdi-note-text-outline</v-icon>
+          ملاحظات الفاتورة
+        </v-card-title>
+        <v-divider></v-divider>
+        <v-card-text class="text-body-1 sale-notes__text">{{ sale.notes }}</v-card-text>
+      </v-card>
+
+      <!-- Products Table -->
+      <v-card v-if="sale && sale.items" class="mb-4">
+        <v-card-title>
+          <v-icon class="ml-2">mdi-package-variant</v-icon>
+          تفاصيل المنتجات
+        </v-card-title>
+        <v-divider></v-divider>
+        <v-card-text>
+          <v-table>
+            <thead>
+              <tr>
+                <th class="text-center">#</th>
+                <th class="text-center">المنتج</th>
+                <th class="text-center">الكمية</th>
+                <th v-if="hasReturns" class="text-center">المُعاد</th>
+                <th v-if="hasReturns" class="text-center">الصافي</th>
+                <th class="text-center">سعر الوحدة</th>
+                <th class="text-center">خصم على الوحدة</th>
+                <th class="text-center">الملاحظات</th>
+                <th class="text-center">المجموع</th>
+                <th v-if="canViewProfit" class="text-center">الربح</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="(item, index) in sale.items"
+                :key="item.id"
+                :class="
+                  returnedQtyByItem[item.id] >= item.quantity
+                    ? 'bg-warning-lighten-5'
+                    : returnedQtyByItem[item.id] > 0
+                      ? 'bg-warning-lighten-5'
+                      : ''
+                "
+              >
+                <td class="text-center font-weight-bold">{{ index + 1 }}</td>
+                <td class="text-center">
+                  <div class="font-weight-bold">{{ item.productName }}</div>
+                  <div v-if="item.productDescription" class="text-caption text-grey mt-1">
+                    {{ item.productDescription }}
+                  </div>
+                </td>
+                <td class="text-center">
+                  <span
+                    :class="
+                      returnedQtyByItem[item.id] >= item.quantity
+                        ? 'text-decoration-line-through text-grey'
+                        : ''
+                    "
+                  >
+                    {{ item.quantity }}
+                    <span v-if="item.unitName" class="text-caption text-medium-emphasis">
+                      {{ item.unitName }}
+                    </span>
+                  </span>
+                </td>
+                <td v-if="hasReturns" class="text-center text-warning font-weight-bold">
+                  {{ returnedQtyByItem[item.id] || 0 }}
                   <span v-if="item.unitName" class="text-caption text-medium-emphasis">
                     {{ item.unitName }}
                   </span>
-                </span>
-              </td>
-              <td v-if="hasReturns" class="text-center text-warning font-weight-bold">
-                {{ returnedQtyByItem[item.id] || 0 }}
-                <span v-if="item.unitName" class="text-caption text-medium-emphasis">
-                  {{ item.unitName }}
-                </span>
-              </td>
-              <td v-if="hasReturns" class="text-center font-weight-bold">
-                {{ Math.max(0, item.quantity - (returnedQtyByItem[item.id] || 0)) }}
-                <span v-if="item.unitName" class="text-caption text-medium-emphasis">
-                  {{ item.unitName }}
-                </span>
-              </td>
-              <td class="text-center">
-                {{ formatCurrency(item.unitPrice, sale.currency) }}
-                <div v-if="item.unitName" class="text-caption text-medium-emphasis">
-                  / {{ item.unitName }}
-                </div>
-              </td>
-              <td class="text-center">
-                {{ item.discount ? formatCurrency(item.discount, sale.currency) : '-' }}
-              </td>
-              <td class="text-center">{{ item.notes || '-' }}</td>
-              <td class="text-center font-weight-bold">
-                {{ formatCurrency(item.subtotal, sale.currency) }}
-              </td>
-              <td v-if="canViewProfit" class="text-center">
-                <span
-                  v-if="item.profit != null"
-                  :class="item.profit >= 0 ? 'text-success' : 'text-error'"
-                  class="font-weight-bold"
+                </td>
+                <td v-if="hasReturns" class="text-center font-weight-bold">
+                  {{ Math.max(0, item.quantity - (returnedQtyByItem[item.id] || 0)) }}
+                  <span v-if="item.unitName" class="text-caption text-medium-emphasis">
+                    {{ item.unitName }}
+                  </span>
+                </td>
+                <td class="text-center">
+                  {{ formatCurrency(item.unitPrice, sale.currency) }}
+                  <div v-if="item.unitName" class="text-caption text-medium-emphasis">
+                    / {{ item.unitName }}
+                  </div>
+                </td>
+                <td class="text-center">
+                  {{ item.discount ? formatCurrency(item.discount, sale.currency) : '-' }}
+                </td>
+                <td class="text-center">{{ item.notes || '-' }}</td>
+                <td class="text-center font-weight-bold">
+                  {{ formatCurrency(item.subtotal, sale.currency) }}
+                </td>
+                <td v-if="canViewProfit" class="text-center">
+                  <span
+                    v-if="item.profit != null"
+                    :class="item.profit >= 0 ? 'text-success' : 'text-error'"
+                    class="font-weight-bold"
+                  >
+                    {{ formatCurrency(item.profit, sale.currency) }}
+                  </span>
+                  <span v-else class="text-medium-emphasis">—</span>
+                </td>
+              </tr>
+            </tbody>
+
+            <!-- المجموع مع الخصم و الفائدة -->
+            <tfoot>
+              <tr v-if="sale.discount && sale.discount > 0">
+                <td :colspan="footerLabelColspan" class="text-right font-weight-bold">
+                  الخصم على الفاتورة:
+                </td>
+                <td class="text-center font-weight-bold text-error">
+                  {{ formatCurrency(sale.discount, sale.currency) }}
+                </td>
+                <td v-if="canViewProfit"></td>
+              </tr>
+
+              <tr>
+                <td :colspan="footerLabelColspan" class="text-right font-weight-bold">
+                  <span v-if="sale.paymentType === 'installment'"> المجموع الفرعي: </span>
+                  <span v-else>الإجمالي:</span>
+                </td>
+                <td class="text-center font-weight-bold">
+                  {{ formatCurrency(sale.total - (sale.interestAmount || 0), sale.currency) }}
+                </td>
+                <td v-if="canViewProfit"></td>
+              </tr>
+
+              <tr v-if="sale.paymentType === 'installment' && sale.interestAmount > 0">
+                <td :colspan="footerLabelColspan" class="text-right font-weight-bold">الفائدة:</td>
+                <td class="text-center font-weight-bold text-warning">
+                  + {{ formatCurrency(sale.interestAmount, sale.currency) }}
+                </td>
+                <td v-if="canViewProfit"></td>
+              </tr>
+
+              <tr v-if="sale.discount > 0 || sale.interestAmount > 0">
+                <td :colspan="footerLabelColspan" class="text-right font-weight-bold text-primary">
+                  الإجمالي النهائي:
+                </td>
+                <td class="text-center font-weight-bold text-primary text-h6">
+                  {{ formatCurrency(sale.total, sale.currency) }}
+                </td>
+                <td v-if="canViewProfit" class="text-center font-weight-bold text-success">
+                  <span v-if="sale.totalProfit != null">
+                    {{ formatCurrency(sale.totalProfit, sale.currency) }}
+                  </span>
+                  <span v-else class="text-medium-emphasis">—</span>
+                </td>
+              </tr>
+
+              <tr v-if="hasReturns">
+                <td :colspan="footerLabelColspan" class="text-right font-weight-bold text-warning">
+                  إجمالي الإرجاع:
+                </td>
+                <td class="text-center font-weight-bold text-warning">
+                  - {{ formatCurrency(totalReturnedValue, sale.currency) }}
+                </td>
+                <td v-if="canViewProfit"></td>
+              </tr>
+
+              <tr v-if="hasReturns">
+                <td :colspan="footerLabelColspan" class="text-right font-weight-bold text-success">
+                  الصافي بعد الإرجاع:
+                </td>
+                <td
+                  data-testid="sale-net-after-returns"
+                  class="text-center font-weight-bold text-success text-h6"
                 >
-                  {{ formatCurrency(item.profit, sale.currency) }}
-                </span>
-                <span v-else class="text-medium-emphasis">—</span>
-              </td>
-            </tr>
-          </tbody>
+                  {{ formatCurrency(Math.max(0, sale.total - totalReturnedValue), sale.currency) }}
+                </td>
+                <td v-if="canViewProfit"></td>
+              </tr>
+            </tfoot>
+          </v-table>
+        </v-card-text>
+      </v-card>
 
-          <!-- المجموع مع الخصم و الفائدة -->
-          <tfoot>
-            <tr v-if="sale.discount && sale.discount > 0">
-              <td :colspan="footerLabelColspan" class="text-right font-weight-bold">
-                الخصم على الفاتورة:
-              </td>
-              <td class="text-center font-weight-bold text-error">
-                {{ formatCurrency(sale.discount, sale.currency) }}
-              </td>
-              <td v-if="canViewProfit"></td>
-            </tr>
-
-            <tr>
-              <td :colspan="footerLabelColspan" class="text-right font-weight-bold">
-                <span v-if="sale.paymentType === 'installment'"> المجموع الفرعي: </span>
-                <span v-else>الإجمالي:</span>
-              </td>
-              <td class="text-center font-weight-bold">
-                {{ formatCurrency(sale.total - (sale.interestAmount || 0), sale.currency) }}
-              </td>
-              <td v-if="canViewProfit"></td>
-            </tr>
-
-            <tr v-if="sale.paymentType === 'installment' && sale.interestAmount > 0">
-              <td :colspan="footerLabelColspan" class="text-right font-weight-bold">الفائدة:</td>
-              <td class="text-center font-weight-bold text-warning">
-                + {{ formatCurrency(sale.interestAmount, sale.currency) }}
-              </td>
-              <td v-if="canViewProfit"></td>
-            </tr>
-
-            <tr v-if="sale.discount > 0 || sale.interestAmount > 0">
-              <td :colspan="footerLabelColspan" class="text-right font-weight-bold text-primary">
-                الإجمالي النهائي:
-              </td>
-              <td class="text-center font-weight-bold text-primary text-h6">
-                {{ formatCurrency(sale.total, sale.currency) }}
-              </td>
-              <td v-if="canViewProfit" class="text-center font-weight-bold text-success">
-                <span v-if="sale.totalProfit != null">
-                  {{ formatCurrency(sale.totalProfit, sale.currency) }}
-                </span>
-                <span v-else class="text-medium-emphasis">—</span>
-              </td>
-            </tr>
-
-            <tr v-if="hasReturns">
-              <td :colspan="footerLabelColspan" class="text-right font-weight-bold text-warning">
-                إجمالي الإرجاع:
-              </td>
-              <td class="text-center font-weight-bold text-warning">
-                - {{ formatCurrency(totalReturnedValue, sale.currency) }}
-              </td>
-              <td v-if="canViewProfit"></td>
-            </tr>
-
-            <tr v-if="hasReturns">
-              <td :colspan="footerLabelColspan" class="text-right font-weight-bold text-success">
-                الصافي بعد الإرجاع:
-              </td>
-              <td data-testid="sale-net-after-returns" class="text-center font-weight-bold text-success text-h6">
-                {{ formatCurrency(Math.max(0, sale.total - totalReturnedValue), sale.currency) }}
-              </td>
-              <td v-if="canViewProfit"></td>
-            </tr>
-          </tfoot>
-        </v-table>
-      </v-card-text>
-    </v-card>
-
-    <!-- Installments Table -->
-    <v-card v-if="sale && sale.installments && sale.installments.length > 0" class="mb-4">
-      <v-card-title class="d-flex justify-space-between align-center">
-        <div>
-          <v-icon class="ml-2">mdi-calendar-clock</v-icon>
-          جدول الأقساط
-          <span
-            v-if="sale.paymentType === 'installment' && sale.interestAmount > 0"
-            class="text-caption text-warning d-block"
-          >
-            * الأقساط تشمل فائدة بنسبة {{ sale.interestRate }}%
-          </span>
-        </div>
-        <v-chip :color="getInstallmentStatusColor()" size="small">
-          {{ getInstallmentStatusText() }}
-        </v-chip>
-      </v-card-title>
-      <v-divider></v-divider>
-      <v-card-text>
-        <v-table>
-          <thead>
-            <tr>
-              <th class="text-center">رقم القسط</th>
-              <th class="text-center">المبلغ المستحق</th>
-              <th class="text-center">المبلغ المدفوع</th>
-              <th class="text-center">المبلغ المتبقي</th>
-              <th class="text-center">تاريخ الاستحقاق</th>
-              <th class="text-center">تاريخ الدفع</th>
-              <th class="text-center">الحالة</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="installment in sale.installments"
-              :key="installment.id"
-              :class="getInstallmentRowClass(installment)"
+      <!-- Installments Table -->
+      <v-card v-if="sale && sale.installments && sale.installments.length > 0" class="mb-4">
+        <v-card-title class="d-flex justify-space-between align-center">
+          <div>
+            <v-icon class="ml-2">mdi-calendar-clock</v-icon>
+            جدول الأقساط
+            <span
+              v-if="sale.paymentType === 'installment' && sale.interestAmount > 0"
+              class="text-caption text-warning d-block"
             >
-              <td class="text-center font-weight-bold">{{ installment.installmentNumber }}</td>
-              <td class="text-center">
-                {{ formatCurrency(installment.dueAmount, sale.currency) }}
-              </td>
-              <td class="text-center text-success">
-                {{ formatCurrency(installment.paidAmount, sale.currency) }}
-              </td>
-              <td class="text-center" :class="installment.remainingAmount > 0 ? 'text-error' : ''">
-                {{ formatCurrency(installment.remainingAmount, sale.currency) }}
-              </td>
-              <td class="text-center">{{ toYmd(installment.dueDate) }}</td>
-              <td class="text-center">
-                {{ installment.paidDate ? toYmd(installment.paidDate) : '-' }}
-              </td>
-              <td class="text-center">
-                <v-chip :color="getInstallmentColor(installment)" size="small">
-                  {{ getInstallmentStatusLabel(installment) }}
-                </v-chip>
-              </td>
-            </tr>
-          </tbody>
-        </v-table>
-      </v-card-text>
-    </v-card>
+              * الأقساط تشمل فائدة بنسبة {{ sale.interestRate }}%
+            </span>
+          </div>
+          <v-chip :color="getInstallmentStatusColor()" size="small">
+            {{ getInstallmentStatusText() }}
+          </v-chip>
+        </v-card-title>
+        <v-divider></v-divider>
+        <v-card-text>
+          <v-table>
+            <thead>
+              <tr>
+                <th class="text-center">رقم القسط</th>
+                <th class="text-center">المبلغ المستحق</th>
+                <th class="text-center">المبلغ المدفوع</th>
+                <th class="text-center">المبلغ المتبقي</th>
+                <th class="text-center">تاريخ الاستحقاق</th>
+                <th class="text-center">تاريخ الدفع</th>
+                <th class="text-center">الحالة</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="installment in sale.installments"
+                :key="installment.id"
+                :class="getInstallmentRowClass(installment)"
+              >
+                <td class="text-center font-weight-bold">{{ installment.installmentNumber }}</td>
+                <td class="text-center">
+                  {{ formatCurrency(installment.dueAmount, sale.currency) }}
+                </td>
+                <td class="text-center text-success">
+                  {{ formatCurrency(installment.paidAmount, sale.currency) }}
+                </td>
+                <td
+                  class="text-center"
+                  :class="installment.remainingAmount > 0 ? 'text-error' : ''"
+                >
+                  {{ formatCurrency(installment.remainingAmount, sale.currency) }}
+                </td>
+                <td class="text-center">{{ toYmd(installment.dueDate) }}</td>
+                <td class="text-center">
+                  {{ installment.paidDate ? toYmd(installment.paidDate) : '-' }}
+                </td>
+                <td class="text-center">
+                  <v-chip :color="getInstallmentColor(installment)" size="small">
+                    {{ getInstallmentStatusLabel(installment) }}
+                  </v-chip>
+                </td>
+              </tr>
+            </tbody>
+          </v-table>
+        </v-card-text>
+      </v-card>
 
-    <!-- Payments Table -->
-    <v-card v-if="sale && sale.payments && sale.payments.length > 0" class="mb-4">
-      <v-card-title>
-        <v-icon class="ml-2">mdi-cash-register</v-icon>
-        سجل الدفعات
-      </v-card-title>
-      <v-divider></v-divider>
-      <v-card-text>
-        <v-table>
-          <thead>
-            <tr>
-              <th class="text-center">#</th>
-              <th class="text-center">المبلغ</th>
-              <th class="text-center">طريقة الدفع</th>
-              <th class="text-center">التاريخ</th>
-              <th class="text-center">العملة</th>
-              <th class="text-center">بواسطة</th>
-              <th class="text-center">رقم المرجع</th>
-              <th class="text-right">ملاحظات</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(payment, index) in sale.payments" :key="payment.id">
-              <td class="text-center">{{ index + 1 }}</td>
-              <td class="text-center font-weight-bold text-success">
-                {{ formatCurrency(payment.amount, payment.currency) }}
-              </td>
-              <td class="text-center">{{ getPaymentMethodText(payment.paymentMethod) }}</td>
-              <td class="text-center">{{ toYmdWithTime(payment.createdAt) }}</td>
-              <td class="text-center">{{ payment.currency }}</td>
-              <td class="text-center">{{ payment.createdBy || '-' }}</td>
-              <td class="text-center">
-                <v-chip v-if="payment.paymentReference" size="small" variant="tonal" color="info">
-                  {{ payment.paymentReference }}
-                </v-chip>
-                <span v-else>-</span>
-              </td>
-              <td>{{ payment.notes || '-' }}</td>
-            </tr>
-          </tbody>
-        </v-table>
-      </v-card-text>
-    </v-card>
+      <!-- Payments Table -->
+      <v-card v-if="sale && sale.payments && sale.payments.length > 0" class="mb-4">
+        <v-card-title>
+          <v-icon class="ml-2">mdi-cash-register</v-icon>
+          سجل الدفعات
+        </v-card-title>
+        <v-divider></v-divider>
+        <v-card-text>
+          <v-table>
+            <thead>
+              <tr>
+                <th class="text-center">#</th>
+                <th class="text-center">المبلغ</th>
+                <th class="text-center">طريقة الدفع</th>
+                <th class="text-center">التاريخ</th>
+                <th class="text-center">العملة</th>
+                <th class="text-center">بواسطة</th>
+                <th class="text-center">رقم المرجع</th>
+                <th class="text-right">ملاحظات</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(payment, index) in sale.payments" :key="payment.id">
+                <td class="text-center">{{ index + 1 }}</td>
+                <td class="text-center font-weight-bold text-success">
+                  {{ formatCurrency(payment.amount, payment.currency) }}
+                </td>
+                <td class="text-center">{{ getPaymentMethodText(payment.paymentMethod) }}</td>
+                <td class="text-center">{{ toYmdWithTime(payment.createdAt) }}</td>
+                <td class="text-center">{{ payment.currency }}</td>
+                <td class="text-center">{{ payment.createdBy || '-' }}</td>
+                <td class="text-center">
+                  <v-chip v-if="payment.paymentReference" size="small" variant="tonal" color="info">
+                    {{ payment.paymentReference }}
+                  </v-chip>
+                  <span v-else>-</span>
+                </td>
+                <td>{{ payment.notes || '-' }}</td>
+              </tr>
+            </tbody>
+          </v-table>
+        </v-card-text>
+      </v-card>
 
-    <!-- Returns History -->
-    <v-card data-testid="sale-returns-history" v-if="sale && sale.returns && sale.returns.length > 0" class="mb-4">
-      <v-card-title>
-        <v-icon class="ml-2">mdi-keyboard-return</v-icon>
-        سجل الإرجاع
-      </v-card-title>
-      <v-divider></v-divider>
-      <v-card-text>
-        <v-table>
-          <thead>
-            <tr>
-              <th class="text-center">#</th>
-              <th class="text-center">التاريخ</th>
-              <th class="text-center">المنتجات المُعادة</th>
-              <th class="text-center">قيمة الإرجاع</th>
-              <th class="text-center">المسترد نقداً</th>
-              <th class="text-center">خصم من الذمة</th>
-              <th class="text-center">السبب</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(ret, idx) in sale.returns" :key="ret.id">
-              <td class="text-center">{{ idx + 1 }}</td>
-              <td class="text-center">{{ toYmdWithTime(ret.createdAt) }}</td>
-              <td class="text-center">
-                <div v-for="it in ret.items" :key="it.id" class="text-caption">
-                  {{ it.productName }} × {{ it.quantity }}
-                </div>
-              </td>
-              <td class="text-center">{{ formatCurrency(ret.returnedValue, ret.currency) }}</td>
-              <td class="text-center text-success">
-                {{ formatCurrency(ret.refundAmount, ret.currency) }}
-              </td>
-              <td class="text-center">
-                {{ formatCurrency(ret.debtReduction, ret.currency) }}
-              </td>
-              <td class="text-center">{{ ret.reason || '-' }}</td>
-            </tr>
-          </tbody>
-        </v-table>
-      </v-card-text>
-    </v-card>
+      <!-- Returns History -->
+      <v-card
+        v-if="sale && sale.returns && sale.returns.length > 0"
+        data-testid="sale-returns-history"
+        class="mb-4"
+      >
+        <v-card-title>
+          <v-icon class="ml-2">mdi-keyboard-return</v-icon>
+          سجل الإرجاع
+        </v-card-title>
+        <v-divider></v-divider>
+        <v-card-text>
+          <v-table>
+            <thead>
+              <tr>
+                <th class="text-center">#</th>
+                <th class="text-center">التاريخ</th>
+                <th class="text-center">المنتجات المُعادة</th>
+                <th class="text-center">قيمة الإرجاع</th>
+                <th class="text-center">المسترد نقداً</th>
+                <th class="text-center">خصم من الذمة</th>
+                <th class="text-center">السبب</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(ret, idx) in sale.returns" :key="ret.id">
+                <td class="text-center">{{ idx + 1 }}</td>
+                <td class="text-center">{{ toYmdWithTime(ret.createdAt) }}</td>
+                <td class="text-center">
+                  <div v-for="it in ret.items" :key="it.id" class="text-caption">
+                    {{ it.productName }} × {{ it.quantity }}
+                  </div>
+                </td>
+                <td class="text-center">{{ formatCurrency(ret.returnedValue, ret.currency) }}</td>
+                <td class="text-center text-success">
+                  {{ formatCurrency(ret.refundAmount, ret.currency) }}
+                </td>
+                <td class="text-center">
+                  {{ formatCurrency(ret.debtReduction, ret.currency) }}
+                </td>
+                <td class="text-center">{{ ret.reason || '-' }}</td>
+              </tr>
+            </tbody>
+          </v-table>
+        </v-card-text>
+      </v-card>
+    </template>
+
+    <div v-else class="sale-state">
+      <v-icon size="64" color="warning">mdi-receipt-text-remove-outline</v-icon>
+      <div class="text-h6 mt-3">لم يتم تحميل بيانات الفاتورة</div>
+      <v-btn class="mt-4" color="primary" @click="loadSale">إعادة المحاولة</v-btn>
+    </div>
 
     <!-- Return / Refund Dialog -->
     <v-dialog v-model="returnDialog" max-width="900" persistent>
@@ -603,9 +673,9 @@
                 </td>
                 <td class="text-center">
                   <v-number-input
+                    v-model="row.quantity"
                     data-testid="sale-return-qty"
                     :data-sale-item-id="row.saleItemId"
-                    v-model="row.quantity"
                     :min="0"
                     :max="row.maxReturnable"
                     :disabled="row.maxReturnable <= 0"
@@ -634,8 +704,8 @@
           <v-row class="mt-4">
             <v-col cols="12" md="4">
               <v-text-field
-                data-testid="sale-refund-amount"
                 v-model.number="returnForm.refundAmount"
+                data-testid="sale-refund-amount"
                 type="number"
                 :label="`المبلغ المسترد نقداً (${sale.currency})`"
                 :suffix="sale.currency"
@@ -648,8 +718,8 @@
             </v-col>
             <v-col cols="12" md="4">
               <v-select
-                data-testid="sale-refund-method"
                 v-model="returnForm.refundMethod"
+                data-testid="sale-refund-method"
                 :items="refundMethodOptions"
                 label="طريقة الاسترداد"
                 density="comfortable"
@@ -790,7 +860,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, watch } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useSaleStore } from '@/stores/sale';
 import { useSettingsStore } from '@/stores/settings';
@@ -813,8 +883,11 @@ import {
   getPaymentMethodText,
 } from '@/utils/helpers';
 
-const { params } = useRoute();
+const route = useRoute();
 const router = useRouter();
+
+const { params } = route;
+
 const saleStore = useSaleStore();
 const settingsStore = useSettingsStore();
 const notificationStore = useNotificationStore();
@@ -823,6 +896,16 @@ const { can } = usePermissions();
 
 const printing = ref(false);
 const settings = ref(null);
+
+// state
+const sale = ref(null);
+const loadingPayment = ref(false);
+
+// Page-load lifecycle for the invoice itself. `loading` shows a spinner while
+// the sale is fetched; `loadError` switches to a recoverable error panel so a
+// failed/empty fetch never leaves a blank, half-broken page.
+const loading = ref(true);
+const loadError = ref(false);
 
 // Profit visibility — manager and above only.
 const canViewProfit = computed(() => authStore.hasPermission?.(['manage:sales']));
@@ -985,6 +1068,23 @@ const returnedValue = computed(() => {
 const maxRefundable = computed(() => {
   if (!sale.value) return 0;
   return Math.min(returnedValue.value, Number(sale.value.paidAmount) || 0);
+});
+
+// Suggested refund = the returnable value capped at what was actually paid.
+// NOTE: defined at top level (NOT inside onMounted). Creating this computed/
+// watch after an `await` inside the hook would register them outside the
+// component's effect scope, leaking a watcher on every visit — and could keep
+// the unmounted page reactive after navigating back to POS.
+const autoRefundAmount = computed(() => {
+  const currency = sale.value?.currency || 'USD';
+  return roundReturnNearest(
+    Math.max(0, Math.min(returnedValue.value, maxRefundable.value)),
+    currency
+  );
+});
+
+watch(autoRefundAmount, (amount) => {
+  returnForm.value.refundAmount = amount;
 });
 
 const refundAmountClamped = computed(() => {
@@ -1161,10 +1261,6 @@ const previewPrint = async () => {
     notificationStore.error('حدث خطأ أثناء عرض المعاينة: ' + (error.message || 'خطأ غير معروف'));
   }
 };
-
-// state
-const sale = ref(null);
-const loadingPayment = ref(false);
 
 const paymentData = ref({
   amount: null,
@@ -1404,45 +1500,87 @@ const payAll = async () => {
     loadingPayment.value = false;
   }
 };
-// lifecycle
-onMounted(async () => {
-  try {
-    // جلب تفاصيل الفاتورة
-    const response = await saleStore.fetchSale(params.id);
-    sale.value = response.data;
+// ── Lifecycle / data load ───────────────────────────────────────────────────
+// Defensive against every "silent break" path: a missing route id, an
+// unexpected response shape, or a failed request all resolve to a recoverable
+// error panel instead of a thrown render / blank page that wedges the app.
+const loadSale = async () => {
+  loading.value = true;
+  loadError.value = false;
 
-    // جلب معلومات الشركة من الإعدادات
-    await settingsStore.fetchCompanyInfo();
-    settings.value = settingsStore.companyInfo;
+  const saleId = route.params.id;
 
-    // تعيين العملة للدفعات
-    if (sale.value) {
-      paymentData.value.currency = sale.value.currency;
-    }
-
-    const autoRefundAmount = computed(() => {
-      const currency = sale.value?.currency || 'USD';
-      return roundReturnNearest(
-        Math.max(0, Math.min(returnedValue.value, maxRefundable.value)),
-        currency
-      );
-    });
-
-    watch(
-      autoRefundAmount,
-      (amount) => {
-        returnForm.value.refundAmount = amount;
-      },
-      { immediate: false }
-    );
-  } catch (error) {
-    console.error('Failed to load sale details:', error);
-    notificationStore.error('فشل في تحميل تفاصيل المبيع');
+  // 1) Route param must exist — otherwise we'd GET /sales/undefined.
+  if (!saleId) {
+    console.error('[SaleDetails] missing route param id');
+    loadError.value = true;
+    loading.value = false;
+    notificationStore.error('رقم الفاتورة غير موجود في الرابط');
+    return;
   }
-});
+
+  try {
+    console.log('[SaleDetails] fetching sale id =', saleId);
+    const response = await saleStore.fetchSale(saleId);
+    console.log('[SaleDetails] fetch response =', response);
+
+    // `fetchSale` resolves to the unwrapped API body ({ success, data }) — but
+    // tolerate the sale arriving directly OR double-wrapped (same fallback chain
+    // used elsewhere for this endpoint). Validate before trusting it so a 404 /
+    // unexpected payload becomes a clean error, not a render crash.
+    const payload = response?.data?.data ?? response?.data ?? response ?? null;
+    if (!payload || typeof payload !== 'object' || !payload.id) {
+      throw new Error('Sale payload missing or malformed');
+    }
+    sale.value = payload;
+    paymentData.value.currency = sale.value.currency;
+
+    // Company info is only needed for printing — its failure must NOT block the
+    // invoice from rendering.
+    try {
+      await settingsStore.fetchCompanyInfo();
+      settings.value = settingsStore.companyInfo;
+    } catch (e) {
+      console.warn('[SaleDetails] company info load failed (non-fatal):', e);
+    }
+  } catch (error) {
+    console.error('[SaleDetails] Failed to load sale details:', error);
+    sale.value = null;
+    loadError.value = true;
+    notificationStore.error('تعذر تحميل تفاصيل الفاتورة');
+  } finally {
+    loading.value = false;
+  }
+};
+
+watch(
+  () => route.params.id,
+  (id) => {
+    console.debug('[SaleDetails] route id changed:', id);
+    loadSale();
+  },
+  { immediate: true }
+);
 </script>
 
 <style scoped>
+/* Preserve the line breaks the cashier typed into the invoice note. */
+.sale-notes__text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Centered loading / error panel that replaces the invoice while it resolves. */
+.sale-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-height: 60vh;
+  padding: 32px 16px;
+}
+
 @media print {
   .v-btn,
   .v-select,

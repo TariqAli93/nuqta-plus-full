@@ -242,6 +242,23 @@
                         color="primary"
                       />
                     </v-col>
+
+                    <!-- Per-line note (ملاحظة المنتج) — independent of the
+                         invoice-level note in sale.notes. -->
+                    <v-col cols="12">
+                      <v-text-field
+                        v-model="item.notes"
+                        :data-testid="`installment-item-notes-${index}`"
+                        label="ملاحظة المنتج (اختياري)"
+                        placeholder="مثال: بدون شاحن"
+                        prepend-inner-icon="mdi-note-text-outline"
+                        clearable
+                        counter="1000"
+                        maxlength="1000"
+                        density="comfortable"
+                        variant="outlined"
+                      />
+                    </v-col>
                   </v-row>
                 </v-card-text>
               </v-card>
@@ -532,6 +549,8 @@
                 label="ملاحظات إضافية"
                 rows="3"
                 auto-grow
+                counter="1000"
+                maxlength="1000"
                 variant="outlined"
                 density="comfortable"
                 placeholder="أضف أي ملاحظات متعلقة بهذا البيع..."
@@ -1072,7 +1091,7 @@ const saleSummary = computed(() => [
 
 /* 📦 إدارة المنتجات */
 const addItem = () =>
-  sale.value.items.push({ productId: null, quantity: 1, unitPrice: 0, discount: 0, unitId: null });
+  sale.value.items.push({ productId: null, quantity: 1, unitPrice: 0, discount: 0, unitId: null, notes: '' });
 const removeItem = (index) => sale.value.items.splice(index, 1);
 
 /* 🧮 وحدات المنتج */
@@ -1332,6 +1351,8 @@ const submitSale = async () => {
         baseQuantity: toBaseQuantity(it.quantity, {
           conversionFactor: Number(it.unitConversionFactor) || 1,
         }),
+        // Per-line note (ملاحظة المنتج). Whitespace-only → omitted (NULL).
+        notes: it.notes && String(it.notes).trim() ? String(it.notes).trim() : undefined,
       })),
     };
 
@@ -1553,6 +1574,7 @@ onMounted(async () => {
               quantity: item.quantity,
               unitPrice: item.unitPrice,
               discount: item.discount || 0,
+              notes: item.notes || '',
               unitPriceOriginal: product?.sellingPrice || item.unitPrice,
               originalCurrency: product?.currency || sale.value.currency,
               availableStock: availableStockOf(product),

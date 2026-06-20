@@ -31,12 +31,12 @@ rows expose `data-sale-item-id`.
 | `pos-shift-chip` | open-shift status chip |
 | `pos-open-shift` | "فتح وردية" button |
 | `pos-close-shift` | "إغلاق الوردية" button |
-| `pos-search` | quick-search field (F2) |
-| `pos-barcode` | barcode field (F4) |
+| `pos-search` | unified search + barcode field (F2/F4); Enter resolves an exact barcode/SKU scan |
 | `pos-product` | product tile (`+ data-product-id`, `data-product-name`) |
 | `pos-total` | cart grand-total value |
-| `pos-pay-method-cash` / `pos-pay-method-card` | payment-method radios |
+| `pos-pay-method-cash` / `pos-pay-method-card` | payment-method toggle buttons |
 | `pos-card-ref` | card reference field (card only) |
+| `pos-sale-notes` | invoice-level note (inside the "خيارات" panel) |
 | `pos-pay-full` | "المبلغ كامل" tender button |
 | `pos-checkout` | "دفع وإتمام" (F9) |
 
@@ -90,6 +90,7 @@ rows expose `data-sale-item-id`.
 | testid | Element |
 |---|---|
 | `sale-invoice-number` | invoice-number chip |
+| `sale-notes` | invoice-level note card (shown only when a note exists) |
 | `sale-return-btn` | "إرجاع / استرداد" |
 | `sale-return-qty` | per-line return qty (`+ data-sale-item-id`) |
 | `sale-refund-amount` | cash refund amount |

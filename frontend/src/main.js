@@ -31,4 +31,31 @@ const connectionStore = useConnectionStore();
 connectionStore.loadSavedConnection();
 initAxiosBaseUrl(connectionStore);
 
+app.config.errorHandler = (err, instance, info) => {
+  console.error('[Vue Error]', {
+    error: err,
+    info,
+    component: instance?.type?.name,
+    route: window.location.pathname,
+  });
+};
+
+window.addEventListener('error', (event) => {
+  console.error('[Global Error]', {
+    message: event.message,
+    error: event.error,
+    source: event.filename,
+    line: event.lineno,
+    column: event.colno,
+    route: window.location.pathname,
+  });
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('[Unhandled Promise]', {
+    reason: event.reason,
+    route: window.location.pathname,
+  });
+});
+
 app.mount('#app');
