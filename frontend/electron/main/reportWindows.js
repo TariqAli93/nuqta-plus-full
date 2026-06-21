@@ -14,9 +14,15 @@ const TITLES = Object.freeze({
   profit: 'تقرير الأرباح — شكد ربحت؟',
   'top-products': 'أكثر المنتجات مبيعاً',
   debts: 'تقرير الديون — شنو عليه دين؟',
-  'cash-box': 'تقرير الصندوق — شكد بالصندوق؟',
+  'cash-box': 'حركة وتقرير الصندوق — شكد بالصندوق؟',
   expenses: 'تقرير المصروفات — شكد صرفت؟',
-  'cash-movement': 'حركة الصندوق',
+});
+
+// Retired report types → their replacement. «حركة الصندوق» (cash-movement) was
+// merged into «حركة وتقرير الصندوق» (cash-box); resolve any stale request to it
+// so it focuses the same window instead of opening an unknown-type error.
+const TYPE_ALIASES = Object.freeze({
+  'cash-movement': 'cash-box',
 });
 
 // One window per report type (dedupe + focus). Keyed by type.
@@ -59,6 +65,7 @@ async function loadReportRoute(win, type, params) {
 }
 
 function openReportWindow(parentWindow, { type, params }) {
+  type = TYPE_ALIASES[type] || type;
   if (!TITLES[type]) throw new Error(`Unknown report type: ${type}`);
 
   // Already open → focus it (and push the latest filters) instead of duplicating.

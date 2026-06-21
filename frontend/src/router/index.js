@@ -81,7 +81,8 @@ import TopProductsReportPage from '@/views/reports/TopProductsReportPage.vue';
 import DebtsReportPage from '@/views/reports/DebtsReportPage.vue';
 import CashBoxReportPage from '@/views/reports/CashBoxReportPage.vue';
 import ExpensesReportPage from '@/views/reports/ExpensesReportPage.vue';
-import CashMovementReportPage from '@/views/reports/CashMovementReportPage.vue';
+// CashMovementReportPage retired: «حركة الصندوق» merged into «حركة وتقرير الصندوق»
+// (cash-box). The /reports/cash-movement route now redirects to it.
 
 const routes = [
   {
@@ -528,10 +529,11 @@ const routes = [
     meta: { requiresAuth: true, permission: 'view:expenses', standaloneReport: true },
   },
   {
+    // Merged into the unified «حركة وتقرير الصندوق» (cash-box). Kept as a
+    // redirect so old deep-links / stale Electron windows land on the new page.
     path: '/reports/cash-movement',
     name: 'Report_cash_movement',
-    component: CashMovementReportPage,
-    meta: { requiresAuth: true, permission: 'reports:read_financial', standaloneReport: true },
+    redirect: { name: 'Report_cash_box' },
   },
 ];
 

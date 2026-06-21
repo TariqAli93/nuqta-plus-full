@@ -259,6 +259,16 @@ export function useNavigationMenu() {
             permission: 'recurring_expenses:read',
           },
           {
+            // Unified «حركة وتقرير الصندوق» — opens the merged cash-box report
+            // window (same launcher the dashboard quick-question card uses).
+            // `report` (instead of `to`) tells the drawer to open a report
+            // window rather than navigate in-app.
+            title: 'حركة وتقرير الصندوق',
+            icon: 'mdi-cash-register',
+            report: 'cash-box',
+            permission: 'reports:read_financial',
+          },
+          {
             title: 'الصناديق',
             icon: 'mdi-safe-square-outline',
             to: '/treasury/cashboxes',

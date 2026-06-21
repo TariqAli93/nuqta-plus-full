@@ -71,15 +71,19 @@
               </v-list-item>
             </template>
 
-            <!-- Sub-items -->
+            <!-- Sub-items. Most navigate in-app via `to`; a few (e.g. the
+                 unified cash-box report) open a standalone report window via
+                 `report` instead. -->
             <v-list-item
               v-for="sub in item.group.items"
               :key="sub.title"
               :to="sub.to"
+              :link="sub.report ? true : undefined"
               active-class="active-nav-item"
               variant="plain"
-              :value="sub.to"
+              :value="sub.to || sub.report"
               :aria-label="sub.title"
+              @click="sub.report ? openReport(sub.report) : undefined"
             >
               <div class="flex items-center justify-center flex-col gap-2 mb-2 in-group-title">
                 <div class="v-list-item-icon">
@@ -226,6 +230,8 @@ import { useRouter, useRoute } from 'vue-router';
 import { useTheme, useDisplay } from 'vuetify';
 import { useAuthStore } from '@/stores/auth';
 import { useAlertStore } from '@/stores/alert';
+import { useNotificationStore } from '@/stores/notification';
+import { openReportWindow } from '@/composables/useReportWindow';
 import QuickSearch from '@/components/QuickSearch.vue';
 import HeaderQuickActions from '@/components/HeaderQuickActions.vue';
 import BranchWarehouseSelector from '@/components/BranchWarehouseSelector.vue';
@@ -238,7 +244,18 @@ const theme = useTheme();
 const { mobile: isMobile } = useDisplay();
 const authStore = useAuthStore();
 const alertStore = useAlertStore();
+const notification = useNotificationStore();
 const { filteredMenu, getPageTitle } = useNavigationMenu();
+
+/** Open a quick-question report in its own window from a sidebar entry. */
+const openReport = async (type) => {
+  try {
+    await openReportWindow(type);
+  } catch (err) {
+    console.error('[reports] open failed:', err);
+    notification.error('تعذر فتح التقرير، حاول مرة أخرى');
+  }
+};
 
 const transitionName = ref('fade');
 

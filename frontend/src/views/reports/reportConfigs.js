@@ -130,29 +130,34 @@ export const REPORT_CONFIGS = {
     ],
   },
 
+  // Unified "حركة وتقرير الصندوق": merges the former «تقرير الصندوق» (cash-box
+  // position) and «حركة الصندوق» (cash-movement ledger) into one view. The
+  // backend `cashBox` endpoint already returns the full position summary AND the
+  // movement rows in a single call, and honours the movementType filter — so the
+  // two pages were duplicating the same financial domain.
   'cash-box': {
     type: 'cash-box',
-    title: 'تقرير الصندوق',
-    question: 'شكد بالصندوق؟',
+    title: 'حركة وتقرير الصندوق',
+    question: 'شكد بالصندوق وشنو حركته؟',
     icon: 'mdi-cash-register',
     accent: '#0891b2',
     permission: 'reports:read_financial',
     defaultRange: 'today',
-    filters: ['date', 'branch'],
+    filters: ['date', 'movementType', 'branch'],
     summary: [
+      { key: 'opening', label: 'الرصيد الافتتاحي', format: money, accent: '#64748b' },
+      { key: 'totalIn', label: 'الداخل (المقبوضات)', format: money, accent: '#16a34a', big: true },
+      { key: 'totalOut', label: 'الخارج (المصروفات والمرتجعات)', format: money, accent: '#dc2626', big: true },
+      { key: 'net', label: 'صافي الحركة', format: money, accent: '#2563eb' },
       { key: 'currentBalance', label: 'الرصيد الحالي', format: money, accent: '#0891b2', big: true },
-      { key: 'receipts', label: 'المقبوضات', format: money, accent: '#16a34a' },
-      { key: 'expenses', label: 'المصروفات', format: money, accent: '#dc2626' },
-      { key: 'returns', label: 'المرتجعات', format: money, accent: '#d97706' },
-      { key: 'net', label: 'صافي حركة الصندوق', format: money, accent: '#2563eb' },
     ],
     columns: [
-      { key: 'ts', label: 'التاريخ', format: datetime },
+      { key: 'ts', label: 'التاريخ والوقت', format: datetime },
       { key: 'type_label', label: 'نوع الحركة' },
-      { key: 'description', label: 'الوصف' },
+      { key: 'description', label: 'المصدر / الوصف' },
       { key: 'amount_in', label: 'داخل', format: money, align: 'end' },
       { key: 'amount_out', label: 'خارج', format: money, align: 'end' },
-      { key: 'balance_after', label: 'الرصيد', format: money, align: 'end' },
+      { key: 'balance_after', label: 'الرصيد بعد الحركة', format: money, align: 'end' },
       { key: 'user_name', label: 'المستخدم' },
       { key: 'branch_name', label: 'الفرع' },
     ],
@@ -183,36 +188,20 @@ export const REPORT_CONFIGS = {
     ],
   },
 
-  'cash-movement': {
-    type: 'cash-movement',
-    title: 'حركة الصندوق',
-    question: 'شنو حركة الصندوق؟',
-    icon: 'mdi-swap-vertical-bold',
-    accent: '#0d9488',
-    permission: 'reports:read_financial',
-    defaultRange: 'today',
-    filters: ['date', 'movementType', 'branch'],
-    summary: [
-      { key: 'totalIn', label: 'إجمالي الداخل', format: money, accent: '#16a34a', big: true },
-      { key: 'totalOut', label: 'إجمالي الخارج', format: money, accent: '#dc2626', big: true },
-      { key: 'net', label: 'الصافي', format: money, accent: '#2563eb' },
-    ],
-    columns: [
-      { key: 'ts', label: 'التاريخ والوقت', format: datetime },
-      { key: 'type_label', label: 'نوع الحركة' },
-      { key: 'description', label: 'الوصف' },
-      { key: 'amount_in', label: 'المبلغ الداخل', format: money, align: 'end' },
-      { key: 'amount_out', label: 'المبلغ الخارج', format: money, align: 'end' },
-      { key: 'balance_after', label: 'الرصيد بعد الحركة', format: money, align: 'end' },
-      { key: 'user_name', label: 'المستخدم' },
-      { key: 'branch_name', label: 'الفرع / الوردية' },
-    ],
-  },
+  // NOTE: the former `cash-movement` report was merged into `cash-box` above.
+  // Old deep-links redirect to it (router) and the Electron launcher aliases the
+  // type, so no separate config is needed here.
 };
 
-/** Ordered list for the dashboard quick-question cards. */
+/**
+ * Ordered list for the dashboard quick-question cards.
+ *
+ * `cash-movement` is intentionally absent: it was merged into the unified
+ * `cash-box` card («حركة وتقرير الصندوق»). Old deep-links still resolve via the
+ * router redirect + Electron launcher alias.
+ */
 export const REPORT_ORDER = [
-  'sales', 'profit', 'top-products', 'debts', 'cash-box', 'expenses', 'cash-movement',
+  'sales', 'profit', 'top-products', 'debts', 'cash-box', 'expenses',
 ];
 
 // ── Debts report option sets ────────────────────────────────────────────────

@@ -521,12 +521,15 @@ onMounted(async () => {
   await fetchData();
   if (window.electronAPI?.onReportParams) {
     unsubParams = window.electronAPI.onReportParams((p) => {
+      if (p.range) range.value = p.range;
       if (p.from) {
         range.value = 'custom';
         from.value = p.from;
       }
       if (p.to) to.value = p.to;
       if (p.branchId) branchId.value = Number(p.branchId);
+      // Movement-type deep-link (e.g. dashboard «المقبوضات» → type=receipt).
+      if (p.type && cfg.value.filters.includes('movementType')) movementType.value = p.type;
       reload();
     });
   }

@@ -555,16 +555,30 @@ class PosReportsService {
     const net = num(receipts) - num(expensesOut) - num(refunds);
 
     // Recent cash movements (context table) — reuse the unified ledger.
+    // The merged "حركة وتقرير الصندوق" page reads its movement table AND its
+    // in/out totals from this single call, so we surface the ledger totals
+    // (totalIn/totalOut) alongside the position breakdown.
     const movement = await this.cashMovement({ ...filters, limit: filters.limit || 50, page: filters.page || 1 }, user);
+    const totalIn = num(movement.summary.totalIn);
+    const totalOut = num(movement.summary.totalOut);
+
+    // When a movementType filter is active the ledger totals already reflect it,
+    // so net/currentBalance must follow the filtered view. With no type filter
+    // (the only case today) totalIn === receipts and totalOut === expenses+returns,
+    // so these values are byte-identical to the previous behaviour.
+    const filteredByType = filters.type && filters.type !== 'all';
+    const netValue = filteredByType ? totalIn - totalOut : net;
 
     return {
       summary: {
-        currentBalance: opening + net,
+        currentBalance: opening + netValue,
         opening,
         receipts: num(receipts),
         expenses: num(expensesOut),
         returns: num(refunds),
-        net,
+        totalIn,
+        totalOut,
+        net: netValue,
       },
       rows: movement.rows,
       meta: movement.meta,
