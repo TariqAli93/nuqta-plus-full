@@ -130,6 +130,14 @@
         </template>
         <template #[`item.actions`]="{ item }">
           <v-btn
+            v-if="canCreateRecurring"
+            icon="mdi-calendar-sync"
+            size="small"
+            variant="text"
+            title="إنشاء مصروف ثابت من هذا المصروف"
+            @click="makeRecurring(item)"
+          />
+          <v-btn
             v-if="canManage"
             icon="mdi-pencil"
             size="small"
@@ -266,7 +274,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { useExpensesStore } from '@/stores/expenses';
 import { useAuthStore } from '@/stores/auth';
 import { useInventoryStore } from '@/stores/inventory';
@@ -280,6 +288,7 @@ import TableSkeleton from '@/components/TableSkeleton.vue';
 import { formatCurrency, getCurrencySymbol } from '@/utils/formatters';
 
 const route = useRoute();
+const router = useRouter();
 const expensesStore = useExpensesStore();
 const authStore = useAuthStore();
 const inventoryStore = useInventoryStore();
@@ -294,6 +303,7 @@ const branchOptions = computed(() => inventoryStore.branches || []);
 const canCreate = computed(() => authStore.hasPermission?.('expenses:create'));
 const canManage = computed(() => authStore.hasPermission?.(['expenses:update']));
 const canDelete = computed(() => authStore.hasPermission?.(['expenses:delete']));
+const canCreateRecurring = computed(() => authStore.hasPermission?.('recurring_expenses:create'));
 // Treasury picker is an OPTIONAL sub-feature: only load cashboxes/bank accounts
 // when the feature is on AND the user can actually read treasury data, otherwise
 // the global axios interceptor would toast a spurious 403 on /treasury/*.
@@ -428,6 +438,22 @@ async function save() {
   } finally {
     saving.value = false;
   }
+}
+
+function makeRecurring(row) {
+  // Deep-link to the recurring-expenses screen with this expense prefilled.
+  router.push({
+    path: '/recurring-expenses',
+    query: {
+      fromExpense: '1',
+      name: categoryLabel(row.category),
+      category: row.category,
+      amount: row.amount,
+      currency: row.currency,
+      ...(row.branchId ? { branchId: row.branchId } : {}),
+      ...(row.note ? { note: row.note } : {}),
+    },
+  });
 }
 
 async function confirmDelete(row) {

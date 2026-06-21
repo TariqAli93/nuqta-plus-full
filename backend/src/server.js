@@ -49,6 +49,7 @@ import accountingPeriodRoutes from './routes/accountingPeriodRoutes.js';
 import installmentRoutes from './routes/installmentRoutes.js';
 import collectionsRoutes from './routes/collectionsRoutes.js';
 import expensesRoutes from './routes/expensesRoutes.js';
+import recurringExpensesRoutes from './routes/recurringExpensesRoutes.js';
 import setupRoutes from './routes/setupRoutes.js';
 import remoteAccessRoutes from './routes/remoteAccessRoutes.js';
 import treasuryRoutes from './routes/treasuryRoutes.js';
@@ -171,6 +172,7 @@ const start = async () => {
     await fastify.register(installmentRoutes, { prefix: '/api/installments' });
     await fastify.register(collectionsRoutes, { prefix: '/api/collections' });
     await fastify.register(expensesRoutes, { prefix: '/api/expenses' });
+    await fastify.register(recurringExpensesRoutes, { prefix: '/api/recurring-expenses' });
     await fastify.register(setupRoutes, { prefix: '/api/setup' });
     await fastify.register(remoteAccessRoutes, { prefix: '/api/tunnel' });
     await fastify.register(treasuryRoutes, { prefix: '/api/treasury' });

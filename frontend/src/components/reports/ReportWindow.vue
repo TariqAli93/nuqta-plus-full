@@ -140,17 +140,6 @@
           hide-details
           max-width="200"
         />
-        <v-select
-          v-if="cfg.filters.includes('cashSession') && sessionOptions.length"
-          v-model="cashSessionId"
-          :items="sessionOptions"
-          label="الوردية"
-          clearable
-          density="compact"
-          variant="outlined"
-          hide-details
-          max-width="220"
-        />
         <v-text-field
           v-if="cfg.filters.includes('search')"
           v-model="search"
@@ -352,7 +341,6 @@ const direction = ref(route.query.direction || cfg.value.defaultDirection || 'al
 const debtStatus = ref(route.query.status || cfg.value.defaultDebtStatus || 'all');
 const movementType = ref(route.query.type || 'all');
 const branchId = ref(route.query.branchId ? Number(route.query.branchId) : null);
-const cashSessionId = ref(route.query.cashSessionId ? Number(route.query.cashSessionId) : null);
 const limit = ref(Number(route.query.limit) || 50);
 
 // Start in the loading state so a freshly-opened report window paints its
@@ -415,7 +403,6 @@ const branchOptions = computed(() => {
   if (!authStore.branchFeatureEnabled || !authStore.canSwitchBranch) return [];
   return (inventoryStore.branches || []).map((b) => ({ value: b.id, title: b.name }));
 });
-const sessionOptions = ref([]);
 
 function todayStr(d = new Date()) {
   const t = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
@@ -455,8 +442,6 @@ function buildParams() {
   if (cfg.value.filters.includes('debtStatus')) p.status = debtStatus.value;
   if (cfg.value.filters.includes('movementType')) p.type = movementType.value;
   if (cfg.value.filters.includes('branch') && branchId.value) p.branchId = branchId.value;
-  if (cfg.value.filters.includes('cashSession') && cashSessionId.value)
-    p.cashSessionId = cashSessionId.value;
   return p;
 }
 
@@ -499,7 +484,6 @@ function resetFilters() {
   debtStatus.value = cfg.value.defaultDebtStatus || 'all';
   movementType.value = 'all';
   branchId.value = null;
-  cashSessionId.value = null;
   reload();
 }
 function goPage(p) {
@@ -513,7 +497,7 @@ function onLimit(n) {
 
 // Re-fetch (reset to page 1) when any filter changes.
 watch(
-  [range, from, to, partyType, direction, debtStatus, movementType, branchId, cashSessionId, limit],
+  [range, from, to, partyType, direction, debtStatus, movementType, branchId, limit],
   reload
 );
 
@@ -534,7 +518,6 @@ onMounted(async () => {
   } catch {
     /* non-fatal */
   }
-  if (cfg.value.filters.includes('cashSession')) loadSessions();
   await fetchData();
   if (window.electronAPI?.onReportParams) {
     unsubParams = window.electronAPI.onReportParams((p) => {
@@ -544,7 +527,6 @@ onMounted(async () => {
       }
       if (p.to) to.value = p.to;
       if (p.branchId) branchId.value = Number(p.branchId);
-      if (p.cashSessionId) cashSessionId.value = Number(p.cashSessionId);
       reload();
     });
   }
@@ -552,19 +534,6 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (unsubParams) unsubParams();
 });
-
-async function loadSessions() {
-  try {
-    const res = await api.get('/cash-sessions', { params: { limit: 50 } });
-    const list = res.data || res || [];
-    sessionOptions.value = list.map((s) => ({
-      value: s.id,
-      title: `${s.cashierName || 'وردية'} — ${new Date(s.openedAt).toLocaleDateString('en-GB')}${s.status === 'open' ? ' (مفتوحة)' : ''}`,
-    }));
-  } catch {
-    sessionOptions.value = [];
-  }
-}
 
 // ── Formatting ───────────────────────────────────────────────────────────────
 const PAY = { cash: 'نقدي', credit: 'آجل', installment: 'أقساط', mixed: 'مختلط' };

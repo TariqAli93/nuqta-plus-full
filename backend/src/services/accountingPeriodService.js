@@ -1,12 +1,10 @@
 import { getDb, getPool } from '../db.js';
 import {
   accountingPeriods,
-  accountingPeriodShifts,
-  cashSessions,
   branches,
   users,
 } from '../models/index.js';
-import { and, eq, desc, isNull, sql, inArray } from 'drizzle-orm';
+import { and, eq, desc, isNull } from 'drizzle-orm';
 import {
   ValidationError,
   NotFoundError,
@@ -19,15 +17,15 @@ import auditService from './auditService.js';
 
 /**
  * Accounting period (القيد المحاسبي) — a financial operating window opened once
- * and closed once. While open, shifts/sales/returns/expenses attach to it; on
- * close a frozen results snapshot is written to `totals_json` so reviewing a
- * closed period never changes even if underlying rows are later edited.
+ * and closed once. While open, sales/returns/expenses attach to it; on close a
+ * frozen results snapshot is written to `totals_json` so reviewing a closed
+ * period never changes even if underlying rows are later edited.
  *
  * Enforcement is gated by the `accountingPeriods` feature flag:
  *   - OFF (default): everything behaves as before. Writes still *stamp* the open
  *     period if one happens to exist, but never require one.
- *   - ON: opening a shift / recording a sale, return or expense REQUIRES an open
- *     period for that scope, and writes inside a closed period are blocked.
+ *   - ON: recording a sale, return or expense REQUIRES an open period for that
+ *     scope, and writes inside a closed period are blocked.
  */
 
 export const PERIOD_TYPES = Object.freeze(['daily', 'weekly', 'monthly', 'yearly']);
@@ -138,90 +136,6 @@ export class AccountingPeriodService {
       .orderBy(desc(accountingPeriods.id))
       .limit(1);
     return row || null;
-  }
-
-  /**
-   * Central, FLAG-INDEPENDENT guard for opening a shift. The financial system
-   * depends on accounting periods, so a shift can NEVER open without an open
-   * period — even when the feature is disabled. Returns the open period to bind
-   * the shift to (its id becomes the shift's NOT-NULL accounting_period_id).
-   *
-   * Throws with the exact user-facing message for each failure:
-   *   - feature disabled        → "...نظام القيد المحاسبي غير مفعل."
-   *   - latest period is closed → "...لأن القيد المحاسبي مغلق."
-   *   - no period at all        → "...لا يوجد قيد محاسبي مفتوح."
-   */
-  async resolvePeriodForNewShift(user, branchId) {
-    if (!(await this.isEnabled())) {
-      const err = new ValidationError('لا يمكن فتح وردية لأن نظام القيد المحاسبي غير مفعل.');
-      err.code = 'ACCOUNTING_PERIOD_DISABLED';
-      err.statusCode = 422;
-      throw err;
-    }
-    const period = await this.getOpenPeriodForOperation(branchId);
-    if (period) return period;
-
-    const latest = await this.getLatestPeriodForScope(branchId);
-    const closed = latest && latest.status === 'closed';
-    const err = new ValidationError(
-      closed
-        ? 'لا يمكن فتح وردية لأن القيد المحاسبي مغلق.'
-        : 'لا يمكن فتح وردية، لا يوجد قيد محاسبي مفتوح.'
-    );
-    // Distinct, spec-aligned codes the frontend maps to Arabic.
-    err.code = closed ? 'ACCOUNTING_PERIOD_CLOSED' : 'NO_OPEN_ACCOUNTING_PERIOD';
-    err.statusCode = 422;
-    throw err;
-  }
-
-  /** Any OPEN shift for the user regardless of period — used to detect a legacy
-   *  shift that predates the period system (accounting_period_id IS NULL). */
-  async getAnyOpenShiftForUser(userId) {
-    if (!userId) return null;
-    const db = await getDb();
-    const [row] = await db
-      .select({ id: cashSessions.id, accountingPeriodId: cashSessions.accountingPeriodId })
-      .from(cashSessions)
-      .where(and(eq(cashSessions.userId, userId), eq(cashSessions.status, 'open')))
-      .limit(1);
-    return row || null;
-  }
-
-  /**
-   * The user's OPEN shift (cash session) bound to the given open period, or
-   * null. A shift can only exist inside an open period (open() requires it and
-   * close() auto-closes shifts), so a matching open shift always belongs to the
-   * current open period.
-   */
-  async getOpenShiftForUser(userId, periodId) {
-    if (!userId || !periodId) return null;
-    const db = await getDb();
-    const [row] = await db
-      .select({ id: cashSessions.id, accountingPeriodId: cashSessions.accountingPeriodId })
-      .from(cashSessions)
-      .where(
-        and(
-          eq(cashSessions.userId, userId),
-          eq(cashSessions.status, 'open'),
-          eq(cashSessions.accountingPeriodId, periodId)
-        )
-      )
-      .limit(1);
-    return row || null;
-  }
-
-  /**
-   * Shifts (cash sessions) were removed from the system. These two methods are
-   * kept as no-ops so the historical call sites keep working without enforcing
-   * any shift requirement. Financial writes now bind to the current user and
-   * the open accounting period only.
-   */
-  async requireOpenShift() {
-    return null; // no shift system — never required
-  }
-
-  async assertShiftWritable() {
-    return; // no shift system — nothing to lock
   }
 
   /**
@@ -419,19 +333,6 @@ export class AccountingPeriodService {
       [periodId]
     );
 
-    // Shift summary — every cash session linked to the period.
-    const shiftRows = await q(
-      `SELECT cs.id, cs.user_id, u.full_name AS cashier_name, cs.status, cs.currency,
-              cs.opening_cash, cs.closing_cash, cs.expected_cash, cs.variance,
-              cs.opened_at, cs.closed_at
-       FROM accounting_period_shifts aps
-       JOIN cash_sessions cs ON aps.shift_id = cs.id
-       LEFT JOIN users u ON cs.user_id = u.id
-       WHERE aps.accounting_period_id = $1
-       ORDER BY cs.id`,
-      [periodId]
-    );
-
     // ── Assemble per currency ────────────────────────────────────────────────
     const byCur = {};
     const ensure = (cur) => (byCur[cur] ??= {
@@ -510,93 +411,13 @@ export class AccountingPeriodService {
         count: Number(r.count || 0),
         quantity: toNum(r.qty),
       })),
-      shiftSummary: shiftRows.map((r) => ({
-        shiftId: r.id,
-        userId: r.user_id,
-        cashierName: r.cashier_name || null,
-        status: r.status,
-        currency: r.currency || 'USD',
-        openingBalance: toNum(r.opening_cash),
-        closingBalance: r.closing_cash === null ? null : toNum(r.closing_cash),
-        expectedCash: r.expected_cash === null ? null : toNum(r.expected_cash),
-        variance: r.variance === null ? null : toNum(r.variance),
-        openedAt: r.opened_at,
-        closedAt: r.closed_at,
-      })),
     };
   }
 
   /**
-   * Per-shift closing totals frozen onto the cash session when its period (or
-   * the shift itself) closes: sales / returns / expenses / payments and the
-   * expected cash in the drawer. `client` is a pg client or the pool.
-   */
-  async computeShiftClosingTotals(client, shiftId) {
-    const q = (text, params) => client.query(text, params).then((r) => r.rows);
-
-    const [salesAgg] = await q(
-      `SELECT COALESCE(SUM(total::numeric),0) AS sales_total, COUNT(*) AS sales_count
-       FROM sales WHERE cash_session_id = $1 AND status IN ${ACTIVE_SALE_STATUSES}`,
-      [shiftId]
-    );
-    const [returnsAgg] = await q(
-      `SELECT COALESCE(SUM(returned_value::numeric),0) AS returns_total,
-              COALESCE(SUM(refund_amount::numeric),0)  AS refunds_total,
-              COUNT(*) AS returns_count
-       FROM sale_returns WHERE cash_session_id = $1`,
-      [shiftId]
-    );
-    const [expensesAgg] = await q(
-      `SELECT COALESCE(SUM(amount::numeric),0) AS expenses_total, COUNT(*) AS expenses_count
-       FROM expenses WHERE cash_session_id = $1`,
-      [shiftId]
-    );
-    const [paymentsAgg] = await q(
-      `SELECT COALESCE(SUM(amount::numeric),0) AS payments_total,
-              COALESCE(SUM(CASE WHEN payment_method = 'cash' THEN amount::numeric ELSE 0 END),0) AS cash_in
-       FROM payments WHERE cash_session_id = $1`,
-      [shiftId]
-    );
-    const [shiftRow] = await q(
-      `SELECT opening_cash, closing_cash FROM cash_sessions WHERE id = $1`,
-      [shiftId]
-    );
-
-    const openingBalance = toNum(shiftRow?.opening_cash);
-    const cashIn = toNum(paymentsAgg?.cash_in);
-    // Cash refunds reduce the drawer; debt/credit refunds do not.
-    const [cashRefundAgg] = await q(
-      `SELECT COALESCE(SUM(refund_amount::numeric),0) AS cash_out
-       FROM sale_returns WHERE cash_session_id = $1 AND refund_method = 'cash'`,
-      [shiftId]
-    );
-    const cashOut = toNum(cashRefundAgg?.cash_out);
-    const expectedCash = openingBalance + cashIn - cashOut;
-
-    return {
-      generatedAt: new Date().toISOString(),
-      salesTotal: toNum(salesAgg?.sales_total),
-      salesCount: Number(salesAgg?.sales_count || 0),
-      returnsTotal: toNum(returnsAgg?.returns_total),
-      refundsTotal: toNum(returnsAgg?.refunds_total),
-      returnsCount: Number(returnsAgg?.returns_count || 0),
-      expensesTotal: toNum(expensesAgg?.expenses_total),
-      expensesCount: Number(expensesAgg?.expenses_count || 0),
-      paymentsTotal: toNum(paymentsAgg?.payments_total),
-      cashIn,
-      cashOut,
-      openingBalance,
-      closingBalance: shiftRow?.closing_cash === null || shiftRow?.closing_cash === undefined
-        ? null
-        : toNum(shiftRow.closing_cash),
-      expectedCash,
-    };
-  }
-
-  /**
-   * Close a period: auto-close its open shifts, compute + freeze the snapshot,
-   * and flip status to closed — all inside one transaction with a row lock so
-   * two concurrent closes can't both win.
+   * Close a period: compute + freeze the snapshot and flip status to closed —
+   * all inside one transaction with a row lock so two concurrent closes can't
+   * both win.
    */
   async close(id, user, { notes } = {}) {
     const pool = await getPool();
@@ -614,36 +435,7 @@ export class AccountingPeriodService {
         throw new ValidationError('القيد المحاسبي مغلق مسبقاً');
       }
 
-      // Auto-close attached open shifts (cash sessions).
-      const { rows: openShifts } = await client.query(
-        `SELECT cs.id, cs.opening_cash
-         FROM accounting_period_shifts aps
-         JOIN cash_sessions cs ON aps.shift_id = cs.id
-         WHERE aps.accounting_period_id = $1 AND cs.status = 'open'`,
-        [id]
-      );
-      let shiftsClosed = 0;
-      for (const shift of openShifts) {
-        // Freeze the full per-shift closing totals (sales/returns/expenses/
-        // payments + expected cash). The cashier never counted the drawer on an
-        // auto-close, so closing balance == expected and variance is zero.
-        const shiftTotals = await this.computeShiftClosingTotals(client, shift.id);
-        const expected = shiftTotals.expectedCash;
-        shiftTotals.closingBalance = expected;
-        shiftTotals.variance = 0;
-        shiftTotals.autoClosed = true;
-        await client.query(
-          `UPDATE cash_sessions
-           SET status='closed', closed_at=now(), expected_cash=$2, closing_cash=$2,
-               variance='0', totals_json=$3::jsonb
-           WHERE id=$1 AND status='open'`,
-          [shift.id, String(expected), JSON.stringify(shiftTotals)]
-        );
-        shiftsClosed += 1;
-      }
-
       const snapshot = await this.computeSnapshot(client, id, { generatedByUserId: user?.id || null });
-      snapshot.shiftsClosed = shiftsClosed;
 
       // Freeze the snapshot into its own immutable row, then point the period at
       // it and mirror the payload into totals_json for the period-detail UI.
@@ -752,22 +544,6 @@ export class AccountingPeriodService {
       ? await db.select({ name: branches.name }).from(branches).where(eq(branches.id, row.branchId)).limit(1)
       : [{ name: null }];
 
-    const shifts = await db
-      .select({
-        id: cashSessions.id,
-        userId: cashSessions.userId,
-        cashierName: users.fullName,
-        status: cashSessions.status,
-        openingCash: cashSessions.openingCash,
-        closingCash: cashSessions.closingCash,
-        openedAt: cashSessions.openedAt,
-        closedAt: cashSessions.closedAt,
-      })
-      .from(accountingPeriodShifts)
-      .innerJoin(cashSessions, eq(accountingPeriodShifts.shiftId, cashSessions.id))
-      .leftJoin(users, eq(cashSessions.userId, users.id))
-      .where(eq(accountingPeriodShifts.accountingPeriodId, row.id));
-
     // Closed → frozen snapshot. Open → live preview computed on the fly.
     let totals = row.totalsJson;
     if (row.status === 'open') {
@@ -778,21 +554,8 @@ export class AccountingPeriodService {
     return {
       ...row,
       branchName: branch?.name || null,
-      shifts,
-      shiftCount: shifts.length,
-      openShiftCount: shifts.filter((s) => s.status === 'open').length,
       totals,
     };
-  }
-
-  /** Link a shift (cash session) to a period. Idempotent via unique(shift_id). */
-  async linkShift(periodId, shiftId, executor = null) {
-    if (!periodId || !shiftId) return;
-    const db = executor || (await getDb());
-    await db
-      .insert(accountingPeriodShifts)
-      .values({ accountingPeriodId: periodId, shiftId })
-      .onConflictDoNothing({ target: accountingPeriodShifts.shiftId });
   }
 }
 

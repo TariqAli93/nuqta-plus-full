@@ -55,8 +55,8 @@ function effectiveBranch(actingUser, requestedBranchId) {
  *   - a holder of a financial-reports permission (profit / financial / the
  *     explicit "all users" grant) → yes;
  *   - everyone else → no (restricted to their own rows).
- * Replaces the old shift (cash-session) scope: reports are now scoped by the
- * user who performed the operation (`created_by`), enforced in the BACKEND.
+ * Reports are scoped by the user who performed the operation (`created_by`),
+ * enforced in the BACKEND.
  */
 function canViewAllUsers(actingUser) {
   if (!actingUser) return false;
@@ -550,7 +550,7 @@ class PosReportsService {
       `SELECT COALESCE(SUM(sr.refund_amount),0) refunds FROM sale_returns sr WHERE ${rWhere.join(' AND ')}`, ra
     )).rows;
 
-    // No shift opening float anymore (cash sessions removed); start from zero.
+    // No opening float; start from zero.
     const opening = 0;
     const net = num(receipts) - num(expensesOut) - num(refunds);
 

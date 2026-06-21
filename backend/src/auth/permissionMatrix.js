@@ -197,6 +197,15 @@ const PERMISSION_MATRIX = {
   'expenses:update': MANAGER,
   'expenses:delete': BRANCH_MANAGER,
 
+  // ── Recurring / fixed expenses (المصاريف الثابتة) ─────────────────────────
+  // Same scope as ordinary expenses: managers maintain templates, branch
+  // managers and above may delete. Generated rows are plain expenses.
+  'recurring_expenses:create': MANAGER,
+  'recurring_expenses:read': MANAGER,
+  'recurring_expenses:update': MANAGER,
+  'recurring_expenses:delete': BRANCH_MANAGER,
+  'view:recurring_expenses': MANAGER,
+
   // ── Reports ──────────────────────────────────────────────────────────────
   // Profit-sensitive aggregates require manager-level role.
   'reports:read_profit': MANAGER,

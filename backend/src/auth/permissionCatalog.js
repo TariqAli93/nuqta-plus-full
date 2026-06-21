@@ -152,6 +152,13 @@ export const PERMISSION_CATALOG = Object.freeze({
   'expenses:delete': { ar: 'حذف مصروف', group: G.TREASURY },
   'view:expenses': { ar: 'الوصول إلى صفحة المصاريف', group: G.TREASURY },
 
+  // ── Recurring / fixed expenses (المصاريف الثابتة المتكررة) ──
+  'recurring_expenses:create': { ar: 'إضافة مصروف ثابت', group: G.TREASURY },
+  'recurring_expenses:read': { ar: 'عرض المصاريف الثابتة', group: G.TREASURY },
+  'recurring_expenses:update': { ar: 'تعديل مصروف ثابت', group: G.TREASURY },
+  'recurring_expenses:delete': { ar: 'حذف مصروف ثابت', group: G.TREASURY },
+  'view:recurring_expenses': { ar: 'الوصول إلى صفحة المصاريف الثابتة', group: G.TREASURY },
+
   // ── Reports ──
   'reports:read_profit': { ar: 'عرض تقارير الأرباح', group: G.REPORTS },
   'reports:read_financial': { ar: 'عرض التقارير المالية', group: G.REPORTS },

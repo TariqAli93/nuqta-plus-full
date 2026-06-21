@@ -35,7 +35,9 @@
           </v-chip>
         </template>
         <template #[`item.openedAt`]="{ item }">{{ fmtDate(item.openedAt) }}</template>
-        <template #[`item.closedAt`]="{ item }">{{ item.closedAt ? fmtDate(item.closedAt) : '—' }}</template>
+        <template #[`item.closedAt`]="{ item }">{{
+          item.closedAt ? fmtDate(item.closedAt) : '—'
+        }}</template>
         <template #[`item.netProfit`]="{ item }">
           <span v-if="firstCur(item)" :class="netClass(item)">
             {{ formatCurrency(firstTotals(item).netProfit, firstCur(item)) }}
@@ -43,7 +45,13 @@
           <span v-else class="text-medium-emphasis">—</span>
         </template>
         <template #[`item.actions`]="{ item }">
-          <v-btn size="small" variant="text" icon="mdi-eye" title="تفاصيل" @click.stop="showDetails(item)">
+          <v-btn
+            size="small"
+            variant="text"
+            icon="mdi-eye"
+            title="تفاصيل"
+            @click.stop="showDetails(item)"
+          >
             <v-icon>mdi-eye</v-icon>
           </v-btn>
           <v-btn
@@ -118,7 +126,13 @@
         <v-card-actions class="pa-3">
           <v-spacer />
           <v-btn variant="text" @click="openDialog = false">إلغاء</v-btn>
-          <v-btn data-testid="period-submit-open" color="primary" :loading="busy" @click="submitOpen">فتح القيد</v-btn>
+          <v-btn
+            data-testid="period-submit-open"
+            color="primary"
+            :loading="busy"
+            @click="submitOpen"
+            >فتح القيد</v-btn
+          >
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -156,7 +170,13 @@
         <v-card-actions class="pa-3">
           <v-spacer />
           <v-btn variant="text" @click="closeDialog = false">إلغاء</v-btn>
-          <v-btn data-testid="period-confirm-close" color="warning" :loading="busy" @click="submitClose">تأكيد الإغلاق</v-btn>
+          <v-btn
+            data-testid="period-confirm-close"
+            color="warning"
+            :loading="busy"
+            @click="submitClose"
+            >تأكيد الإغلاق</v-btn
+          >
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -183,7 +203,10 @@
           <div v-if="detail.totals" class="summary-grid">
             <template v-for="(t, cur) in detail.totals.byCurrency" :key="cur">
               <div class="summary-currency">{{ cur }}</div>
-              <SummaryRow label="إجمالي المبيعات قبل الخصم" :value="formatCurrency(t.grossSales, cur)" />
+              <SummaryRow
+                label="إجمالي المبيعات قبل الخصم"
+                :value="formatCurrency(t.grossSales, cur)"
+              />
               <SummaryRow label="الخصومات" :value="formatCurrency(t.discounts, cur)" />
               <SummaryRow label="صافي المبيعات" :value="formatCurrency(t.netSales, cur)" />
               <SummaryRow label="المحصّل نقداً" :value="formatCurrency(t.paidCash, cur)" />
@@ -201,23 +224,6 @@
             </template>
           </div>
           <p v-else class="text-medium-emphasis">لا توجد بيانات.</p>
-
-          <h4 class="section-title">الورديات ({{ detail.shiftCount || 0 }})</h4>
-          <v-table density="compact">
-            <thead>
-              <tr><th>#</th><th>الكاشير</th><th>الحالة</th><th>الافتتاح</th><th>الإغلاق</th></tr>
-            </thead>
-            <tbody>
-              <tr v-for="s in detail.shifts" :key="s.id">
-                <td>{{ s.id }}</td>
-                <td>{{ s.cashierName || '—' }}</td>
-                <td>{{ s.status === 'open' ? 'مفتوحة' : 'مغلقة' }}</td>
-                <td>{{ fmtDate(s.openedAt) }}</td>
-                <td>{{ s.closedAt ? fmtDate(s.closedAt) : '—' }}</td>
-              </tr>
-              <tr v-if="!detail.shifts?.length"><td colspan="5" class="text-medium-emphasis">لا توجد ورديات</td></tr>
-            </tbody>
-          </v-table>
         </v-card-text>
         <v-divider />
         <v-card-actions class="pa-3">
@@ -250,7 +256,11 @@ import { formatCurrency } from '@/utils/formatters';
 const SummaryRow = (props) =>
   h('div', { class: 'summary-row' }, [
     h('span', { class: 'summary-label' }, props.label),
-    h('span', { class: `summary-value ${props.emphasis ? 'text-' + props.emphasis : ''}` }, props.value),
+    h(
+      'span',
+      { class: `summary-value ${props.emphasis ? 'text-' + props.emphasis : ''}` },
+      props.value
+    ),
   ]);
 SummaryRow.props = ['label', 'value', 'emphasis'];
 
@@ -401,5 +411,7 @@ onMounted(async () => {
   color: rgba(var(--v-theme-on-surface), 0.7);
   font-size: 0.875rem;
 }
-:deep(tr) { cursor: pointer; }
+:deep(tr) {
+  cursor: pointer;
+}
 </style>

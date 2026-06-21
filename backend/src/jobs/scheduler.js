@@ -1,6 +1,7 @@
 import { runCreditScoringJob } from './creditScoringJob.js';
 import { runOverdueReminderJob } from '../services/notifications/overdueReminderJob.js';
 import { runDeliverySyncJob } from './deliverySyncJob.js';
+import { runRecurringExpensesJob } from './recurringExpensesJob.js';
 
 /**
  * Lightweight internal scheduler.
@@ -103,6 +104,25 @@ export function registerDefaultJobs(fastify) {
     });
     fastify.log.info(
       `[scheduler] deliverySync registered (intervalMs=${deliveryIntervalMs}, runOnStart=${deliveryRunOnStart})`
+    );
+  }
+
+  // Recurring (fixed) expenses — generate every due occurrence into the normal
+  // expenses table. Runs ONCE on startup by default (catch-up after the program
+  // was closed across due dates) plus a daily timer. The service is idempotent,
+  // so a start-up run that overlaps the timer never double-charges.
+  if (process.env.RECURRING_EXPENSES_DISABLED !== '1') {
+    const recurringIntervalMs = Number(process.env.RECURRING_EXPENSES_INTERVAL_MS) || DAY_MS;
+    // Default ON — catching up missed expenses on launch is a core requirement.
+    const recurringRunOnStart = process.env.RECURRING_EXPENSES_RUN_ON_START !== '0';
+    scheduleJob('recurringExpenses', {
+      intervalMs: recurringIntervalMs,
+      runOnStart: recurringRunOnStart,
+      run: runRecurringExpensesJob,
+      logger: fastify.log,
+    });
+    fastify.log.info(
+      `[scheduler] recurringExpenses registered (intervalMs=${recurringIntervalMs}, runOnStart=${recurringRunOnStart})`
     );
   }
 }

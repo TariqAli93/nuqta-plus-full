@@ -257,12 +257,10 @@ export class TreasuryService {
 
   /**
    * Resolve the cashbox a money operation should target:
-   * explicit → the user's open shift's cashbox → branch default (created on
-   * demand). Used by voucher minting and the shift-open flow.
+   * explicit → branch default (created on demand).
    */
-  async resolveEffectiveCashboxId({ cashboxId = null, cashSessionCashboxId = null, branchId = null } = {}) {
+  async resolveEffectiveCashboxId({ cashboxId = null, branchId = null } = {}) {
     if (cashboxId) return Number(cashboxId);
-    if (cashSessionCashboxId) return Number(cashSessionCashboxId);
     return ensureDefaultCashbox(null, branchId);
   }
 

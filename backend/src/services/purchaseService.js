@@ -617,7 +617,6 @@ export class PurchaseService {
           branchId: invoice.branchId,
           warehouseId: invoice.warehouseId,
           accountingPeriodId: invoice.accountingPeriodId || null,
-          cashSessionId: invoice.cashSessionId || null,
           returnedValue: String(returnedValue),
           refundAmount: String(refundAmount),
           debtReduction: String(debtReduction),

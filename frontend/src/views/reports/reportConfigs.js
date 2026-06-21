@@ -138,7 +138,7 @@ export const REPORT_CONFIGS = {
     accent: '#0891b2',
     permission: 'reports:read_financial',
     defaultRange: 'today',
-    filters: ['date', 'branch', 'cashSession'],
+    filters: ['date', 'branch'],
     summary: [
       { key: 'currentBalance', label: 'الرصيد الحالي', format: money, accent: '#0891b2', big: true },
       { key: 'receipts', label: 'المقبوضات', format: money, accent: '#16a34a' },
@@ -191,7 +191,7 @@ export const REPORT_CONFIGS = {
     accent: '#0d9488',
     permission: 'reports:read_financial',
     defaultRange: 'today',
-    filters: ['date', 'movementType', 'branch', 'cashSession'],
+    filters: ['date', 'movementType', 'branch'],
     summary: [
       { key: 'totalIn', label: 'إجمالي الداخل', format: money, accent: '#16a34a', big: true },
       { key: 'totalOut', label: 'إجمالي الخارج', format: money, accent: '#dc2626', big: true },

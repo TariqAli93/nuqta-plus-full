@@ -378,66 +378,10 @@ export const accountingPeriodReportSnapshots = pgTable(
   })
 );
 
-// Link table: which cash-session shifts belong to a period (a period has many
-// shifts). `shiftId` is unique so a shift can only live in one period.
-export const accountingPeriodShifts = pgTable(
-  'accounting_period_shifts',
-  {
-    id: serial('id').primaryKey(),
-    accountingPeriodId: integer('accounting_period_id')
-      .notNull()
-      .references(() => accountingPeriods.id, { onDelete: 'cascade' }),
-    shiftId: integer('shift_id')
-      .notNull()
-      .references(() => cashSessions.id, { onDelete: 'cascade' }),
-    createdAt: timestamp('created_at').defaultNow(),
-  },
-  (t) => ({
-    shiftIdx: uniqueIndex('accounting_period_shifts_shift_unique').on(t.shiftId),
-    periodIdx: index('accounting_period_shifts_period_idx').on(t.accountingPeriodId),
-  })
-);
-
-// ── Cash Sessions ─────────────────────────────────────────────────────────
-// Tracks per-cashier cash drawer accountability for POS shifts. A user can
-// have only one open session per branch at a time. Cash POS sales are blocked
-// unless an open session exists, and POS cash sales/payments are linked back
-// to the session via `cashSessionId` on the sales/payments tables. Closed
-// sessions are immutable (no edits to opening_cash, closing_cash, variance).
-export const cashSessions = pgTable(
-  'cash_sessions',
-  {
-    id: serial('id').primaryKey(),
-    userId: integer('user_id')
-      .notNull()
-      .references(() => users.id),
-    branchId: integer('branch_id').references(() => branches.id),
-    accountingPeriodId: integer('accounting_period_id').references(() => accountingPeriods.id),
-    // The cashbox this shift operates on (treasury module). Plain column —
-    // the FK lives in migration 0006; cashboxes is declared later in this file.
-    cashboxId: integer('cashbox_id'),
-    openingCash: numeric('opening_cash', { precision: 18, scale: 4 }).notNull().default('0'),
-    closingCash: numeric('closing_cash', { precision: 18, scale: 4 }),
-    expectedCash: numeric('expected_cash', { precision: 18, scale: 4 }),
-    variance: numeric('variance', { precision: 18, scale: 4 }),
-    currency: text('currency').notNull().default('USD'),
-    status: text('status').notNull().default('open'), // 'open' | 'closed'
-    notes: text('notes'),
-    // Frozen per-shift closing totals (sales/returns/expenses/payments/expected
-    // cash/opening+closing balance), captured when the shift closes.
-    totalsJson: jsonb('totals_json'),
-    openedAt: timestamp('opened_at').defaultNow(),
-    closedAt: timestamp('closed_at'),
-  },
-  (t) => ({
-    userIdx: index('cash_sessions_user_idx').on(t.userId),
-    branchIdx: index('cash_sessions_branch_idx').on(t.branchId),
-    statusIdx: index('cash_sessions_status_idx').on(t.status),
-    // Partial unique "one open session per user/branch" index is created in
-    // the SQL migration (0008_cash_sessions.sql) — Drizzle's schema DSL only
-    // describes the table here; the migration is the source of truth.
-  })
-);
+// NOTE: The cash-session / shift system was removed. Its physical tables
+// (`cash_sessions`, `accounting_period_shifts`) and the `cash_session_id`
+// columns on financial tables are left dormant in existing databases but are
+// no longer modelled here, written to, or read by any code.
 
 // ── Sales ─────────────────────────────────────────────────────────────────
 export const sales = pgTable('sales', {
@@ -446,7 +390,6 @@ export const sales = pgTable('sales', {
   customerId: integer('customer_id').references(() => customers.id),
   branchId: integer('branch_id').references(() => branches.id),
   warehouseId: integer('warehouse_id').references(() => warehouses.id),
-  cashSessionId: integer('cash_session_id').references(() => cashSessions.id),
   accountingPeriodId: integer('accounting_period_id').references(() => accountingPeriods.id),
   subtotal: numeric('subtotal', { precision: 18, scale: 4 }).notNull(),
   discount: numeric('discount', { precision: 18, scale: 4 }).default('0'),
@@ -587,7 +530,6 @@ export const payments = pgTable('payments', {
   paymentMethod: text('payment_method').notNull(),
   paymentReference: text('payment_reference'),
   paymentDate: timestamp('payment_date').defaultNow(),
-  cashSessionId: integer('cash_session_id').references(() => cashSessions.id),
   // Treasury attribution (module 0006): which cashbox/bank received the money
   // and the voucher minted for it. Plain columns — FKs live in the migration;
   // cashboxes/bank_accounts/vouchers are declared later in this file.
@@ -636,9 +578,6 @@ export const saleReturns = pgTable(
     branchId: integer('branch_id').references(() => branches.id),
     warehouseId: integer('warehouse_id').references(() => warehouses.id),
     accountingPeriodId: integer('accounting_period_id').references(() => accountingPeriods.id),
-    // The shift the original sale was recorded in — so the return is locked
-    // when that shift closes and is counted in the shift's closing totals.
-    cashSessionId: integer('cash_session_id').references(() => cashSessions.id, { onDelete: 'set null' }),
     // Total monetary value of the returned items (net of per-item discount)
     returnedValue: numeric('returned_value', { precision: 18, scale: 4 }).notNull(),
     // Cash actually refunded to the customer (<= sale.paidAmount).
@@ -958,9 +897,6 @@ export const expenses = pgTable(
     id: serial('id').primaryKey(),
     branchId: integer('branch_id').references(() => branches.id, { onDelete: 'set null' }),
     accountingPeriodId: integer('accounting_period_id').references(() => accountingPeriods.id),
-    // Shift the expense was recorded in — locks the expense when the shift or
-    // period closes (set null on shift hard-delete to preserve the expense).
-    cashSessionId: integer('cash_session_id').references(() => cashSessions.id, { onDelete: 'set null' }),
     category: text('category').notNull(),
     amount: numeric('amount', { precision: 18, scale: 4 }).notNull(),
     currency: text('currency').notNull().default('USD'),
@@ -973,6 +909,11 @@ export const expenses = pgTable(
     bankAccountId: integer('bank_account_id'),
     voucherId: integer('voucher_id'),
     paymentMethod: text('payment_method'),
+    // Recurring-expense linkage (المصاريف الثابتة): when this expense row was
+    // auto-generated by a recurring-expense template, this points back to it.
+    // NULL for ordinary manually-entered expenses. FK lives in the migration
+    // (recurring_expenses is declared after this table).
+    recurringExpenseId: integer('recurring_expense_id'),
     createdBy: integer('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at').defaultNow(),
     updatedAt: timestamp('updated_at').defaultNow(),
@@ -982,6 +923,60 @@ export const expenses = pgTable(
     categoryIdx: index('expenses_category_idx').on(t.category),
     expenseDateIdx: index('expenses_expense_date_idx').on(t.expenseDate),
     createdAtIdx: index('expenses_created_at_idx').on(t.createdAt),
+    // Idempotency guard for auto-generated rows: at most ONE generated expense
+    // per (template, due date). Manual rows keep recurring_expense_id NULL, and
+    // Postgres treats NULLs as distinct in a unique index, so unlimited manual
+    // expenses on the same date are still allowed.
+    recurringPeriodUq: uniqueIndex('expenses_recurring_period_uq').on(
+      t.recurringExpenseId,
+      t.expenseDate
+    ),
+  })
+);
+
+// ── Recurring / fixed expenses (المصاريف الثابتة المتكررة) ────────────────
+// Templates that auto-generate ordinary rows in the `expenses` table when their
+// due date arrives (handled by a scheduler job + a catch-up run on startup).
+// They DON'T compute money themselves — every generated row is a normal expense
+// so all existing reports, profit calculations and the GL pick them up unchanged.
+export const recurringExpenses = pgTable(
+  'recurring_expenses',
+  {
+    id: serial('id').primaryKey(),
+    branchId: integer('branch_id').references(() => branches.id, { onDelete: 'set null' }),
+    name: text('name').notNull(),
+    category: text('category').notNull(),
+    amount: numeric('amount', { precision: 18, scale: 4 }).notNull(),
+    currency: text('currency').notNull().default('USD'),
+    note: text('note'),
+    // 'daily' | 'weekly' | 'monthly' | 'yearly'
+    frequency: text('frequency').notNull(),
+    // Weekly recurrence: ISO-ish day of week 0=Sunday … 6=Saturday.
+    dayOfWeek: integer('day_of_week'),
+    // Monthly/yearly recurrence: day number of the month (1-31, clamped to the
+    // month's length when shorter).
+    dayOfMonth: integer('day_of_month'),
+    // Yearly recurrence: month of the year (1-12).
+    monthOfYear: integer('month_of_year'),
+    // First date the template is eligible to generate from.
+    startDate: date('start_date').notNull(),
+    // Active (فعال) vs paused (متوقف) — paused templates never generate.
+    isActive: boolean('is_active').notNull().default(true),
+    // Bookkeeping: last date an expense was generated for, and the next date one
+    // is due. Both are maintained by the generation engine.
+    lastRunDate: date('last_run_date'),
+    nextDueDate: date('next_due_date'),
+    // Optional treasury attribution propagated to every generated expense.
+    cashboxId: integer('cashbox_id'),
+    bankAccountId: integer('bank_account_id'),
+    createdBy: integer('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+  },
+  (t) => ({
+    branchIdx: index('recurring_expenses_branch_idx').on(t.branchId),
+    activeIdx: index('recurring_expenses_active_idx').on(t.isActive),
+    nextDueIdx: index('recurring_expenses_next_due_idx').on(t.nextDueDate),
   })
 );
 
@@ -1021,9 +1016,6 @@ export const purchaseInvoices = pgTable(
     supplierInvoiceNumber: text('supplier_invoice_number'),
     branchId: integer('branch_id').references(() => branches.id),
     warehouseId: integer('warehouse_id').references(() => warehouses.id),
-    cashSessionId: integer('cash_session_id').references(() => cashSessions.id, {
-      onDelete: 'set null',
-    }),
     accountingPeriodId: integer('accounting_period_id').references(() => accountingPeriods.id),
     subtotal: numeric('subtotal', { precision: 18, scale: 4 }).notNull(),
     discount: numeric('discount', { precision: 18, scale: 4 }).default('0'),
@@ -1108,9 +1100,6 @@ export const purchaseReturns = pgTable(
     branchId: integer('branch_id').references(() => branches.id),
     warehouseId: integer('warehouse_id').references(() => warehouses.id),
     accountingPeriodId: integer('accounting_period_id').references(() => accountingPeriods.id),
-    cashSessionId: integer('cash_session_id').references(() => cashSessions.id, {
-      onDelete: 'set null',
-    }),
     returnedValue: numeric('returned_value', { precision: 18, scale: 4 }).notNull(),
     refundAmount: numeric('refund_amount', { precision: 18, scale: 4 }).notNull().default('0'),
     debtReduction: numeric('debt_reduction', { precision: 18, scale: 4 }).notNull().default('0'),
@@ -1157,8 +1146,8 @@ export const purchaseReturnItems = pgTable(
 );
 
 // ── Cashboxes (الصناديق) ──────────────────────────────────────────────────
-// Persistent money containers, one or more per branch. Cash sessions (shifts)
-// run ON a cashbox; vouchers and treasury transfers move money in/out of it.
+// Persistent money containers, one or more per branch. Vouchers and treasury
+// transfers move money in/out of a cashbox.
 // Balance is computed per currency: opening_balances_json + active vouchers
 // (receipt +, payment −) + transfers. Pre-treasury payments have no cashbox
 // and never affect a balance.
@@ -1231,9 +1220,6 @@ export const vouchers = pgTable(
     voucherType: text('voucher_type').notNull(), // 'receipt' | 'payment'
     branchId: integer('branch_id').references(() => branches.id),
     accountingPeriodId: integer('accounting_period_id').references(() => accountingPeriods.id),
-    cashSessionId: integer('cash_session_id').references(() => cashSessions.id, {
-      onDelete: 'set null',
-    }),
     partyType: text('party_type'), // 'customer' | 'supplier' | 'other'
     customerId: integer('customer_id').references(() => customers.id),
     supplierId: integer('supplier_id').references(() => suppliers.id),
@@ -1397,7 +1383,7 @@ export const journalEntries = pgTable(
     branchId: integer('branch_id').references(() => branches.id),
     accountingPeriodId: integer('accounting_period_id').references(() => accountingPeriods.id),
     // 'manual' | 'sale' | 'sale_return' | 'payment' | 'expense' | 'voucher'
-    // | 'purchase' | 'purchase_return' | 'treasury_transfer' | 'shift_variance'
+    // | 'purchase' | 'purchase_return' | 'treasury_transfer'
     // | 'opening_balance' | 'reversal'
     sourceType: text('source_type').notNull(),
     sourceId: integer('source_id'),

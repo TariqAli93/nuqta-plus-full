@@ -14,7 +14,6 @@
  *   - Payments on credit sales (full + partial) → customer debts
  *   - Stock movements: opening, purchase, sale, transfers, adjustments (جرد)
  *   - Operational expenses (إيجار/رواتب/كهرباء/...) over 12 months
- *   - Closed cash sessions (ورديات) per branch per month
  *   - NO installments, NO sale returns, NO purchase returns (per spec)
  *
  * Everything is internally consistent: sale/purchase totals match their lines,
@@ -336,8 +335,8 @@ async function main() {
         branches, warehouses,
         vouchers, treasury_transfers, cashboxes, bank_accounts,
         journal_entry_lines, journal_entries, gl_posting_failures,
-        accounting_period_shifts, accounting_period_report_snapshots, accounting_periods,
-        cash_sessions, invoice_sequences, document_sequences,
+        accounting_period_report_snapshots, accounting_periods,
+        invoice_sequences, document_sequences,
         credit_events, credit_snapshots, credit_scores,
         notifications, notification_logs
         RESTART IDENTITY CASCADE`);
@@ -646,30 +645,6 @@ async function main() {
     const customerIds = custRes.map((r) => r.id);
     const customerType = Object.fromEntries(custRes.map((r) => [r.id, r.customer_type]));
 
-    // ── Cash sessions (one closed shift per branch per month) ────────────────
-    const sessionMap = {}; // `${branchId}:${ym}` -> { id, cashIn }
-    const sessionRows = [];
-    const sessionKeys = [];
-    for (const bid of branchIds) {
-      for (let mo = 0; mo <= CFG.months; mo++) {
-        const d = new Date(startOfWindow.getTime()); d.setMonth(d.getMonth() + mo);
-        if (d > NOW) continue;
-        const opened = new Date(d.getFullYear(), d.getMonth(), 1, 9, 0, 0);
-        const closed = new Date(d.getFullYear(), d.getMonth() + 1, 0, 22, 0, 0);
-        const openCash = round250(ri(100, 500) * 1000);
-        sessionKeys.push({ key: `${bid}:${ym(d)}`, openCash });
-        sessionRows.push([cashierByBranch[bid], bid, D(openCash), null, null, null, IQD, 'closed',
-          'وردية شهرية', (closed > NOW ? null : opened), (closed > NOW ? null : opened), closed > NOW ? null : closed]);
-      }
-    }
-    // columns: user_id, branch_id, opening_cash, closing_cash, expected_cash, variance, currency, status, notes, opened_at(*), _, closed_at
-    // NOTE: build with explicit columns below
-    const sessionInsert = sessionRows.map((r) => [r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[11]]);
-    const sessRes = await bulkInsert(client, 'cash_sessions',
-      ['user_id', 'branch_id', 'opening_cash', 'closing_cash', 'expected_cash', 'variance', 'currency', 'status', 'notes', 'opened_at', 'closed_at'],
-      sessionInsert, { returning: 'id' });
-    sessRes.forEach((r, i) => { sessionMap[sessionKeys[i].key] = { id: r.id, openCash: sessionKeys[i].openCash, cashIn: 0 }; });
-
     // ── Sales over 12 months ─────────────────────────────────────────────────
     log(`generating ${CFG.sales} sales…`);
     const priceFor = (m, type) => type === 'agent' ? m.agent : type === 'wholesale' ? m.wholesale : m.sell;
@@ -730,19 +705,16 @@ async function main() {
       else { const r = rnd(); paid = r < 0.35 ? 0 : r < 0.8 ? round250(total * (0.2 + rnd() * 0.5)) : total; }
       const remaining = Math.max(0, total - paid);
       const payType = remaining > 0 ? 'credit' : 'cash';
-      const sess = sessionMap[`${s.bid}:${ym(s.date)}`];
-      const sessId = (payType === 'cash' && sess) ? sess.id : null;
       const createdBy = cashierByBranch[s.bid];
-      if (sessId && paid > 0) sess.cashIn += paid;
       // Column order MUST match the insert below (no remap — avoids index bugs).
       saleRows.push([
-        invoice, s.customerId, s.bid, s.wid, sessId, D(subtotal), D(discount), '0', D(total), IQD, '1',
+        invoice, s.customerId, s.bid, s.wid, D(subtotal), D(discount), '0', D(total), IQD, '1',
         payType, 'POS', 'CASH', s.tier, D(paid), D(remaining), 'completed', false, s.date, s.date, createdBy,
       ]);
-      salePlanForItems.push({ items, date: s.date, customerId: s.customerId, paid, remaining, total, sessId, tier: s.tier, wid: s.wid, createdBy });
+      salePlanForItems.push({ items, date: s.date, customerId: s.customerId, paid, remaining, total, tier: s.tier, wid: s.wid, createdBy });
     }
     const saleRes = await bulkInsert(client, 'sales',
-      ['invoice_number', 'customer_id', 'branch_id', 'warehouse_id', 'cash_session_id', 'subtotal', 'discount', 'tax',
+      ['invoice_number', 'customer_id', 'branch_id', 'warehouse_id', 'subtotal', 'discount', 'tax',
         'total', 'currency', 'exchange_rate', 'payment_type', 'sale_source', 'sale_type', 'price_type', 'paid_amount',
         'remaining_amount', 'status', 'is_opening_balance', 'issued_at', 'created_at', 'created_by'],
       saleRows, { returning: 'id' });
@@ -769,7 +741,7 @@ async function main() {
           left -= amt;
           const payDate = new Date(sp.date.getTime() + (p === 0 ? 0 : ri(3, 40) * 86400000));
           paymentRows.push([
-            saleId, sp.customerId, D(amt), IQD, '1', 'cash', null, payDate > NOW ? sp.date : payDate, sp.sessId, p === 0 ? 'دفعة عند البيع' : 'دفعة لاحقة', sp.date, sp.createdBy,
+            saleId, sp.customerId, D(amt), IQD, '1', 'cash', null, payDate > NOW ? sp.date : payDate, p === 0 ? 'دفعة عند البيع' : 'دفعة لاحقة', sp.date, sp.createdBy,
           ]);
         }
       }
@@ -784,7 +756,7 @@ async function main() {
       saleItemRows);
     await bulkInsert(client, 'payments',
       ['sale_id', 'customer_id', 'amount', 'currency', 'exchange_rate', 'payment_method', 'payment_reference',
-        'payment_date', 'cash_session_id', 'notes', 'created_at', 'created_by'],
+        'payment_date', 'notes', 'created_at', 'created_by'],
       paymentRows);
 
     // ── Warehouse transfers (approved) ───────────────────────────────────────
@@ -916,7 +888,7 @@ async function main() {
       expenseRows);
 
     // ── Update aggregate caches ──────────────────────────────────────────────
-    log('updating caches (product stock, customer/supplier balances, shift totals)…');
+    log('updating caches (product stock, customer/supplier balances)…');
     // products.stock
     {
       const entries = [...productTotal.entries()];
@@ -934,14 +906,6 @@ async function main() {
     // suppliers
     for (const [sid, agg] of supplierAgg) {
       await client.query('UPDATE suppliers SET total_purchases = $1, total_debt = $2 WHERE id = $3', [D(agg.purchases), D(agg.debt), sid]);
-    }
-    // cash sessions: closing = opening + cashIn, expected = same, small variance
-    for (const key of Object.keys(sessionMap)) {
-      const s = sessionMap[key];
-      const expected = s.openCash + s.cashIn;
-      const variance = chance(0.3) ? round250((rnd() - 0.5) * 10000) : 0;
-      await client.query('UPDATE cash_sessions SET expected_cash = $1, closing_cash = $2, variance = $3 WHERE id = $4',
-        [D(expected), D(expected + variance), D(variance), s.id]);
     }
     // invoice_sequences so the app continues numbering cleanly
     for (const key of Object.keys(seqByBranchYear)) {
@@ -966,8 +930,7 @@ async function main() {
       (SELECT count(*) FROM payments) payments,
       (SELECT count(*) FROM purchase_invoices) purchases,
       (SELECT count(*) FROM stock_movements) movements,
-      (SELECT count(*) FROM expenses) expenses,
-      (SELECT count(*) FROM cash_sessions) shifts`);
+      (SELECT count(*) FROM expenses) expenses`);
     const fin = await q(`SELECT
       (SELECT COALESCE(SUM(total),0) FROM sales WHERE status='completed') revenue,
       (SELECT COALESCE(SUM(remaining_amount),0) FROM sales) customer_debt,

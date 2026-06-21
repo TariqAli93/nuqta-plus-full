@@ -56,7 +56,7 @@ export class ExpensesService {
    *  - Other users always write to their assigned branch — payload branchId
    *    is ignored to prevent spoofing.
    */
-  async create(input, user) {
+  async create(input, user, opts = {}) {
     const amount = Number(input.amount);
     if (!Number.isFinite(amount) || amount <= 0) {
       throw new ValidationError('Expense amount must be greater than zero');
@@ -77,16 +77,13 @@ export class ExpensesService {
         ? input.expenseDate
         : new Date().toISOString().slice(0, 10);
 
-    // Attach to the open accounting period + the user's open shift (both
-    // required when the feature is on; no-ops when off).
+    // Attach to the open accounting period (required when the feature is on;
+    // no-op when off).
     const accountingPeriodId = await accountingPeriodService.resolvePeriodIdForWrite(
       user,
       branchId,
       { require: true }
     );
-    const cashSessionId = await accountingPeriodService.requireOpenShift(user, accountingPeriodId, {
-      message: 'لا يمكن تسجيل المصروف — لا توجد وردية مفتوحة ضمن قيد محاسبي مفتوح',
-    });
 
     return await withTransaction(async (tx) => {
       const [row] = await tx
@@ -94,13 +91,15 @@ export class ExpensesService {
         .values({
           branchId,
           accountingPeriodId,
-          cashSessionId,
           category: String(input.category).trim(),
           amount: String(amount),
           currency: input.currency || 'USD',
           note: input.note || null,
           expenseDate,
           paymentMethod: input.bankAccountId ? 'bank' : 'cash',
+          // Link back to the recurring-expense template when this row was
+          // auto-generated (null for ordinary manual expenses).
+          recurringExpenseId: opts.recurringExpenseId ?? null,
           createdBy: user?.id || null,
         })
         .returning();
@@ -216,7 +215,6 @@ export class ExpensesService {
   async update(id, input, actingUser = null) {
     const existing = await this.getById(id, actingUser); // scope check + existence
     await accountingPeriodService.assertWritable(existing.accountingPeriodId || null);
-    await accountingPeriodService.assertShiftWritable(existing.cashSessionId || null);
     const patch = {};
     if (input.category !== undefined) patch.category = String(input.category).trim();
     if (input.amount !== undefined) {
@@ -276,7 +274,6 @@ export class ExpensesService {
   async delete(id, actingUser = null) {
     const existing = await this.getById(id, actingUser); // scope check
     await accountingPeriodService.assertWritable(existing.accountingPeriodId || null);
-    await accountingPeriodService.assertShiftWritable(existing.cashSessionId || null);
     await withTransaction(async (tx) => {
       // Cancel the minted voucher BEFORE the expense row disappears so the
       // cashbox balance reverses (the FK is SET NULL, not CASCADE).

@@ -35,7 +35,6 @@ export const BACKUP_GROUPS = Object.freeze({
   productStockEntries: { label: 'دفعات المخزون', tables: ['product_stock_entries'] },
   stockMovements: { label: 'حركات المخزون', tables: ['stock_movements'] },
   warehouseTransfers: { label: 'تحويلات المخازن', tables: ['warehouse_transfers'] },
-  cashSessions: { label: 'جلسات الصندوق', tables: ['cash_sessions'] },
   sales: {
     label: 'المبيعات',
     tables: [
@@ -68,7 +67,6 @@ export const RESTORE_ORDER = Object.freeze([
   'customers',
   'product_stock',
   'product_stock_entries',
-  'cash_sessions',
   'sales',
   'sale_items',
   'sale_item_stock_entries',

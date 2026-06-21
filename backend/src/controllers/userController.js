@@ -10,7 +10,7 @@ const ROLE_CODE = z.string().trim().min(1, 'الدور مطلوب');
 
 const createUserSchema = z.object({
   username: z.string().min(3),
-  password: z.string().min(8),
+  password: z.string().min(4),
   fullName: z.string().min(2),
   phone: z.string().optional(),
   role: ROLE_CODE.default('cashier'),

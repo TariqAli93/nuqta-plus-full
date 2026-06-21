@@ -75,8 +75,8 @@ function applyBranchScope(filters, actingUser) {
  * May the acting user see EVERY user's operations on the dashboard / financial
  * reports? Global admins and holders of a financial-reports permission can;
  * everyone else is scoped to the operations they personally performed. Mirrors
- * `posReportsService.canViewAllUsers` — the cash-session (shift) scope was
- * replaced by per-user (`created_by`) scoping, enforced in the BACKEND.
+ * `posReportsService.canViewAllUsers` — scoping is per-user (`created_by`),
+ * enforced in the BACKEND.
  */
 function canViewAllUsers(actingUser) {
   if (!actingUser) return false;

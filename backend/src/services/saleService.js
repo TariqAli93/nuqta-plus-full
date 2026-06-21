@@ -44,7 +44,6 @@ import { netAfterReturn, returnedItemCost } from './reportMath.js';
 import accountingPeriodService from './accountingPeriodService.js';
 import voucherService from './voucherService.js';
 import glPostingService from './gl/glPostingService.js';
-import { PAYMENT_METHOD_CASH } from '../constants/sales.js';
 
 // Threshold below which a customer is considered "high risk" for an alert
 const HIGH_RISK_SCORE_THRESHOLD = 50;
@@ -574,13 +573,8 @@ export class SaleService {
       { require: true }
     );
 
-    // ── No shift system ───────────────────────────────────────────────────────
-    // Shifts (cash sessions) were removed: a sale binds to the CURRENT USER
-    // (createdBy) and the open accounting period (enforced above via
-    // resolvePeriodIdForWrite). cash_session_id stays null on new rows; the
-    // column is retained only for historical records.
-    const cashSessionId = null;
-
+    // A sale binds to the CURRENT USER (createdBy) and the open accounting
+    // period (enforced above via resolvePeriodIdForWrite).
     const newSaleId = await withTransaction(async (tx) => {
       // Allocate inside the transaction so a rollback releases the number
       // back (the counter increment rolls back too) and concurrent inserts
@@ -595,7 +589,6 @@ export class SaleService {
           customerId,
           branchId,
           warehouseId,
-          cashSessionId,
           accountingPeriodId,
           subtotal: String(totals.subtotal),
           discount: String(totals.discount),
@@ -700,9 +693,6 @@ export class SaleService {
           exchangeRate: String(exchangeRate),
           paymentMethod: method,
           paymentReference: saleData.paymentReference || null,
-          // Tie cash payments to the open shift so close-of-shift can compute
-          // expected cash. Card payments stay unlinked — they don't touch the drawer.
-          cashSessionId: method === PAYMENT_METHOD_CASH ? cashSessionId : null,
           createdBy: userId,
           notes: saleData.paymentNotes || null,
         }).returning({ id: payments.id });
@@ -716,7 +706,6 @@ export class SaleService {
             currency,
             exchangeRate,
             paymentMethod: method,
-            cashSessionId: method === PAYMENT_METHOD_CASH ? cashSessionId : null,
           },
           sale: { id: newSale.id, branchId, customerId, invoiceNumber },
           user: actingUser || { id: userId },
@@ -1110,12 +1099,11 @@ export class SaleService {
   async assertSaleWritable(saleId) {
     const db = await getDb();
     const [row] = await db
-      .select({ accountingPeriodId: sales.accountingPeriodId, cashSessionId: sales.cashSessionId })
+      .select({ accountingPeriodId: sales.accountingPeriodId })
       .from(sales)
       .where(eq(sales.id, saleId))
       .limit(1);
     await accountingPeriodService.assertAccountingPeriodWritable(row?.accountingPeriodId || null);
-    await accountingPeriodService.assertShiftWritable(row?.cashSessionId || null);
   }
 
   async addPayment(saleId, paymentData, userId) {
@@ -1168,7 +1156,6 @@ export class SaleService {
           currency: paymentData.currency || sale.currency,
           exchangeRate: paymentData.exchangeRate || sale.exchangeRate,
           paymentMethod: paymentData.paymentMethod || 'cash',
-          cashSessionId: null,
         },
         sale: {
           id: sale.id,
@@ -1283,19 +1270,16 @@ export class SaleService {
       throw new ValidationError('Sale is already cancelled');
     }
 
-    // Cancelling mutates the sale — blocked once its accounting period OR its
-    // shift is closed.
+    // Cancelling mutates the sale — blocked once its accounting period is closed.
     const db = await getDb();
     const [salePeriodRow] = await db
       .select({
         accountingPeriodId: sales.accountingPeriodId,
-        cashSessionId: sales.cashSessionId,
       })
       .from(sales)
       .where(eq(sales.id, id))
       .limit(1);
     await accountingPeriodService.assertWritable(salePeriodRow?.accountingPeriodId || null);
-    await accountingPeriodService.assertShiftWritable(salePeriodRow?.cashSessionId || null);
 
     const result = await withTransaction(async (tx) => {
       // Per-warehouse stock restore via inventoryService (records sale_cancel
@@ -1820,19 +1804,17 @@ export class SaleService {
     const sale = await this.getById(saleId);
 
     // A return mutates the original sale and must be recorded in the same
-    // accounting period — blocked once that period OR its shift is closed.
+    // accounting period — blocked once that period is closed.
     const db = await getDb();
     const [salePeriodRow] = await db
       .select({
         accountingPeriodId: sales.accountingPeriodId,
-        cashSessionId: sales.cashSessionId,
       })
       .from(sales)
       .where(eq(sales.id, sale.id))
       .limit(1);
     const salePeriodId = salePeriodRow?.accountingPeriodId || null;
     await accountingPeriodService.assertWritable(salePeriodId);
-    await accountingPeriodService.assertShiftWritable(salePeriodRow?.cashSessionId || null);
 
     if (sale.status === 'cancelled') {
       throw new ValidationError('Cannot return items from a cancelled sale');
@@ -2089,9 +2071,6 @@ export class SaleService {
           branchId: sale.branchId || null,
           warehouseId: sale.warehouseId || null,
           accountingPeriodId: salePeriodId,
-          // Bind the return to the same shift as the originating sale so it is
-          // counted in that shift's closing totals and locked when it closes.
-          cashSessionId: salePeriodRow?.cashSessionId || null,
           returnedValue: String(returnedValue),
           refundAmount: String(refundAmount),
           debtReduction: String(debtReduction),
@@ -2479,9 +2458,6 @@ export class SaleService {
       { require: true }
     );
 
-    // Shifts removed — bind to the current user + open accounting period only.
-    const cashSessionId = null;
-
     // Pricing tier (تسعير الوكلاء): explicit completion payload → the tier the
     // draft was saved with → 'retail'. Stamped for reporting only.
     const priceType = ['retail', 'wholesale', 'agent'].includes(saleData.priceType)
@@ -2508,7 +2484,6 @@ export class SaleService {
           customerId: saleData.customerId || draft.customerId,
           branchId,
           warehouseId,
-          cashSessionId,
           accountingPeriodId,
           subtotal: String(totals.subtotal),
           discount: String(totals.discount),
@@ -2605,7 +2580,6 @@ export class SaleService {
           exchangeRate: String(exchangeRate),
           paymentMethod: method,
           paymentReference: saleData.paymentReference || null,
-          cashSessionId: method === PAYMENT_METHOD_CASH ? cashSessionId : null,
           createdBy: userId,
         }).returning({ id: payments.id });
 
@@ -2617,7 +2591,6 @@ export class SaleService {
             currency,
             exchangeRate,
             paymentMethod: method,
-            cashSessionId: method === PAYMENT_METHOD_CASH ? cashSessionId : null,
           },
           sale: {
             id: updatedSale.id,

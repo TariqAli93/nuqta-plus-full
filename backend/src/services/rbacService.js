@@ -151,6 +151,13 @@ class RbacService {
       'online_orders:send_to_shipping',
       'online_orders:resend_to_shipping',
       'online_orders:view_shipment',
+      // Recurring / fixed expenses (المصاريف الثابتة) — backfilled once on
+      // upgrade to the matrix-assigned roles (managers + branch managers).
+      'recurring_expenses:create',
+      'recurring_expenses:read',
+      'recurring_expenses:update',
+      'recurring_expenses:delete',
+      'view:recurring_expenses',
     ];
     for (const key of BACKFILL_KEYS) {
       const pid = permIdByKey.get(key);

@@ -4,9 +4,7 @@ import * as schema from '../models/index.js';
 import {
   vouchers,
   payments,
-  cashSessions,
   customers,
-  branches,
   users,
 } from '../models/index.js';
 import { and, desc, eq, gte, lte, sql } from 'drizzle-orm';
@@ -69,7 +67,7 @@ export class VoucherService {
    *
    * @param {object} tx The source document's transaction handle.
    * @param {object} params
-   *   payment: {id, amount, currency, exchangeRate, paymentMethod, cashSessionId}
+   *   payment: {id, amount, currency, exchangeRate, paymentMethod}
    *   sale:    {id, branchId, customerId, invoiceNumber} (nullable fields ok)
    *   sourceType: 'sale_payment' | 'collections'
    *   cashboxId / bankAccountId: explicit overrides from the API payload.
@@ -86,9 +84,7 @@ export class VoucherService {
       isCash,
       cashboxId,
       bankAccountId,
-      cashSessionId: payment.cashSessionId || null,
       branchId,
-      userId: user?.id || null,
     });
 
     const accountingPeriodId = await accountingPeriodService.resolvePeriodIdForWrite(
@@ -109,7 +105,6 @@ export class VoucherService {
         voucherType: 'receipt',
         branchId,
         accountingPeriodId,
-        cashSessionId: payment.cashSessionId || null,
         partyType: sale?.customerId ? 'customer' : 'other',
         customerId: sale?.customerId || null,
         saleId: sale?.id || null,
@@ -155,7 +150,6 @@ export class VoucherService {
       isCash,
       cashboxId,
       bankAccountId,
-      cashSessionId: expense.cashSessionId || null,
       branchId,
     });
 
@@ -171,7 +165,6 @@ export class VoucherService {
         voucherType: 'payment',
         branchId,
         accountingPeriodId: expense.accountingPeriodId || null,
-        cashSessionId: expense.cashSessionId || null,
         partyType: 'other',
         expenseId: expense.id,
         cashboxId: target.cashboxId,
@@ -205,7 +198,6 @@ export class VoucherService {
       isCash: true,
       cashboxId: null,
       bankAccountId: null,
-      cashSessionId: saleReturn.cashSessionId || null,
       branchId,
     });
 
@@ -221,7 +213,6 @@ export class VoucherService {
         voucherType: 'payment',
         branchId,
         accountingPeriodId: saleReturn.accountingPeriodId || null,
-        cashSessionId: saleReturn.cashSessionId || null,
         partyType: saleReturn.customerId ? 'customer' : 'other',
         customerId: saleReturn.customerId || null,
         saleId: saleReturn.saleId || null,
@@ -244,37 +235,14 @@ export class VoucherService {
 
   /**
    * Resolve the cashbox/bank a mint should hit:
-   * explicit bank → explicit cashbox → the linked shift's cashbox → the
-   * acting user's open shift's cashbox → branch default cashbox.
+   * explicit bank → explicit cashbox → branch default cashbox.
    */
-  async #resolveTarget(tx, { isCash, cashboxId, bankAccountId, cashSessionId, branchId, userId = null }) {
+  async #resolveTarget(tx, { isCash, cashboxId, bankAccountId, branchId }) {
     if (!isCash && bankAccountId) {
       return { method: 'bank', cashboxId: null, bankAccountId: Number(bankAccountId) };
     }
     if (cashboxId) {
       return { method: 'cash', cashboxId: Number(cashboxId), bankAccountId: null };
-    }
-    if (cashSessionId) {
-      const [session] = await tx
-        .select({ cashboxId: cashSessions.cashboxId })
-        .from(cashSessions)
-        .where(eq(cashSessions.id, Number(cashSessionId)))
-        .limit(1);
-      if (session?.cashboxId) {
-        return { method: 'cash', cashboxId: Number(session.cashboxId), bankAccountId: null };
-      }
-    }
-    if (userId) {
-      // Debt payments aren't linked to a shift, but the collecting cashier's
-      // drawer is where the cash lands — prefer their open shift's cashbox.
-      const [open] = await tx
-        .select({ cashboxId: cashSessions.cashboxId })
-        .from(cashSessions)
-        .where(and(eq(cashSessions.userId, Number(userId)), eq(cashSessions.status, 'open')))
-        .limit(1);
-      if (open?.cashboxId) {
-        return { method: 'cash', cashboxId: Number(open.cashboxId), bankAccountId: null };
-      }
     }
     const fallback = await ensureDefaultCashbox(tx, branchId);
     return { method: 'cash', cashboxId: fallback, bankAccountId: null };

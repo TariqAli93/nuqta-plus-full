@@ -188,7 +188,6 @@ test('mintForPayment creates ONE voucher linked to the payment (no double count)
         currency: 'IQD',
         exchangeRate: 1,
         paymentMethod: 'cash',
-        cashSessionId: null,
       },
       sale: { id: null, branchId: null, customerId: null, invoiceNumber: 'VCH-TEST-1' },
       user,

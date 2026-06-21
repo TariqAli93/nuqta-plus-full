@@ -8,7 +8,7 @@ import router from '@/router';
  * - In a plain browser (dev / web): falls back to `window.open` on the route,
  *   or a same-tab navigation if popups are blocked, so the feature still works.
  *
- * `params` are initial filters (from/to/branchId/cashSessionId/…) forwarded to
+ * `params` are initial filters (from/to/branchId/…) forwarded to
  * the report page via IPC payload (Electron) or the URL query (web).
  */
 export function openReportWindow(type, params = {}) {

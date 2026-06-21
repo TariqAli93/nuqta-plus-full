@@ -423,7 +423,7 @@ const rules = {
   required: (value) => !!value || 'هذا الحقل مطلوب.',
   atLeastOneBranch: (value) =>
     (Array.isArray(value) && value.length > 0) || 'يجب تعيين فرع واحد على الأقل.',
-  minLength: (value) => value.length >= 6 || 'يجب أن تكون كلمة المرور 6 أحرف على الأقل.',
+  minLength: (value) => value.length >= 4 || 'يجب أن تكون كلمة المرور 4 أحرف على الأقل.',
   confirmPassword: (value) =>
     value === resetPwInfo.confirmPassword || 'كلمتا المرور غير متطابقتين.',
 };

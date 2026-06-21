@@ -12,7 +12,6 @@ import {
   purchaseReturns,
   purchaseReturnItems,
   treasuryTransfers,
-  cashSessions,
   cashboxes,
   bankAccounts,
   products,
@@ -527,44 +526,6 @@ async function buildTreasuryTransfer(tx, sourceId) {
   };
 }
 
-// ── Rule 13: shift close variance ──────────────────────────────────────────
-async function buildShiftVariance(tx, sourceId) {
-  const [s] = await tx.select().from(cashSessions).where(eq(cashSessions.id, sourceId)).limit(1);
-  if (!s) throw new ValidationError(`Cash session ${sourceId} not found`);
-  const variance = n(s.variance);
-  if (variance === 0) return null;
-
-  const boxAccount = await resolveTargetAccount(tx, {
-    cashboxId: s.cashboxId,
-    bankAccountId: null,
-    method: 'cash',
-  });
-  const shortOver = await systemAccountsService.resolve(tx, 'cash_short_over');
-  const cur = s.currency || 'IQD';
-
-  // variance > 0 → drawer over (المعدود أكثر): Dr cashbox / Cr cash_short_over
-  // variance < 0 → drawer short (عجز):        Dr cash_short_over / Cr cashbox
-  const amount = Math.abs(variance);
-  const lines =
-    variance > 0
-      ? [
-          { accountId: boxAccount, debit: amount, credit: 0, currency: cur, exchangeRate: 1 },
-          { accountId: shortOver, debit: 0, credit: amount, currency: cur, exchangeRate: 1 },
-        ]
-      : [
-          { accountId: shortOver, debit: amount, credit: 0, currency: cur, exchangeRate: 1 },
-          { accountId: boxAccount, debit: 0, credit: amount, currency: cur, exchangeRate: 1 },
-        ];
-
-  return {
-    entryDate: dateOf(s.closedAt),
-    branchId: s.branchId || null,
-    accountingPeriodId: s.accountingPeriodId || null,
-    description: `قيد فرق إغلاق وردية #${s.id} (${variance > 0 ? 'زيادة' : 'عجز'})`,
-    lines,
-  };
-}
-
 export const RULE_BUILDERS = Object.freeze({
   sale: buildSale,
   sale_return: buildSaleReturn,
@@ -574,7 +535,6 @@ export const RULE_BUILDERS = Object.freeze({
   purchase: buildPurchase,
   purchase_return: buildPurchaseReturn,
   treasury_transfer: buildTreasuryTransfer,
-  shift_variance: buildShiftVariance,
 });
 
 export default { RULE_BUILDERS };

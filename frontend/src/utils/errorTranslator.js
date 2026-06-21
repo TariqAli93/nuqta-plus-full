@@ -10,7 +10,7 @@ function money(v) {
 /**
  * Human, action-oriented messages keyed by the backend's stable error `code`.
  * These take PRECEDENCE over the generic name/message translation so the user
- * never sees a raw code like CREDIT_LIMIT_EXCEEDED or NO_OPEN_CASH_SESSION.
+ * never sees a raw code like CREDIT_LIMIT_EXCEEDED or ACCOUNTING_PERIOD_CLOSED.
  * Each entry returns the full message; some interpolate `data.details`.
  */
 function translateErrorCode(data = {}) {

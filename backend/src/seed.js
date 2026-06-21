@@ -46,7 +46,6 @@ import {
   productStock,
   stockMovements,
   warehouseTransfers,
-  cashSessions,
   saleReturns,
   saleReturnItems,
   expenses,
@@ -1040,7 +1039,6 @@ async function applySaleScenarios(db, scenarios, ctx) {
           customerId: scenario.customer?.id || null,
           branchId: scenario.branch?.id || null,
           warehouseId: scenario.warehouse?.id || null,
-          cashSessionId: null,
           subtotal: D(subtotal),
           discount: '0',
           tax: '0',
@@ -1316,106 +1314,6 @@ async function seedSaleReturns(db, saleMap, productMap, userMap) {
   });
 
   log.ok('sale returns');
-}
-
-// ── Cash sessions ─────────────────────────────────────────────────────────
-async function seedCashSessions(db, userMap, branchMap, saleMap) {
-  const karada = branchMap['بغداد - الكرادة'];
-  const cashier = userMap['cashier.karada'];
-  if (!karada || !cashier) {
-    log.skip('cash sessions — missing prerequisites');
-    return;
-  }
-
-  // 1. A closed session (yesterday, fully reconciled).
-  // expected_cash = opening + cash_in − cash_out. We pick a clean number
-  // and link the most recent same-branch cash sale to the session so the
-  // closing report reflects real cash inflow.
-  const closedOpenedAt = addDays(TODAY, -1);
-  closedOpenedAt.setUTCHours(8, 0, 0, 0);
-  const closedClosedAt = addDays(TODAY, -1);
-  closedClosedAt.setUTCHours(20, 0, 0, 0);
-
-  const closedExisting = (await db
-    .select()
-    .from(cashSessions)
-    .where(
-      and(
-        eq(cashSessions.userId, cashier.id),
-        eq(cashSessions.branchId, karada.id),
-        eq(cashSessions.status, 'closed')
-      )
-    )
-    .limit(1))[0];
-  let closedId = closedExisting?.id;
-  if (!closedExisting) {
-    const opening = 200_000;
-    const cashIn = 0; // no sales linked retroactively to keep the math clean
-    const cashOut = 0;
-    const expected = opening + cashIn - cashOut;
-    const closing = expected; // no variance
-    const variance = 0;
-    const [row] = await db
-      .insert(cashSessions)
-      .values({
-        userId: cashier.id,
-        branchId: karada.id,
-        openingCash: D(opening),
-        closingCash: D(closing),
-        expectedCash: D(expected),
-        variance: D(variance),
-        currency: IQD,
-        status: 'closed',
-        notes: 'وردية الأمس — تمت التسوية بدون فرق',
-        openedAt: closedOpenedAt,
-        closedAt: closedClosedAt,
-      })
-      .returning();
-    closedId = row.id;
-  }
-
-  // 2. An open session for today. The unique partial index forbids two open
-  // sessions for the same (user, branch); skip if one already exists.
-  const openExisting = (await db
-    .select()
-    .from(cashSessions)
-    .where(
-      and(
-        eq(cashSessions.userId, cashier.id),
-        eq(cashSessions.branchId, karada.id),
-        eq(cashSessions.status, 'open')
-      )
-    )
-    .limit(1))[0];
-  if (!openExisting) {
-    const openedAt = new Date(TODAY);
-    openedAt.setUTCHours(8, 30, 0, 0);
-    await db.insert(cashSessions).values({
-      userId: cashier.id,
-      branchId: karada.id,
-      openingCash: D(150_000),
-      currency: IQD,
-      status: 'open',
-      notes: 'وردية اليوم - مفتوحة',
-      openedAt,
-    });
-  }
-
-  // Backlink the most recent Karada cash POS sale to the closed session so
-  // reports & profile views show "this sale belongs to that shift".
-  const target = saleMap['CASH-KARADA-003'];
-  if (target && closedId && !target.cashSessionId) {
-    await db
-      .update(sales)
-      .set({ cashSessionId: closedId })
-      .where(eq(sales.id, target.id));
-    await db
-      .update(payments)
-      .set({ cashSessionId: closedId })
-      .where(eq(payments.saleId, target.id));
-  }
-
-  log.ok('cash sessions');
 }
 
 // ── Expenses ──────────────────────────────────────────────────────────────
@@ -1762,7 +1660,6 @@ const TRUNCATE_ORDER = [
   'sale_items',
   'invoice_sequences',
   'idempotency_keys',
-  'cash_sessions',
   'sales',
   'expenses',
   'products',
@@ -1849,9 +1746,6 @@ async function runSeed() {
 
     log.info('seeding returns...');
     await seedSaleReturns(db, saleMap, productMap, userMap);
-
-    log.info('seeding cash sessions...');
-    await seedCashSessions(db, userMap, branchMap, saleMap);
 
     log.info('seeding expenses...');
     await seedExpenses(db, branchMap, userMap);

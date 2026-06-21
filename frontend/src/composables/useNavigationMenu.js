@@ -253,6 +253,12 @@ export function useNavigationMenu() {
             permission: 'expenses:read',
           },
           {
+            title: 'المصاريف الثابتة',
+            icon: 'mdi-calendar-sync',
+            to: '/recurring-expenses',
+            permission: 'recurring_expenses:read',
+          },
+          {
             title: 'الصناديق',
             icon: 'mdi-safe-square-outline',
             to: '/treasury/cashboxes',

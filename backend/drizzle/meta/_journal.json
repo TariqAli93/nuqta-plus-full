@@ -43,6 +43,13 @@
       "when": 1781998644640,
       "tag": "0005_fixed_wiccan",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1782005009380,
+      "tag": "0006_famous_karnak",
+      "breakpoints": true
     }
   ]
 }

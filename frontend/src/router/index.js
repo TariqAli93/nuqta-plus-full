@@ -55,6 +55,7 @@ import FeatureFlags from '@/views/settings/FeatureFlags.vue';
 import SetupWizard from '@/views/settings/SetupWizard.vue';
 import Collections from '@/views/collections/Collections.vue';
 import Expenses from '@/views/expenses/Expenses.vue';
+import RecurringExpenses from '@/views/expenses/RecurringExpenses.vue';
 import AccountingPeriods from '@/views/accounting/AccountingPeriods.vue';
 import Cashboxes from '@/views/treasury/Cashboxes.vue';
 import CashboxLedger from '@/views/treasury/CashboxLedger.vue';
@@ -283,6 +284,12 @@ const routes = [
         name: 'Expenses',
         component: Expenses,
         meta: { permission: 'expenses:read' },
+      },
+      {
+        path: 'recurring-expenses',
+        name: 'RecurringExpenses',
+        component: RecurringExpenses,
+        meta: { permission: 'recurring_expenses:read' },
       },
       {
         path: 'accounting-periods',
