@@ -5,19 +5,26 @@
       subtitle="الإعدادات ← التكاملات ← موفّرو التوصيل"
       icon="mdi-truck-fast-outline"
     >
-      <v-btn variant="text" prepend-icon="mdi-arrow-right" to="/settings/integrations/delivery-providers">
+      <v-btn
+        variant="text"
+        prepend-icon="mdi-arrow-right"
+        to="/settings/integrations/delivery-providers"
+      >
         رجوع
       </v-btn>
     </PageHeader>
 
-    <v-alert v-if="notFound" type="error" variant="tonal"> لم يتم العثور على شركة التوصيل المطلوبة. </v-alert>
+    <v-alert v-if="notFound" type="error" variant="tonal">
+      لم يتم العثور على شركة التوصيل المطلوبة.
+    </v-alert>
 
-    <v-card v-else class="page-section" :loading="store.loading" max-width="720">
+    <v-card v-else class="page-section" :loading="store.loading">
       <v-card-text v-if="provider" class="pt-4">
         <!-- Status + default + implementation chips -->
         <div class="d-flex align-center flex-wrap gap-3 mb-4">
           <v-chip :color="conn.color" variant="flat">
-            <v-icon start size="16">{{ conn.icon }}</v-icon>{{ conn.label }}
+            <v-icon start size="16">{{ conn.icon }}</v-icon
+            >{{ conn.label }}
           </v-chip>
           <v-chip v-if="provider.isDefault" color="primary" variant="tonal" size="small">
             <v-icon start size="14">mdi-star</v-icon>الشركة الافتراضية
@@ -135,7 +142,9 @@
         >
           اختبار الاتصال
         </v-btn>
-        <span v-if="dirty" class="text-caption text-medium-emphasis ms-2">احفظ التغييرات أولاً للاختبار</span>
+        <span v-if="dirty" class="text-caption text-medium-emphasis ms-2"
+          >احفظ التغييرات أولاً للاختبار</span
+        >
         <v-spacer />
         <v-btn
           v-if="canManage"

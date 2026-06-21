@@ -13,22 +13,30 @@
       >
         سجل الـ Webhook
       </v-btn>
-      <v-btn variant="text" prepend-icon="mdi-arrow-right" to="/settings/integrations/delivery-providers">
+      <v-btn
+        variant="text"
+        prepend-icon="mdi-arrow-right"
+        to="/settings/integrations/delivery-providers"
+      >
         رجوع
       </v-btn>
     </PageHeader>
 
-    <v-card class="page-section" :loading="store.loading" max-width="720">
+    <v-card class="page-section" :loading="store.loading">
       <v-card-text v-if="boxy" class="pt-4">
         <!-- Connection status + last successful test -->
         <div class="d-flex align-center flex-wrap gap-3 mb-4">
           <v-chip :color="conn.color" variant="flat">
-            <v-icon start size="16">{{ conn.icon }}</v-icon>{{ conn.label }}
+            <v-icon start size="16">{{ conn.icon }}</v-icon
+            >{{ conn.label }}
           </v-chip>
           <span class="text-caption text-medium-emphasis">
             آخر اختبار ناجح: {{ formatDateTime(boxy.lastSuccessfulTestAt) }}
           </span>
-          <span v-if="boxy.lastTestStatus === 'failed' && boxy.lastTestMessage" class="text-caption text-error">
+          <span
+            v-if="boxy.lastTestStatus === 'failed' && boxy.lastTestMessage"
+            class="text-caption text-error"
+          >
             ({{ boxy.lastTestMessage }})
           </span>
         </div>
@@ -67,7 +75,9 @@
           <v-text-field
             v-model="formData.apiKey"
             label="مفتاح الـ API (API Key)"
-            :placeholder="boxy.hasApiKey ? '•••••••• (محفوظ — اتركه فارغاً للإبقاء عليه)' : 'أدخل المفتاح'"
+            :placeholder="
+              boxy.hasApiKey ? '•••••••• (محفوظ — اتركه فارغاً للإبقاء عليه)' : 'أدخل المفتاح'
+            "
             type="password"
             autocomplete="new-password"
             variant="outlined"
@@ -78,7 +88,9 @@
           <v-text-field
             v-model="formData.apiSecret"
             label="السر (API Secret)"
-            :placeholder="boxy.hasApiSecret ? '•••••••• (محفوظ — اتركه فارغاً للإبقاء عليه)' : 'أدخل السر'"
+            :placeholder="
+              boxy.hasApiSecret ? '•••••••• (محفوظ — اتركه فارغاً للإبقاء عليه)' : 'أدخل السر'
+            "
             type="password"
             autocomplete="new-password"
             variant="outlined"
@@ -103,7 +115,9 @@
         >
           اختبار الاتصال
         </v-btn>
-        <span v-if="dirty" class="text-caption text-medium-emphasis ms-2">احفظ التغييرات أولاً للاختبار</span>
+        <span v-if="dirty" class="text-caption text-medium-emphasis ms-2"
+          >احفظ التغييرات أولاً للاختبار</span
+        >
         <v-spacer />
         <!-- 6. Save -->
         <v-btn

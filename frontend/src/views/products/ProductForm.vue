@@ -127,8 +127,8 @@
             </v-col>
             <v-col cols="12" md="6">
               <v-text-field
-                data-testid="product-cost-price"
                 v-if="!isEdit || isAdmin || costPriceUnlocked"
+                data-testid="product-cost-price"
                 :model-value="formatNumber(formData.costPrice)"
                 :suffix="formData.currency"
                 :label="isService ? 'تكلفة الخدمة (اختياري)' : 'سعر التكلفة'"

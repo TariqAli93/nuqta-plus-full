@@ -145,17 +145,13 @@
               </v-col>
               <v-col cols="12" sm="8">
                 <v-text-field
-                  v-model.number="formData.amount"
-                  type="number"
-                  step="0.01"
+                  :model-value="formatNumber(formData.amount)"
                   label="المبلغ *"
                   variant="outlined"
                   density="comfortable"
-                  :rules="[
-                    (v) => !!v || 'المبلغ مطلوب',
-                    (v) => Number(v) > 0 || 'المبلغ يجب أن يكون أكبر من صفر',
-                  ]"
+                  :rules="[(v) => parseNumber(v) > 0 || 'المبلغ مطلوب']"
                   required
+                  @update:model-value="handleAmountInput"
                 />
               </v-col>
               <v-col cols="12" sm="4">
@@ -199,12 +195,16 @@
                   label="يوم الأسبوع *"
                   variant="outlined"
                   density="comfortable"
-                  :rules="[(v) => v !== null && v !== undefined || 'يوم الأسبوع مطلوب']"
+                  :rules="[(v) => (v !== null && v !== undefined) || 'يوم الأسبوع مطلوب']"
                 />
               </v-col>
 
               <!-- Monthly/Yearly: day of month -->
-              <v-col v-if="formData.frequency === 'monthly' || formData.frequency === 'yearly'" cols="12" sm="6">
+              <v-col
+                v-if="formData.frequency === 'monthly' || formData.frequency === 'yearly'"
+                cols="12"
+                sm="6"
+              >
                 <v-text-field
                   v-model.number="formData.dayOfMonth"
                   type="number"
@@ -323,8 +323,14 @@ const canDelete = computed(() => authStore.hasPermission?.(['recurring_expenses:
 const canReadTreasury = computed(() => authStore.hasPermission?.('treasury:read'));
 const treasuryOn = computed(() => authStore.hasFeature('treasury'));
 const treasuryTargets = computed(() => [
-  ...(treasuryStore.cashboxes || []).map((c) => ({ key: `cashbox:${c.id}`, title: `صندوق: ${c.name}` })),
-  ...(treasuryStore.bankAccounts || []).map((b) => ({ key: `bank:${b.id}`, title: `حساب: ${b.name}` })),
+  ...(treasuryStore.cashboxes || []).map((c) => ({
+    key: `cashbox:${c.id}`,
+    title: `صندوق: ${c.name}`,
+  })),
+  ...(treasuryStore.bankAccounts || []).map((b) => ({
+    key: `bank:${b.id}`,
+    title: `حساب: ${b.name}`,
+  })),
 ]);
 
 const CATEGORY_LABELS = {
@@ -343,13 +349,43 @@ function categoryLabel(c) {
   return CATEGORY_LABELS[c] || c;
 }
 
+const formatNumber = (value) => {
+  if (!value && value !== 0) return '';
+  const numStr = String(value).replace(/,/g, '');
+  if (!/^\d*\.?\d*$/.test(numStr)) return value;
+  const parts = numStr.split('.');
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return parts.join('.');
+};
+
 const FREQUENCY_LABELS = { daily: 'يومي', weekly: 'أسبوعي', monthly: 'شهري', yearly: 'سنوي' };
-const frequencyOptions = Object.entries(FREQUENCY_LABELS).map(([value, title]) => ({ value, title }));
-const DAY_OF_WEEK_LABELS = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+const frequencyOptions = Object.entries(FREQUENCY_LABELS).map(([value, title]) => ({
+  value,
+  title,
+}));
+const DAY_OF_WEEK_LABELS = [
+  'الأحد',
+  'الإثنين',
+  'الثلاثاء',
+  'الأربعاء',
+  'الخميس',
+  'الجمعة',
+  'السبت',
+];
 const dayOfWeekOptions = DAY_OF_WEEK_LABELS.map((title, value) => ({ value, title }));
 const MONTH_LABELS = [
-  'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-  'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر',
+  'يناير',
+  'فبراير',
+  'مارس',
+  'أبريل',
+  'مايو',
+  'يونيو',
+  'يوليو',
+  'أغسطس',
+  'سبتمبر',
+  'أكتوبر',
+  'نوفمبر',
+  'ديسمبر',
 ];
 const monthOptions = MONTH_LABELS.map((title, i) => ({ value: i + 1, title }));
 
@@ -502,7 +538,12 @@ async function toggleActive(row) {
 }
 
 async function confirmDelete(row) {
-  if (!window.confirm(`حذف المصروف الثابت «${row.name}»؟ (المصاريف المُولّدة سابقاً تبقى في التقارير)`)) return;
+  if (
+    !window.confirm(
+      `حذف المصروف الثابت «${row.name}»؟ (المصاريف المُولّدة سابقاً تبقى في التقارير)`
+    )
+  )
+    return;
   try {
     await store.remove(row.id);
     await store.fetch();
@@ -522,6 +563,19 @@ async function runNow() {
     running.value = false;
   }
 }
+
+const parseNumber = (value) => {
+  if (!value) return 0;
+  // إزالة الفواصل وتحويل إلى رقم
+  const numStr = String(value).replace(/,/g, '');
+  const num = parseFloat(numStr);
+  return isNaN(num) ? 0 : num;
+};
+
+const handleAmountInput = (value) => {
+  const numStr = parseNumber(value);
+  formData.amount = numStr;
+};
 
 onMounted(async () => {
   if (isGlobalAdmin.value) {
