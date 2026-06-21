@@ -190,37 +190,22 @@ onMounted(async () => {
 <template>
   <v-card elevation="0">
     <v-card-title class="d-flex align-center justify-space-between">
-      <div class="text-h6 font-weight-bold">📦 إدارة نسخ قاعدة البيانات الاحتياطية</div>
+      <div class="text-h6 font-weight-bold">📦 إدارة نسخ قاعدة البيانات الاحتياطية (تقليدي)</div>
       <div class="flex gap-2">
-        <v-btn
-          v-if="can('settings:create')"
-          color="primary"
-          variant="elevated"
-          prepend-icon="mdi-database-export-outline"
-          @click="createBackup"
-        >
-          إنشاء نسخة احتياطية
-        </v-btn>
+        <v-menu>
+          <template #activator="{ props }">
+            <v-btn v-bind="props">
+              <v-icon>mdi-dots-vertical</v-icon>
+            </v-btn>
+          </template>
 
-        <v-btn
-          v-if="can('settings:create')"
-          color="secondary"
-          variant="elevated"
-          prepend-icon="mdi-database-import-outline"
-          @click="importBackup"
-        >
-          استيراد نسخة احتياطية
-        </v-btn>
-
-        <v-btn
-          v-if="can('settings:create')"
-          color="error"
-          variant="elevated"
-          prepend-icon="mdi-database-remove-outline"
-          @click="clearDatabase"
-        >
-          تصفير قاعدة البيانات
-        </v-btn>
+          <v-list>
+            <v-list-item title="انشاء نسخة احتياطية" @click="createBackup" />
+            <v-list-item title="استيراد نسخة احتياطية" @click="importBackup" />
+            <v-divider></v-divider>
+            <v-list-item title="تصفير قاعدة البيانات" class="text-error" @click="clearDatabase" />
+          </v-list>
+        </v-menu>
       </div>
     </v-card-title>
 

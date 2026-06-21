@@ -2,6 +2,7 @@ import { runCreditScoringJob } from './creditScoringJob.js';
 import { runOverdueReminderJob } from '../services/notifications/overdueReminderJob.js';
 import { runDeliverySyncJob } from './deliverySyncJob.js';
 import { runRecurringExpensesJob } from './recurringExpensesJob.js';
+import { runAccountingPeriodCloseJob } from './accountingPeriodCloseJob.js';
 
 /**
  * Lightweight internal scheduler.
@@ -123,6 +124,26 @@ export function registerDefaultJobs(fastify) {
     });
     fastify.log.info(
       `[scheduler] recurringExpenses registered (intervalMs=${recurringIntervalMs}, runOnStart=${recurringRunOnStart})`
+    );
+  }
+
+  // Accounting-period auto-close — close any period whose end time has elapsed.
+  // Runs ONCE on startup by default (catch-up: close periods that expired while
+  // the app was down) plus a SHORT repeating timer (default every minute) so a
+  // period closes within a tick of its end time with no user action. The engine
+  // is idempotent and per-period isolated, so frequent runs are safe.
+  if (process.env.ACCOUNTING_PERIOD_CLOSE_DISABLED !== '1') {
+    const periodCloseIntervalMs =
+      Number(process.env.ACCOUNTING_PERIOD_CLOSE_INTERVAL_MS) || 60 * 1000;
+    const periodCloseRunOnStart = process.env.ACCOUNTING_PERIOD_CLOSE_RUN_ON_START !== '0';
+    scheduleJob('accountingPeriodClose', {
+      intervalMs: periodCloseIntervalMs,
+      runOnStart: periodCloseRunOnStart,
+      run: runAccountingPeriodCloseJob,
+      logger: fastify.log,
+    });
+    fastify.log.info(
+      `[scheduler] accountingPeriodClose registered (intervalMs=${periodCloseIntervalMs}, runOnStart=${periodCloseRunOnStart})`
     );
   }
 }

@@ -196,26 +196,22 @@ onMounted(async () => {
 <template>
   <v-card elevation="0">
     <v-card-title class="d-flex align-center justify-space-between flex-wrap">
-      <div class="text-h6 font-weight-bold">🗂️ النسخ الاحتياطي الانتقائي (تصدير/استيراد البيانات)</div>
+      <div class="text-h6 font-weight-bold">
+        🗂️ النسخ الاحتياطي الانتقائي (تصدير/استيراد البيانات)
+      </div>
       <div class="d-flex gap-2">
-        <v-btn
-          v-if="can('settings:create')"
-          color="primary"
-          variant="elevated"
-          prepend-icon="mdi-export-variant"
-          @click="openBackup"
-        >
-          إنشاء نسخة احتياطية
-        </v-btn>
-        <v-btn
-          v-if="can('settings:create')"
-          color="secondary"
-          variant="elevated"
-          prepend-icon="mdi-import"
-          @click="openRestore"
-        >
-          استعادة من ملف
-        </v-btn>
+        <v-menu>
+          <template #activator="{ props }">
+            <v-btn v-bind="props">
+              <v-icon>mdi-dots-vertical</v-icon>
+            </v-btn>
+          </template>
+
+          <v-list>
+            <v-list-item title="انشاء نسخة احتياطية" @click="openBackup" />
+            <v-list-item title="استعادة نسخة احتياطية" @click="openRestore" />
+          </v-list>
+        </v-menu>
       </div>
     </v-card-title>
 
@@ -285,21 +281,25 @@ onMounted(async () => {
           <template v-if="manifest">
             <v-table density="compact" class="mb-4">
               <tbody>
-                <tr><td>تاريخ الإنشاء</td><td>{{ fmtDate(manifest.createdAt) }}</td></tr>
-                <tr><td>إصدار التطبيق</td><td>{{ manifest.appVersion }}</td></tr>
-                <tr><td>إصدار النسخة</td><td>{{ manifest.backupVersion }}</td></tr>
+                <tr>
+                  <td>تاريخ الإنشاء</td>
+                  <td>{{ fmtDate(manifest.createdAt) }}</td>
+                </tr>
+                <tr>
+                  <td>إصدار التطبيق</td>
+                  <td>{{ manifest.appVersion }}</td>
+                </tr>
+                <tr>
+                  <td>إصدار النسخة</td>
+                  <td>{{ manifest.backupVersion }}</td>
+                </tr>
               </tbody>
             </v-table>
 
             <div class="text-subtitle-2 mb-2">المجموعات المضمّنة — اختر ما تريد استعادته:</div>
             <v-row dense>
               <v-col v-for="key in includedGroups" :key="key" cols="12" sm="6">
-                <v-checkbox
-                  v-model="restoreSelected"
-                  :value="key"
-                  density="compact"
-                  hide-details
-                >
+                <v-checkbox v-model="restoreSelected" :value="key" density="compact" hide-details>
                   <template #label>
                     {{ labelOf(key) }}
                     <v-chip size="x-small" class="ms-2" variant="tonal">
@@ -331,7 +331,13 @@ onMounted(async () => {
             />
 
             <!-- Summary after restore -->
-            <v-alert v-if="summary" type="success" variant="tonal" class="mt-4" density="comfortable">
+            <v-alert
+              v-if="summary"
+              type="success"
+              variant="tonal"
+              class="mt-4"
+              density="comfortable"
+            >
               <div class="font-weight-bold mb-1">اكتملت الاستعادة</div>
               <div>المجموعات المستعادة: {{ summary.restoredGroups.map(labelOf).join('، ') }}</div>
               <div v-if="summary.skippedGroups?.length">
@@ -339,7 +345,9 @@ onMounted(async () => {
               </div>
               <div class="mt-1">
                 الصفوف:
-                <span v-for="(c, k) in summary.counts" :key="k" class="me-2">{{ labelOf(k) }}={{ c }}</span>
+                <span v-for="(c, k) in summary.counts" :key="k" class="me-2"
+                  >{{ labelOf(k) }}={{ c }}</span
+                >
               </div>
             </v-alert>
           </template>

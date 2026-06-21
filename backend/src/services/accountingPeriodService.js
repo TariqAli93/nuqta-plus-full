@@ -4,7 +4,7 @@ import {
   branches,
   users,
 } from '../models/index.js';
-import { and, eq, desc, isNull } from 'drizzle-orm';
+import { and, eq, desc, isNull, sql } from 'drizzle-orm';
 import {
   ValidationError,
   NotFoundError,
@@ -31,8 +31,93 @@ import auditService from './auditService.js';
 export const PERIOD_TYPES = Object.freeze(['daily', 'weekly', 'monthly', 'yearly']);
 const ACTIVE_SALE_STATUSES = "('completed','pending','partially_returned','returned')";
 
+// How a period was closed — recorded in accounting_periods.closed_reason.
+export const CLOSE_REASONS = Object.freeze({
+  MANUAL: 'manual', // a user pressed "close"
+  AUTO: 'auto', // scheduler tick or on-access expiry while the app is running
+  AUTO_STARTUP: 'auto_startup', // boot catch-up sweep (app was down past the end)
+});
+
 function toNum(v) {
   return v === null || v === undefined ? 0 : Number(v);
+}
+
+// ── Period end-time computation (calendar-aware, dependency-free) ────────────
+// Boundaries are derived from the open instant: daily/weekly add exact 24h
+// multiples (DST-immune); monthly/yearly add calendar months/years with day
+// clamping so they correctly handle varying month lengths, leap years and
+// month/year rollover.
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Add `months` calendar months to `date`, preserving the time-of-day and
+ * clamping the day to the target month's last day. UTC-component based so it is
+ * deterministic and DST-immune (Jan 31 +1m → Feb 28/29; Feb 29 +12m → Feb 28).
+ */
+function addCalendarMonths(date, months) {
+  const d = new Date(date);
+  const targetIndex = d.getUTCMonth() + months;
+  const targetYear = d.getUTCFullYear() + Math.floor(targetIndex / 12);
+  const targetMonth = ((targetIndex % 12) + 12) % 12;
+  const lastDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+  const day = Math.min(d.getUTCDate(), lastDay);
+  return new Date(
+    Date.UTC(
+      targetYear,
+      targetMonth,
+      day,
+      d.getUTCHours(),
+      d.getUTCMinutes(),
+      d.getUTCSeconds(),
+      d.getUTCMilliseconds()
+    )
+  );
+}
+
+/**
+ * The instant a period of `type` opened at `start` expires. Pure function —
+ * exported for unit tests. Returns a Date.
+ */
+export function computePeriodEnd(start, type) {
+  const s = new Date(start);
+  if (Number.isNaN(s.getTime())) throw new ValidationError('تاريخ بداية القيد غير صالح');
+  switch (type) {
+    case 'daily':
+      return new Date(s.getTime() + DAY_MS);
+    case 'weekly':
+      return new Date(s.getTime() + 7 * DAY_MS);
+    case 'monthly':
+      return addCalendarMonths(s, 1);
+    case 'yearly':
+      return addCalendarMonths(s, 12);
+    default:
+      throw new ValidationError(`نوع القيد غير صالح: ${type}`);
+  }
+}
+
+// Postgres interval equivalent of computePeriodEnd, used to compute ends_at in
+// the DB at open() time. Postgres interval arithmetic clamps month/year
+// overflow exactly like addCalendarMonths (Jan 31 +1m → Feb 28/29). Computing
+// ends_at server-side keeps it in the SAME frame as the `now()` comparisons the
+// auto-close engine uses — avoiding the timestamp-without-tz / JS-Date skew
+// (drizzle reads such columns as UTC while pg reads them as local time).
+export const PERIOD_INTERVAL = Object.freeze({
+  daily: '1 day',
+  weekly: '7 days',
+  monthly: '1 month',
+  yearly: '1 year',
+});
+
+/** Read a period's end instant (camelCase or snake_case row), or null. */
+function periodEndsAt(row) {
+  const v = row?.endsAt ?? row?.ends_at ?? null;
+  return v == null ? null : new Date(v);
+}
+/** Read a period's auto-close flag (camelCase or snake_case), default true. */
+function periodAutoCloseEnabled(row) {
+  const v = row?.autoClose ?? row?.auto_close;
+  return v !== false; // undefined/null → default ON
 }
 
 export class AccountingPeriodService {
@@ -44,6 +129,41 @@ export class AccountingPeriodService {
   async isBranchScoped() {
     const flags = await featureFlagsService.getFeatureFlags();
     return flags.multiBranch !== false;
+  }
+
+  /**
+   * Pure predicate: is this period past its end instant and eligible for
+   * auto-close? True only for an OPEN period with auto_close enabled and a
+   * non-null ends_at on/before `now`. Operates on ABSOLUTE Date values, so it is
+   * correct for callers that hold a trustworthy instant (and is unit-tested
+   * directly). Production hot paths use #isPeriodExpired instead, which asks the
+   * DB so it is immune to the timestamp-without-tz / JS-Date timezone skew.
+   * Accepts drizzle (camelCase) or raw pg (snake_case) rows.
+   */
+  isExpired(period, now = new Date()) {
+    if (!period) return false;
+    if (period.status && period.status !== 'open') return false;
+    if (!periodAutoCloseEnabled(period)) return false;
+    const ends = periodEndsAt(period);
+    if (!ends) return false;
+    const nowMs = now instanceof Date ? now.getTime() : Number(now);
+    return ends.getTime() <= nowMs;
+  }
+
+  /**
+   * Authoritative expiry check, evaluated in the DB so ends_at and "now" share
+   * one frame (no timezone ambiguity). True iff the period is still open, opted
+   * into auto-close, has an end time, and that end time has passed.
+   */
+  async #isPeriodExpired(periodId) {
+    const pool = await getPool();
+    const { rows } = await pool.query(
+      `SELECT (status = 'open' AND auto_close = true AND ends_at IS NOT NULL AND ends_at <= now())
+              AS expired
+       FROM accounting_periods WHERE id = $1`,
+      [periodId]
+    );
+    return rows[0]?.expired === true;
   }
 
   /**
@@ -67,7 +187,7 @@ export class AccountingPeriodService {
    * operation's input branch (only a zero-branch fresh install falls back to a
    * legacy branch_id IS NULL period). When on, the operation's branch period.
    */
-  async getOpenPeriodForOperation(branchId) {
+  async getOpenPeriodForOperation(branchId, { autoClose = true } = {}) {
     const db = await getDb();
     const effective = await this.resolveLookupBranchId(branchId);
     // `effective` is the branch the period must belong to. When branches are
@@ -79,7 +199,17 @@ export class AccountingPeriodService {
         ? and(eq(accountingPeriods.status, 'open'), eq(accountingPeriods.branchId, Number(effective)))
         : and(eq(accountingPeriods.status, 'open'), isNull(accountingPeriods.branchId));
     const [row] = await db.select().from(accountingPeriods).where(where).limit(1);
-    return row || null;
+    if (!row) return null;
+    // An open period whose end time has elapsed is no longer usable. Close it on
+    // access (idempotent) so neither writes nor reads ever attach to / report an
+    // expired period — even between scheduler ticks — and report "no open
+    // period". Expiry is evaluated in the DB (#isPeriodExpired) to dodge the
+    // timestamp timezone skew. Pass `autoClose:false` to peek without effects.
+    if (autoClose && (await this.#isPeriodExpired(row.id))) {
+      await this.autoCloseExpiredPeriod(row, { reason: CLOSE_REASONS.AUTO });
+      return null;
+    }
+    return row;
   }
 
   /**
@@ -109,12 +239,24 @@ export class AccountingPeriodService {
    */
   async resolvePeriodIdForWrite(user, branchId, { require = false, message = null } = {}) {
     const enabled = await this.isEnabled();
+    // getOpenPeriodForOperation auto-closes the period here if it just expired,
+    // so an expired period never gets stamped onto a new operation.
     const period = await this.getOpenPeriodForOperation(branchId);
     if (enabled && require && !period) {
+      // Tell "never opened one" apart from "it auto-closed on expiry" so the UI
+      // can show the user the period was closed automatically.
+      const latest = await this.getLatestPeriodForScope(branchId);
+      const autoClosed =
+        latest &&
+        latest.status === 'closed' &&
+        (latest.closedReason === CLOSE_REASONS.AUTO ||
+          latest.closedReason === CLOSE_REASONS.AUTO_STARTUP);
       const err = new ValidationError(
-        message || 'لا يوجد قيد محاسبي مفتوح. يجب فتح قيد محاسبي قبل تنفيذ هذه العملية'
+        autoClosed
+          ? 'تم إغلاق القيد المحاسبي تلقائياً لانتهاء مدته المحددة. يجب فتح قيد محاسبي جديد قبل تنفيذ هذه العملية'
+          : message || 'لا يوجد قيد محاسبي مفتوح. يجب فتح قيد محاسبي قبل تنفيذ هذه العملية'
       );
-      err.code = 'ACCOUNTING_PERIOD_REQUIRED';
+      err.code = autoClosed ? 'ACCOUNTING_PERIOD_AUTO_CLOSED' : 'ACCOUNTING_PERIOD_REQUIRED';
       err.statusCode = 422;
       throw err;
     }
@@ -130,7 +272,11 @@ export class AccountingPeriodService {
         ? eq(accountingPeriods.branchId, Number(effective))
         : isNull(accountingPeriods.branchId);
     const [row] = await db
-      .select({ id: accountingPeriods.id, status: accountingPeriods.status })
+      .select({
+        id: accountingPeriods.id,
+        status: accountingPeriods.status,
+        closedReason: accountingPeriods.closedReason,
+      })
       .from(accountingPeriods)
       .where(where)
       .orderBy(desc(accountingPeriods.id))
@@ -152,31 +298,62 @@ export class AccountingPeriodService {
     if (!periodId) return; // not attached to a period (legacy / flag off) → allow
     const db = await getDb();
     const [p] = await db
-      .select({ status: accountingPeriods.status })
+      .select({
+        id: accountingPeriods.id,
+        type: accountingPeriods.type,
+        status: accountingPeriods.status,
+        closedReason: accountingPeriods.closedReason,
+      })
       .from(accountingPeriods)
       .where(eq(accountingPeriods.id, periodId))
       .limit(1);
-    if (p && p.status === 'closed') {
+    if (!p) return;
+
+    // Editing an op inside an expired-but-still-open period must be blocked too:
+    // auto-close it first (DB-evaluated expiry), then fall through to the
+    // closed-period rejection below.
+    if (p.status === 'open' && (await this.#isPeriodExpired(p.id))) {
+      await this.autoCloseExpiredPeriod(p, { reason: CLOSE_REASONS.AUTO });
+      p.status = 'closed';
+      p.closedReason = CLOSE_REASONS.AUTO;
+    }
+
+    if (p.status === 'closed') {
+      const auto =
+        p.closedReason === CLOSE_REASONS.AUTO || p.closedReason === CLOSE_REASONS.AUTO_STARTUP;
       const err = new ValidationError(
-        'القيد المحاسبي مغلق — لا يمكن تعديل العمليات المالية بداخله'
+        auto
+          ? 'تم إغلاق القيد المحاسبي تلقائياً لانتهاء مدته المحددة — لا يمكن تعديل العمليات المالية بداخله'
+          : 'القيد المحاسبي مغلق — لا يمكن تعديل العمليات المالية بداخله'
       );
-      err.code = 'ACCOUNTING_PERIOD_CLOSED';
+      err.code = auto ? 'ACCOUNTING_PERIOD_AUTO_CLOSED' : 'ACCOUNTING_PERIOD_CLOSED';
       err.statusCode = 422;
       throw err;
     }
   }
 
   /** Open a new period. Race-safe via the partial unique index. */
-  async open({ type = 'monthly', branchId = null, notes = null } = {}, user) {
+  async open({ type = 'monthly', branchId = null, notes = null, autoClose = true } = {}, user) {
     if (!PERIOD_TYPES.includes(type)) {
       throw new ValidationError(`نوع القيد غير صالح: ${type}`);
     }
     const { scopeType, branchId: scopeBranchId } = await this.resolveOpenScope(user, branchId);
 
+    // Auto-closes a same-scope period that has already expired before checking,
+    // so opening a fresh one is never blocked by a stale, time-elapsed period.
     const existing = await this.getOpenPeriodForOperation(scopeBranchId);
     if (existing) {
       throw new ValidationError('يوجد قيد محاسبي مفتوح بالفعل لهذا النطاق');
     }
+
+    // The operating window: opened_at defaults to now(); ends_at is computed in
+    // the SAME statement as now() + the type's interval (Postgres clamps month/
+    // year overflow exactly like computePeriodEnd). Computing it server-side
+    // keeps ends_at in the DB's time frame, matching the now() comparisons the
+    // auto-close engine uses. NULL ends_at = opted out of auto-close.
+    const willAutoClose = autoClose !== false;
+    const interval = PERIOD_INTERVAL[type];
+    const endsAtExpr = willAutoClose ? sql`(now() + (${interval})::interval)::timestamp` : null;
 
     const db = await getDb();
     let row;
@@ -188,6 +365,8 @@ export class AccountingPeriodService {
           scopeType,
           branchId: scopeBranchId,
           status: 'open',
+          endsAt: endsAtExpr,
+          autoClose: willAutoClose,
           openedByUserId: user?.id || null,
           notes: notes || null,
         })
@@ -206,7 +385,7 @@ export class AccountingPeriodService {
       action: 'accounting_period:open',
       resource: 'accounting_periods',
       resourceId: row.id,
-      details: { type, scopeType, branchId: scopeBranchId },
+      details: { type, scopeType, branchId: scopeBranchId, autoClose: willAutoClose },
     });
 
     return this.getById(row.id, user);
@@ -415,11 +594,13 @@ export class AccountingPeriodService {
   }
 
   /**
-   * Close a period: compute + freeze the snapshot and flip status to closed —
-   * all inside one transaction with a row lock so two concurrent closes can't
-   * both win.
+   * Shared close transaction: compute + freeze the snapshot and flip status to
+   * 'closed' under a row lock so two concurrent closes can't both win. Fully
+   * idempotent — a period that is already closed (or gone) is a no-op, never an
+   * error. Used by both the manual close() and the auto-close engine.
+   * Returns { closed, outcome: 'closed'|'already_closed'|'not_found' }.
    */
-  async close(id, user, { notes } = {}) {
+  async #performClose(id, { userId = null, notes = null, reason = CLOSE_REASONS.MANUAL } = {}) {
     const pool = await getPool();
     const client = await pool.connect();
     try {
@@ -429,13 +610,16 @@ export class AccountingPeriodService {
         'SELECT * FROM accounting_periods WHERE id = $1 FOR UPDATE',
         [id]
       );
-      if (!period) throw new NotFoundError('Accounting period');
-      this.assertCanManage(user, period);
+      if (!period) {
+        await client.query('ROLLBACK');
+        return { closed: false, outcome: 'not_found' };
+      }
       if (period.status === 'closed') {
-        throw new ValidationError('القيد المحاسبي مغلق مسبقاً');
+        await client.query('ROLLBACK');
+        return { closed: false, outcome: 'already_closed' };
       }
 
-      const snapshot = await this.computeSnapshot(client, id, { generatedByUserId: user?.id || null });
+      const snapshot = await this.computeSnapshot(client, id, { generatedByUserId: userId });
 
       // Freeze the snapshot into its own immutable row, then point the period at
       // it and mirror the payload into totals_json for the period-detail UI.
@@ -446,28 +630,59 @@ export class AccountingPeriodService {
          ON CONFLICT (accounting_period_id)
            DO UPDATE SET snapshot_json = EXCLUDED.snapshot_json
          RETURNING id`,
-        [id, period.branch_id || null, JSON.stringify(snapshot), user?.id || null]
+        [id, period.branch_id || null, JSON.stringify(snapshot), userId]
       );
       const snapshotId = snapRow?.id || null;
 
       const { rowCount } = await client.query(
         `UPDATE accounting_periods
          SET status='closed', closed_at=now(), closed_by_user_id=$2,
-             totals_json=$3::jsonb, snapshot_id=$5, notes=COALESCE($4, notes), updated_at=now()
+             totals_json=$3::jsonb, snapshot_id=$5, closed_reason=$6,
+             notes=COALESCE($4, notes), updated_at=now()
          WHERE id=$1 AND status='open'`,
-        [id, user?.id || null, JSON.stringify(snapshot), notes || null, snapshotId]
+        [id, userId, JSON.stringify(snapshot), notes || null, snapshotId, reason]
       );
       if (!rowCount) {
-        // Lost the race between the lock and update (defensive).
-        throw new ValidationError('القيد المحاسبي مغلق مسبقاً');
+        // Lost the race between the lock and the update (defensive).
+        await client.query('ROLLBACK');
+        return { closed: false, outcome: 'already_closed' };
       }
 
       await client.query('COMMIT');
+      return { closed: true, outcome: 'closed' };
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;
     } finally {
       client.release();
+    }
+  }
+
+  /**
+   * Close a period manually (user-initiated). Authorizes the caller, then runs
+   * the shared close transaction with closed_reason='manual'.
+   */
+  async close(id, user, { notes } = {}) {
+    const db = await getDb();
+    const [row] = await db
+      .select()
+      .from(accountingPeriods)
+      .where(eq(accountingPeriods.id, Number(id)))
+      .limit(1);
+    if (!row) throw new NotFoundError('Accounting period');
+    this.assertCanManage(user, row);
+    if (row.status === 'closed') {
+      throw new ValidationError('القيد المحاسبي مغلق مسبقاً');
+    }
+
+    const res = await this.#performClose(id, {
+      userId: user?.id || null,
+      notes: notes || null,
+      reason: CLOSE_REASONS.MANUAL,
+    });
+    if (!res.closed) {
+      if (res.outcome === 'not_found') throw new NotFoundError('Accounting period');
+      throw new ValidationError('القيد المحاسبي مغلق مسبقاً');
     }
 
     await auditService.log({
@@ -481,6 +696,72 @@ export class AccountingPeriodService {
     return this.getById(id, user);
   }
 
+  /**
+   * Auto-close a single expired period (system actor — no user authorization).
+   * Idempotent and self-contained, so it is safe to call from read/write hot
+   * paths and the scheduler. Never throws: it logs and returns whether it
+   * actually closed (false = already closed / gone / failed). This is what
+   * guarantees a period that is "already closed" is never re-closed.
+   */
+  async autoCloseExpiredPeriod(period, { reason = CLOSE_REASONS.AUTO, logger = null } = {}) {
+    const id = period?.id;
+    if (!id) return false;
+    const log = logger || console;
+    try {
+      const res = await this.#performClose(id, { userId: null, notes: null, reason });
+      if (res.closed) {
+        const endsAt = periodEndsAt(period);
+        await auditService
+          .log({
+            userId: null,
+            username: 'system',
+            action: 'accounting_period:auto_close',
+            resource: 'accounting_periods',
+            resourceId: id,
+            details: { reason, type: period.type, endsAt: endsAt ? endsAt.toISOString() : null },
+          })
+          .catch(() => {});
+        log.info?.(
+          `[accountingPeriods] auto-closed period ${id} (type=${period.type || '?'}, reason=${reason})`
+        );
+      }
+      return res.closed;
+    } catch (err) {
+      log.error?.(`[accountingPeriods] auto-close failed for period ${id}: ${err.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Auto-close engine: find every OPEN period past its end time and close it.
+   * Expiry is evaluated in the DB (ends_at <= now()) so it is timezone-safe and
+   * matches how ends_at was stored. Driven by the scheduler (periodic) and the
+   * boot catch-up sweep. The candidate set is tiny (≤ one open period per
+   * scope). Returns a summary. Per-period isolated — one failure never stops the
+   * rest.
+   */
+  async closeExpiredPeriods({ reason = CLOSE_REASONS.AUTO, logger = null } = {}) {
+    const pool = await getPool();
+    const { rows: expiredRows } = await pool.query(
+      `SELECT id, type FROM accounting_periods
+       WHERE status = 'open' AND auto_close = true
+         AND ends_at IS NOT NULL AND ends_at <= now()
+       ORDER BY id`
+    );
+
+    let closed = 0;
+    for (const row of expiredRows) {
+      if (await this.autoCloseExpiredPeriod({ id: row.id, type: row.type }, { reason, logger })) {
+        closed += 1;
+      }
+    }
+    const summary = { expired: expiredRows.length, closed, reason };
+    if (expiredRows.length) {
+      (logger || console).info?.(`[accountingPeriods] sweep ${JSON.stringify(summary)}`);
+    }
+    return summary;
+  }
+
   /** Authorization: global admin → any; branch admin/manager → own branch. */
   assertCanManage(user, period) {
     if (isGlobalAdmin(user)) return;
@@ -492,6 +773,11 @@ export class AccountingPeriodService {
   }
 
   async list(user, { status, type, branchId } = {}) {
+    // Reflect time-based closures the moment the list is viewed, so the UI shows
+    // the new "closed" status without waiting for the next scheduler tick. Best
+    // effort — a sweep failure must never block listing.
+    await this.closeExpiredPeriods({ reason: CLOSE_REASONS.AUTO }).catch(() => {});
+
     const db = await getDb();
     const conds = [];
     if (status) conds.push(eq(accountingPeriods.status, status));
@@ -514,7 +800,10 @@ export class AccountingPeriodService {
         branchName: branches.name,
         status: accountingPeriods.status,
         openedAt: accountingPeriods.openedAt,
+        endsAt: accountingPeriods.endsAt,
+        autoClose: accountingPeriods.autoClose,
         closedAt: accountingPeriods.closedAt,
+        closedReason: accountingPeriods.closedReason,
         openedByUserId: accountingPeriods.openedByUserId,
         openedByName: opener.fullName,
         closedByUserId: accountingPeriods.closedByUserId,

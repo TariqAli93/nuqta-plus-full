@@ -339,7 +339,17 @@ export const accountingPeriods = pgTable(
     branchId: integer('branch_id').references(() => branches.id),
     status: text('status').notNull().default('open'), // 'open'|'closed'
     openedAt: timestamp('opened_at').defaultNow(),
+    // Computed at open() from openedAt + type (calendar-aware: month lengths,
+    // leap years). The period is considered expired the instant now() passes
+    // endsAt; the auto-close engine then flips it to 'closed'. NULL on legacy
+    // rows / periods opted out of auto-close → never auto-closes.
+    endsAt: timestamp('ends_at'),
+    // Whether this period participates in time-based auto-close. Default true.
+    autoClose: boolean('auto_close').notNull().default(true),
     closedAt: timestamp('closed_at'),
+    // How the period was closed: 'manual' (a user), 'auto' (scheduler / on-access
+    // expiry), or 'auto_startup' (catch-up sweep on server boot). NULL while open.
+    closedReason: text('closed_reason'),
     openedByUserId: integer('opened_by_user_id').references(() => users.id),
     closedByUserId: integer('closed_by_user_id').references(() => users.id),
     notes: text('notes'),

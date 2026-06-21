@@ -30,11 +30,20 @@
           {{ item.branchName || (item.scopeType === 'global' ? 'النظام كامل' : '—') }}
         </template>
         <template #[`item.status`]="{ item }">
-          <v-chip :color="item.status === 'open' ? 'success' : 'grey'" size="small">
-            {{ item.status === 'open' ? 'مفتوح' : 'مغلق' }}
+          <v-chip
+            :color="item.status === 'open' ? 'success' : isAutoClosed(item) ? 'info' : 'grey'"
+            size="small"
+            :title="isAutoClosed(item) ? 'أُغلق تلقائياً عند انتهاء المدة' : undefined"
+          >
+            <v-icon v-if="isAutoClosed(item)" start size="x-small">mdi-timer-lock-outline</v-icon>
+            {{ statusLabel(item) }}
           </v-chip>
         </template>
         <template #[`item.openedAt`]="{ item }">{{ fmtDate(item.openedAt) }}</template>
+        <template #[`item.endsAt`]="{ item }">
+          <span v-if="item.endsAt">{{ fmtDate(item.endsAt) }}</span>
+          <span v-else class="text-medium-emphasis" title="إغلاق يدوي — لا ينتهي تلقائياً">يدوي</span>
+        </template>
         <template #[`item.closedAt`]="{ item }">{{
           item.closedAt ? fmtDate(item.closedAt) : '—'
         }}</template>
@@ -98,6 +107,23 @@
             density="comfortable"
             class="mb-3"
           />
+          <v-switch
+            data-testid="period-auto-close"
+            v-model="form.autoClose"
+            color="primary"
+            density="compact"
+            hide-details
+            class="mb-1"
+            :label="
+              form.autoClose
+                ? 'إغلاق تلقائي عند انتهاء المدة'
+                : 'إغلاق يدوي فقط (لا ينتهي تلقائياً)'
+            "
+          />
+          <p class="text-caption text-medium-emphasis mb-3">
+            عند التفعيل يُغلق القيد تلقائياً بمجرد انتهاء مدته ({{ typeLabel(form.type) }}) دون
+            تدخل، ويُمنع تسجيل أي عملية جديدة عليه بعد ذلك.
+          </p>
           <v-select
             v-if="multiBranch"
             v-model="form.branchId"
@@ -244,7 +270,7 @@
 </template>
 
 <script setup>
-import { computed, h, onMounted, ref } from 'vue';
+import { computed, h, onMounted, onUnmounted, ref } from 'vue';
 import { useAccountingPeriodStore } from '@/stores/accountingPeriod';
 import { useAuthStore } from '@/stores/auth';
 import { useInventoryStore } from '@/stores/inventory';
@@ -283,6 +309,7 @@ const headers = [
   { title: 'النطاق', key: 'scope' },
   { title: 'الحالة', key: 'status' },
   { title: 'تاريخ الفتح', key: 'openedAt' },
+  { title: 'تاريخ الانتهاء', key: 'endsAt' },
   { title: 'تاريخ الإغلاق', key: 'closedAt' },
   { title: 'فتحه', key: 'openedByName' },
   { title: 'صافي الربح', key: 'netProfit', align: 'end' },
@@ -296,6 +323,13 @@ const typeOptions = [
   { value: 'yearly', title: 'سنوي' },
 ];
 const typeLabel = (t) => typeOptions.find((o) => o.value === t)?.title || t;
+
+// A period closed by the auto-close engine (scheduler / on-access expiry / boot
+// catch-up) rather than by a user.
+const isAutoClosed = (item) =>
+  item.status === 'closed' && (item.closedReason === 'auto' || item.closedReason === 'auto_startup');
+const statusLabel = (item) =>
+  item.status === 'open' ? 'مفتوح' : isAutoClosed(item) ? 'مغلق تلقائياً' : 'مغلق';
 
 const fmtDate = (d) => {
   if (!d) return '—';
@@ -320,7 +354,7 @@ const netClass = (item) => {
 // ── Open ───────────────────────────────────────────────────────────────────
 const openDialog = ref(false);
 const busy = ref(false);
-const form = ref({ type: 'monthly', branchId: null, notes: '' });
+const form = ref({ type: 'monthly', branchId: null, notes: '', autoClose: true });
 const openWarning = computed(() => {
   if (multiBranch.value) {
     return store.openPeriods.some((p) => p.branchId === form.value.branchId);
@@ -331,11 +365,15 @@ const openWarning = computed(() => {
 const submitOpen = async () => {
   busy.value = true;
   try {
-    const payload = { type: form.value.type, notes: form.value.notes || undefined };
+    const payload = {
+      type: form.value.type,
+      notes: form.value.notes || undefined,
+      autoClose: form.value.autoClose !== false,
+    };
     if (multiBranch.value && form.value.branchId) payload.branchId = form.value.branchId;
     await store.open(payload);
     openDialog.value = false;
-    form.value = { type: 'monthly', branchId: null, notes: '' };
+    form.value = { type: 'monthly', branchId: null, notes: '', autoClose: true };
   } catch {
     /* notified in store */
   } finally {
@@ -372,11 +410,28 @@ const showDetails = async (item) => {
   detailDialog.value = true;
 };
 
+// Live refresh: re-list periodically so a period that auto-closes (scheduler /
+// boot catch-up / on-access expiry) shows its new "مغلق تلقائياً" status without
+// a page reload. Each list call also triggers the backend's expiry sweep.
+let refreshTimer = null;
+const REFRESH_MS = 30000;
+
 onMounted(async () => {
   await store.fetchAll();
   if (multiBranch.value && canReadBranches.value && branches.value.length === 0) {
     await inventoryStore.fetchBranches().catch(() => {});
   }
+  refreshTimer = setInterval(() => {
+    // Skip while a dialog is open (avoid clobbering an in-progress action) and
+    // when the tab is hidden (no point polling in the background).
+    if (openDialog.value || closeDialog.value || detailDialog.value) return;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    store.fetchAll().catch(() => {});
+  }, REFRESH_MS);
+});
+
+onUnmounted(() => {
+  if (refreshTimer) clearInterval(refreshTimer);
 });
 </script>
 

@@ -5,6 +5,8 @@ const openSchema = z.object({
   type: z.enum(PERIOD_TYPES).default('monthly'),
   branchId: z.coerce.number().int().positive().optional(),
   notes: z.string().max(1000).optional(),
+  // When false the period never auto-closes (manual-only). Defaults to true.
+  autoClose: z.boolean().optional(),
 });
 
 const closeSchema = z.object({

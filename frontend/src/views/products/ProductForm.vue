@@ -165,33 +165,33 @@
             <template v-if="agentPricingOn">
               <v-col cols="12" md="6">
                 <v-text-field
-                  v-model.number="formData.wholesalePrice"
-                  type="number"
+                  :model-value="formatNumber(formData.wholesalePrice)"
                   label="سعر الجملة"
                   :suffix="formData.currency"
                   prepend-inner-icon="mdi-account-multiple"
                   hint="السعر المطبّق تلقائياً لعملاء الجملة. اتركه فارغاً = سعر البيع العادي"
                   persistent-hint
                   clearable
+                  @update:model-value="handleWholesalePriceInput"
                 ></v-text-field>
               </v-col>
               <v-col cols="12" md="6">
                 <v-text-field
-                  v-model.number="formData.agentPrice"
-                  type="number"
+                  :model-value="formatNumber(formData.agentPrice)"
                   label="سعر الوكيل"
                   :suffix="formData.currency"
                   prepend-inner-icon="mdi-account-star"
                   hint="السعر المطبّق تلقائياً للوكلاء. اتركه فارغاً = سعر البيع العادي"
                   persistent-hint
                   clearable
+                  @update:model-value="handleAgentPriceInput"
                 ></v-text-field>
               </v-col>
             </template>
             <v-col cols="12" md="3">
               <v-select
-                data-testid="product-currency"
                 v-model="formData.currency"
+                data-testid="product-currency"
                 :items="availableCurrencies"
                 label="العملة"
                 :rules="[rules.required]"
@@ -1146,9 +1146,7 @@ onMounted(async () => {
   if (canReadCategories.value) {
     await categoryStore.fetchCategories();
     // تحديث القائمة المحلية من الـ store
-    categories.value = Array.isArray(categoryStore.categories)
-      ? [...categoryStore.categories]
-      : [];
+    categories.value = Array.isArray(categoryStore.categories) ? [...categoryStore.categories] : [];
   }
 
   if (isEdit.value) {
@@ -1265,5 +1263,15 @@ const handleCostPriceInput = (value) => {
 const handleSellingPriceInput = (value) => {
   const num = parseNumber(value);
   formData.value.sellingPrice = num;
+};
+
+const handleWholesalePriceInput = (value) => {
+  const num = parseNumber(value);
+  formData.value.wholesalePrice = num;
+};
+
+const handleAgentPriceInput = (value) => {
+  const num = parseNumber(value);
+  formData.value.agentPrice = num;
 };
 </script>

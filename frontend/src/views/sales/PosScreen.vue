@@ -85,11 +85,8 @@
           <v-btn-toggle
             v-if="agentPricingOn"
             :model-value="priceType"
-            mandatory
-            divided
-            density="comfortable"
             color="primary"
-            variant="outlined"
+            variant="elevated"
             class="pos__tiers"
             aria-label="نوع التسعيرة"
             @update:model-value="setPriceType"
@@ -1122,6 +1119,8 @@ const goToPeriodFix = () => {
   router.push(shiftBlockAction.value.to);
 };
 
+// Timer handle for the open-period poll (cleared on unmount).
+let periodPollTimer = null;
 const refreshCurrentAccountingPeriod = async () => {
   if (!accountingPeriodsEnabled.value) {
     accountingPeriodStore.current = null; // drop stale state when the system is off
@@ -2008,6 +2007,17 @@ onMounted(async () => {
   // Selling only needs a usable open accounting period (no shifts).
   await refreshCurrentAccountingPeriod();
 
+  // Poll the open period so that when it auto-closes (its time elapses) the POS
+  // blocks selling within ~30s without a reload — the backend reports no open
+  // period the instant it expires, and a sale attempt is rejected server-side
+  // regardless, so this just keeps the banner/gating in sync.
+  if (accountingPeriodsEnabled.value) {
+    periodPollTimer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      refreshCurrentAccountingPeriod();
+    }, 30000);
+  }
+
   window.addEventListener('keydown', onKeydown);
   nextTick(() => searchRef.value?.focus?.());
 });
@@ -2047,6 +2057,7 @@ onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown);
   clearTimeout(searchTimer);
   clearTimeout(flashTimer);
+  if (periodPollTimer) clearInterval(periodPollTimer);
 });
 </script>
 
@@ -2114,6 +2125,7 @@ onUnmounted(() => {
 
 .pos__tiers {
   flex: 0 0 auto;
+  gap: 6px;
 }
 
 .pos__expired {
