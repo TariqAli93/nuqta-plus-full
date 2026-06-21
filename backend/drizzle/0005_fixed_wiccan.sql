@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS "idx_delivery_shipments_online_order_status" ON "delivery_shipments" USING btree ("online_order_id","status");

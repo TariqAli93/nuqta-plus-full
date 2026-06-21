@@ -348,13 +348,14 @@ export const deliveryShipmentCreateSchema = z
     saleId: z.coerce.number().int().positive().optional(),
     providerId: z.coerce.number().int().positive().optional(),
     providerCode: z.string().trim().min(1).optional(),
-    // Recipient (dialog fields).
-    recipientName: z.string().trim().min(1, 'Customer name is required'),
-    recipientPhone: z.string().trim().min(1, 'Customer phone is required'),
+    // Recipient (dialog fields). Name, phone AND a delivery address are required
+    // — a carrier can't deliver without them (Arabic messages surfaced as-is).
+    recipientName: z.string().trim().min(1, 'اسم المستلم مطلوب'),
+    recipientPhone: z.string().trim().min(1, 'رقم هاتف المستلم مطلوب'),
     secondaryPhone: z.string().trim().nullable().optional(),
     province: z.string().trim().nullable().optional(),
     region: z.string().trim().nullable().optional(),
-    recipientAddress: z.string().trim().nullable().optional(),
+    recipientAddress: z.string().trim().min(1, 'عنوان المستلم مطلوب'),
     // Boxy dispatch attributes.
     description: z.string().trim().nullable().optional(),
     size: z.enum(['S', 'M', 'L', 'XL']).optional(),
@@ -366,6 +367,10 @@ export const deliveryShipmentCreateSchema = z
     deliveryFee: z.coerce.number().nonnegative().optional(),
     currency: z.enum(['USD', 'IQD']).optional(),
     notes: z.string().trim().nullable().optional(),
+    // Optional package metadata enriched into the carrier payload.
+    paymentMethod: z.string().trim().nullable().optional(),
+    weight: z.coerce.number().nonnegative().nullable().optional(),
+    pieces: z.coerce.number().int().nonnegative().nullable().optional(),
   })
   .refine((d) => d.onlineOrderId || d.saleId, {
     message: 'onlineOrderId or saleId is required',

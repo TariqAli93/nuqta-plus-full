@@ -36,6 +36,17 @@ export default async function deliveryRoutes(fastify) {
   // ── Providers ──────────────────────────────────────────────────────────────
   fastify.get('/providers', { ...auth('delivery_providers:read'), handler: c.listProviders,
     schema: { description: 'List delivery providers', ...tag } });
+  // Active carriers for the shipment picker — available to anyone who may send /
+  // resend a shipment (not just provider admins). Static path before ':id'.
+  fastify.get('/providers/active', {
+    ...auth([
+      'delivery_shipments:create',
+      'online_orders:send_to_shipping',
+      'online_orders:resend_to_shipping',
+    ]),
+    handler: c.listActiveProviders,
+    schema: { description: 'List active delivery providers (picker)', ...tag },
+  });
   fastify.get('/providers/:id', { ...auth('delivery_providers:read'), handler: c.getProvider,
     schema: { description: 'Get a delivery provider', ...tag } });
   fastify.put('/providers/:id', { ...auth('delivery_providers:manage'), handler: c.updateProvider,
@@ -48,6 +59,9 @@ export default async function deliveryRoutes(fastify) {
   // ── Shipments ───────────────────────────────────────────────────────────────
   fastify.post('/shipments', { ...auth('delivery_shipments:create'), handler: c.createShipment,
     schema: { description: 'Create + dispatch a shipment for an online order', ...tag } });
+  // Re-send (supersede any active shipment) — separate, manager-level permission.
+  fastify.post('/shipments/resend', { ...auth('online_orders:resend_to_shipping'), handler: c.resendShipment,
+    schema: { description: 'Re-send an order/sale to the carrier (supersedes active shipment)', ...tag } });
   fastify.post('/quote', { ...auth('delivery_shipments:create'), handler: c.quote,
     schema: { description: 'Quote shipping cost (provider optional → default)', ...tag } });
   fastify.get('/shipments', { ...auth('delivery_shipments:read'), handler: c.listShipments,

@@ -34,7 +34,8 @@ export const useDeliveryReportStore = defineStore('deliveryReport', {
       const notificationStore = useNotificationStore();
       try {
         const res = await api.get('/reports/delivery/overview', { params: this._params() });
-        this.overview = res.data?.data || null;
+        // Interceptor unwraps to the body ({ success, data }) → payload is res.data.
+        this.overview = res.data || null;
         return this.overview;
       } catch (error) {
         notificationStore.error(error?.message || 'فشل تحميل تقارير الشحن');

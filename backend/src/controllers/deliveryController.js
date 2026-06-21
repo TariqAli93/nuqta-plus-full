@@ -17,6 +17,12 @@ export class DeliveryController {
     return reply.send({ success: true, data });
   }
 
+  /** Active carriers for the shipment "choose company" picker (minimal fields). */
+  async listActiveProviders(request, reply) {
+    const data = await deliveryService.listActiveProviders();
+    return reply.send({ success: true, data });
+  }
+
   async updateProvider(request, reply) {
     const validated = deliveryProviderUpdateSchema.parse(request.body);
     const data = await deliveryService.updateProvider(request.params.id, validated);
@@ -38,6 +44,16 @@ export class DeliveryController {
     const validated = deliveryShipmentCreateSchema.parse(request.body);
     const data = await deliveryService.createShipment(validated, request.user);
     return reply.code(201).send({ success: true, data, message: 'Shipment created' });
+  }
+
+  /**
+   * Re-send a previously-shipped order/sale (gated by
+   * online_orders:resend_to_shipping). Supersedes any active shipment first.
+   */
+  async resendShipment(request, reply) {
+    const validated = deliveryShipmentCreateSchema.parse(request.body);
+    const data = await deliveryService.resendShipment(validated, request.user);
+    return reply.code(201).send({ success: true, data, message: 'تمت إعادة إرسال الشحنة' });
   }
 
   /** Quote shipping cost (provider optional → falls back to the default). */

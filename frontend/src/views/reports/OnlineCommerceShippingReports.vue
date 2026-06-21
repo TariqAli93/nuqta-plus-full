@@ -411,7 +411,14 @@ const del = computed(() => delStore.overview);
 const loading = computed(() => ocStore.loading || delStore.loading);
 
 const ordersSummary = computed(
-  () => oc.value?.ordersSummary || { delivered: 0, returned: 0, returnPercentage: 0 }
+  () =>
+    oc.value?.ordersSummary || {
+      delivered: 0,
+      returned: 0,
+      returnPercentage: 0,
+      sentToShipping: 0,
+      notSentToShipping: 0,
+    }
 );
 const delSummary = computed(
   () => del.value?.summary || { total: 0, delivered: 0, returned: 0, cancelled: 0, lateCount: 0, successRate: 0, returnRate: 0 }
@@ -481,6 +488,8 @@ const orderKpis = computed(() => [
   { label: 'مرتجعة', value: fmt(ordersSummary.value.returned), color: 'orange-darken-3' },
   { label: 'ملغاة', value: fmt(sum(oc.value?.ordersByChannel, 'cancelled')), color: 'error' },
   { label: 'نسبة الإرجاع', value: `${ordersSummary.value.returnPercentage ?? 0}%`, color: 'amber-darken-3' },
+  { label: 'مرسل للشحن', value: fmt(ordersSummary.value.sentToShipping), color: 'teal' },
+  { label: 'غير مرسل للشحن', value: fmt(ordersSummary.value.notSentToShipping), color: 'blue-grey' },
 ]);
 
 const shipKpis = computed(() => [
@@ -501,6 +510,8 @@ const orderHeaders = [
   { title: 'مرتجعة', key: 'returned' },
   { title: 'ملغاة', key: 'cancelled' },
   { title: 'نسبة الإرجاع', key: 'returnPercentage' },
+  { title: 'مرسل للشحن', key: 'sentToShipping' },
+  { title: 'غير مرسل', key: 'notSentToShipping' },
 ];
 const salesHeaders = [
   { title: 'القناة', key: 'channelName' },
@@ -558,6 +569,9 @@ function syncFilters() {
     branchId: filters.branchId,
     status: filters.orderStatus,
     userId: filters.userId,
+    // The carrier + shipment-status selectors also narrow the orders funnel.
+    shippingProviderId: filters.providerId,
+    shippingStatus: filters.status,
   });
   Object.assign(delStore.filters, {
     dateFrom: filters.dateFrom,

@@ -176,18 +176,21 @@
           <span v-else class="text-disabled">—</span>
         </template>
 
+        <template #[`item.invoiceNumber`]="{ item }">
+          <span v-if="item.convertedInvoiceNumber">{{ item.convertedInvoiceNumber }}</span>
+          <span v-else class="text-disabled">—</span>
+        </template>
+
         <template #[`item.actions`]="{ item }">
-          <v-chip
-            v-if="item.convertedInvoiceNumber"
-            color="success"
+          <v-btn
+            v-if="canOpenInvoice(item)"
+            icon="mdi-receipt-text-arrow-right"
             size="small"
-            variant="tonal"
-            class="me-1"
-            title="الفاتورة المرتبطة بالطلب"
-          >
-            <v-icon start size="14">mdi-receipt-text-check</v-icon>
-            {{ item.convertedInvoiceNumber }}
-          </v-chip>
+            variant="text"
+            color="success"
+            title="فتح الفاتورة"
+            @click="openInvoice(item)"
+          />
           <v-btn
             v-if="canReturn(item)"
             icon="mdi-keyboard-return"
@@ -197,7 +200,7 @@
             title="إرجاع الطلب"
             @click="openReturn(item)"
           />
-          <BoxyShipmentButton :order="item" class="me-1" />
+          <BoxyShipmentButton v-if="canSendToShipping(item)" :order="item" />
           <v-btn
             icon="mdi-history"
             size="small"
@@ -214,15 +217,7 @@
             title="تعديل"
             @click="openDialog(item)"
           />
-          <v-btn
-            v-if="canCancel(item.status)"
-            icon="mdi-cancel"
-            size="small"
-            variant="text"
-            color="warning"
-            title="إلغاء الطلب"
-            @click="confirmCancel(item)"
-          />
+
           <v-btn
             v-if="can('online_orders:delete')"
             icon="mdi-delete"
@@ -329,6 +324,9 @@
                   variant="outlined"
                   density="comfortable"
                   clearable
+                  hint="يحدد المخزون المتاح لكل منتج"
+                  persistent-hint
+                  @update:model-value="onWarehouseChange"
                 />
               </v-col>
               <v-col cols="12">
@@ -368,10 +366,12 @@
                       :items="productOptions"
                       item-title="name"
                       item-value="id"
+                      :item-props="productItemProps"
                       :loading="productLoading"
                       no-filter
                       hide-details
                       variant="plain"
+                      clearable
                       placeholder="ابحث عن منتج"
                       :menu-props="{ maxHeight: 320 }"
                       @update:search="onProductSearch"
@@ -399,9 +399,17 @@
                       v-model.number="item.quantity"
                       type="number"
                       min="1"
+                      :max="item.availableStock != null ? item.availableStock : undefined"
+                      :rules="quantityRules(item)"
+                      :hint="
+                        item.productId && item.availableStock != null
+                          ? `المتاح: ${item.availableStock}`
+                          : ''
+                      "
+                      persistent-hint
                       variant="plain"
                       density="compact"
-                      hide-details
+                      hide-details="auto"
                     />
                   </td>
                   <td>
@@ -470,6 +478,66 @@
         <v-card-text class="pt-4" style="max-height: 70vh">
           <div v-if="historyLoading" class="text-center py-6">
             <v-progress-circular indeterminate color="primary" />
+          </div>
+
+          <!-- Linked invoice (الفاتورة المرتبطة) -->
+          <div v-if="!historyLoading && historyOrder" class="mb-4">
+            <div class="text-subtitle-2 mb-2">الفاتورة المرتبطة</div>
+            <div v-if="historyOrder.convertedSaleId" class="d-flex align-center flex-wrap gap-2">
+              <v-chip color="success" size="small" variant="tonal">
+                <v-icon start size="14">mdi-receipt-text-check</v-icon>
+                {{ historyOrder.convertedInvoiceNumber }}
+              </v-chip>
+              <v-chip
+                :color="paymentMeta(historyOrder.paymentStatus).color"
+                size="small"
+                variant="tonal"
+              >
+                <v-icon start size="14">{{ paymentMeta(historyOrder.paymentStatus).icon }}</v-icon>
+                {{ paymentMeta(historyOrder.paymentStatus).label }}
+              </v-chip>
+              <v-spacer />
+              <v-btn
+                v-if="can('online_orders:open_invoice')"
+                color="success"
+                variant="tonal"
+                size="small"
+                prepend-icon="mdi-receipt-text-arrow-right"
+                @click="openInvoice(historyOrder)"
+              >
+                فتح الفاتورة
+              </v-btn>
+            </div>
+            <v-alert v-else type="info" variant="tonal" density="compact">
+              لا توجد فاتورة مرتبطة بهذا الطلب
+            </v-alert>
+          </div>
+
+          <!-- Send to shipping company (إرسال إلى شركة الشحن) -->
+          <div
+            v-if="
+              !historyLoading &&
+              historyOrder &&
+              canSendToShipping(historyOrder) &&
+              !hasActiveShipment
+            "
+            class="mb-4"
+          >
+            <BoxyShipmentButton :order="historyOrder" @created="onShipmentCreated" />
+          </div>
+
+          <!-- Already shipped → block duplicate send, offer permissioned resend.
+               Resend opens the same carrier picker (same or different company). -->
+          <div v-if="!historyLoading && historyOrder && hasActiveShipment" class="mb-4">
+            <v-alert type="info" variant="tonal" density="compact" class="mb-2">
+              تم إرسال هذا الطلب إلى شركة الشحن مسبقاً
+            </v-alert>
+            <BoxyShipmentButton
+              v-if="can('online_orders:resend_to_shipping')"
+              :order="historyOrder"
+              resend
+              @created="onShipmentCreated"
+            />
           </div>
 
           <!-- Boxy shipment status panel (renders only when a shipment exists) -->
@@ -688,11 +756,17 @@ import PaginationControls from '@/components/PaginationControls.vue';
 import PageHeader from '@/components/PageHeader.vue';
 import BoxyShipmentButton from '@/components/delivery/BoxyShipmentButton.vue';
 import BoxyShipmentPanel from '@/components/delivery/BoxyShipmentPanel.vue';
+import { useRouter } from 'vue-router';
+import { useDeliveryShipmentStore } from '@/stores/deliveryShipment';
+import { useNotificationStore } from '@/stores/notification';
 
 const orderStore = useOnlineOrderStore();
 const channelStore = useSalesChannelStore();
 const productStore = useProductStore();
 const inventoryStore = useInventoryStore();
+const shipmentStore = useDeliveryShipmentStore();
+const notify = useNotificationStore();
+const router = useRouter();
 const { can } = usePermissions();
 
 // Payment status (الدفع) display metadata — derived on the backend from the
@@ -721,13 +795,47 @@ const allowedNext = (status) => nextStatuses(status).filter((s) => can(transitio
 const canReturn = (item) =>
   !!item.convertedInvoiceNumber && isSaleBacked(item.status) && can('online_orders:return');
 
+// ── Linked invoice ──────────────────────────────────────────────────────────
+// The sale lives in the sales table; the order exposes it as convertedSaleId.
+// The button is gated by the dedicated permission, and the SaleDetails page
+// itself still enforces view:sales (router + backend).
+const canOpenInvoice = (item) => !!item?.convertedSaleId && can('online_orders:open_invoice');
+
+const openInvoice = (item) => {
+  if (!item?.convertedSaleId) {
+    notify.error('لا توجد فاتورة مرتبطة بهذا الطلب');
+    return;
+  }
+  router.push({ name: 'SaleDetails', params: { id: item.convertedSaleId } });
+};
+
+// ── Send to shipping company ─────────────────────────────────────────────────
+// Order must carry a name, phone and address before it can be shipped.
+const hasValidShippingData = (item) =>
+  !!(item?.customerName?.trim() && item?.customerPhone?.trim() && item?.customerAddress?.trim());
+
+// The shipping button shows for a confirmed/ready order that has a linked
+// invoice, valid recipient data, and the send permission. The carrier is chosen
+// in the dialog (which shows the active providers, or an "enable a carrier"
+// message when none exist).
+const SHIPPABLE_STATUSES = [ORDER_STATUS.CONFIRMED, ORDER_STATUS.READY_FOR_DELIVERY];
+const canSendToShipping = (item) =>
+  SHIPPABLE_STATUSES.includes(item?.status) &&
+  !!item?.convertedSaleId &&
+  hasValidShippingData(item) &&
+  can('online_orders:send_to_shipping');
+
+// ── Existing shipment (gates resend / duplicate prevention in the dialog) ─────
+const DELIVERY_TERMINAL = ['DELIVERED', 'RETURNED', 'CANCELLED', 'FAILED'];
+const orderShipment = ref(null); // newest shipment for the order open in details
+const hasActiveShipment = computed(
+  () => !!orderShipment.value && !DELIVERY_TERMINAL.includes(orderShipment.value.status)
+);
+
 const dialog = ref(false);
 const deleteDialog = ref(false);
 const cancelDialog = ref(false);
-// Confirm-with-payment (creates the linked sale + deducts stock).
-const confirmDialog = ref(false);
-const confirming = ref(false);
-const confirmPayment = reactive({ paidAmount: 0, paymentMethod: 'cash' });
+
 // Return (full / partial) of a confirmed order.
 const returnDialog = ref(false);
 const returning = ref(false);
@@ -738,6 +846,14 @@ const historyOrder = ref(null);
 const form = ref(null);
 const saving = ref(false);
 const selected = ref(null);
+
+// Confirm-with-payment (creates the linked sale + deducts stock).
+const confirmDialog = ref(false);
+const confirming = ref(false);
+const confirmPayment = reactive({
+  paidAmount: selected.value?.totalAmount || 0,
+  paymentMethod: 'cash',
+});
 
 const historyItems = computed(() => historyOrder.value?.history || []);
 
@@ -768,6 +884,7 @@ const headers = [
   { title: 'المحافظة', key: 'province' },
   { title: 'الإجمالي', key: 'totalAmount' },
   { title: 'الحالة', key: 'status', sortable: false },
+
   { title: 'الدفع', key: 'paymentStatus', sortable: false },
   { title: 'إجراءات', key: 'actions', sortable: false },
 ];
@@ -815,6 +932,41 @@ const productOptions = computed(() => {
   return [...map.values()];
 });
 
+// Available stock for a product option: per-warehouse when a warehouse is
+// selected (the figure the confirm/oversell guard checks against), otherwise
+// the total across warehouses.
+const availableStockOf = (p) => {
+  if (!p) return 0;
+  if (formData.value.warehouseId && p.warehouseStock != null) {
+    return Number(p.warehouseStock) || 0;
+  }
+  return Number(p.totalStock ?? p.stock ?? 0);
+};
+
+// Render each option with its available stock and disable out-of-stock items
+// when a warehouse is selected (can't be ordered against that warehouse).
+const productItemProps = (p) => {
+  const scoped = !!formData.value.warehouseId;
+  const stock = availableStockOf(p);
+  return {
+    title: p.name,
+    value: p.id,
+    subtitle: scoped ? `المتاح: ${stock}` : `المخزون: ${stock}`,
+    disabled: scoped && stock <= 0,
+  };
+};
+
+// Line-quantity rule: cap at the available stock when a warehouse is selected
+// (matches the backend SALE_STOCK_VALIDATION oversell guard on confirm).
+const quantityRules = (item) => [
+  (v) => {
+    const qty = Number(v) || 0;
+    if (qty < 1) return 'الكمية يجب أن تكون 1 على الأقل';
+    if (!formData.value.warehouseId || !item.productId || item.availableStock == null) return true;
+    return qty <= item.availableStock || `الكمية المتاحة: ${item.availableStock}`;
+  },
+];
+
 // Fetch a page of products. `append` keeps prior results (infinite scroll),
 // otherwise the list is reset for a fresh query. An empty query loads the
 // default first page so the menu shows options immediately on focus.
@@ -825,6 +977,8 @@ const fetchProductList = async (q = '', { append = false } = {}) => {
   try {
     const params = { page, limit: PRODUCT_PAGE_SIZE };
     if (q) params.search = q;
+    // Scope stock to the selected warehouse so `warehouseStock` is populated.
+    if (formData.value.warehouseId) params.warehouseId = formData.value.warehouseId;
     const res = await productStore.fetch(params, { silent: true });
     const list = Array.isArray(res?.data) ? res.data : [];
     const mapped = list.map((p) => ({
@@ -832,6 +986,8 @@ const fetchProductList = async (q = '', { append = false } = {}) => {
       name: p.name,
       sellingPrice: p.sellingPrice,
       sku: p.sku,
+      warehouseStock: p.warehouseStock,
+      totalStock: p.totalStock ?? p.stock,
     }));
     searchResults.value = append ? [...searchResults.value, ...mapped] : mapped;
     productQuery.value = q;
@@ -866,18 +1022,65 @@ const onProductIntersect = (isIntersecting) => {
   }
 };
 
+// Re-read available stock for the already-selected lines against the current
+// warehouse (used on warehouse change and when editing an existing order).
+const refreshLineStock = async () => {
+  const lines = formData.value.items.filter((it) => it.productId);
+  if (!lines.length) return;
+  try {
+    const params = { limit: 1000 };
+    if (formData.value.warehouseId) params.warehouseId = formData.value.warehouseId;
+    const res = await productStore.fetch(params, { silent: true });
+    const byId = new Map((Array.isArray(res?.data) ? res.data : []).map((p) => [p.id, p]));
+    const nextSelected = { ...selectedProducts.value };
+    for (const it of lines) {
+      const p = byId.get(it.productId);
+      if (!p) continue;
+      const opt = {
+        id: p.id,
+        name: p.name,
+        sellingPrice: p.sellingPrice,
+        sku: p.sku,
+        warehouseStock: p.warehouseStock,
+        totalStock: p.totalStock ?? p.stock,
+      };
+      nextSelected[p.id] = opt;
+      it.availableStock = availableStockOf(opt);
+    }
+    selectedProducts.value = nextSelected;
+  } catch {
+    // ignore — the backend still enforces stock on confirm
+  }
+};
+
+// Switching warehouse changes the available figures: reset the search pool so
+// the next search/scroll is scoped to it, and refresh caps on existing lines.
+const onWarehouseChange = () => {
+  searchResults.value = [];
+  productQuery.value = '';
+  productPage.value = 1;
+  productTotalPages.value = 1;
+  refreshLineStock();
+};
+
 const onProductSelected = (item, productId) => {
   const p = productOptions.value.find((x) => x.id === productId);
   if (!p) {
     // cleared selection
     item.productId = null;
     item.productName = '';
+    item.availableStock = null;
     return;
   }
   item.productId = p.id;
   item.productName = p.name;
   item.productSku = p.sku || null;
   item.unitPrice = Number(p.sellingPrice) || 0;
+  item.availableStock = availableStockOf(p);
+  // Don't let a pre-filled quantity exceed what's available in the warehouse.
+  if (formData.value.warehouseId && Number(item.quantity) > item.availableStock) {
+    item.quantity = item.availableStock > 0 ? item.availableStock : 1;
+  }
   selectedProducts.value = { ...selectedProducts.value, [p.id]: p };
 };
 
@@ -927,6 +1130,8 @@ const openDialog = (order = null) => {
         })),
       };
       seedProductOptions(formData.value.items);
+      // Populate per-warehouse stock caps for the loaded lines.
+      refreshLineStock();
     });
   } else {
     selected.value = null;
@@ -987,7 +1192,8 @@ const handleSubmit = async () => {
 const onStatusPick = (order, status) => {
   selected.value = order;
   if (status === ORDER_STATUS.CONFIRMED) {
-    confirmPayment.paidAmount = 0;
+    // Prefill the paid amount with the order total (full payment by default).
+    confirmPayment.paidAmount = Number(order.totalAmount) || 0;
     confirmPayment.paymentMethod = 'cash';
     confirmDialog.value = true;
   } else if (status === ORDER_STATUS.CANCELLED) {
@@ -1075,13 +1281,25 @@ const openHistory = async (order) => {
   historyOrder.value = { orderNumber: order.orderNumber, history: [] };
   historyDialog.value = true;
   historyLoading.value = true;
+  orderShipment.value = null;
   try {
     historyOrder.value = await orderStore.fetchOrder(order.id);
+    // Detect an existing shipment (to show "already sent" + gate resend).
+    if (can('online_orders:view_shipment')) {
+      const list = await shipmentStore.fetchForEntity({ onlineOrderId: order.id });
+      orderShipment.value = list[0] || null;
+    }
   } catch {
     // surfaced via notification store
   } finally {
     historyLoading.value = false;
   }
+};
+
+// Reflect a freshly-created/resent shipment so the dialog flips to "already
+// sent" and the panel re-fetches the latest carrier/tracking.
+const onShipmentCreated = (shipment) => {
+  if (shipment) orderShipment.value = shipment;
 };
 
 const confirmDelete = (order) => {

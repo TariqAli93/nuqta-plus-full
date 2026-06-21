@@ -97,7 +97,7 @@
         :headers="headers"
         :items="customerStore.customers"
         :loading="tableLoading"
-        :items-per-page="customerStore.pagination.limit"
+        :items-per-page="customerStore.pagination.limit || 10"
         :page="customerStore.pagination.page"
         :items-length="customerStore.pagination.total"
         server-items-length
@@ -258,23 +258,34 @@ const headers = [
   { title: 'إجراءات', key: 'actions', sortable: false },
 ];
 
-const { query, isSearching, error, onQueryChange, runNow, clear, setFilters, clearFilters, setPage, setPageSize, refresh } =
-  useServerSearch({
-    limit: customerStore.pagination.limit,
-    initialFilters: { city: null, hasDebt: null },
-    load: (params, opts) => customerStore.fetch(params, { ...opts, silent: true }),
-    apply: (res) => {
-      customerStore.customers = res?.data || [];
-      if (res?.meta) {
-        customerStore.pagination = {
-          page: Number(res.meta.page) || 1,
-          limit: Number(res.meta.limit) || customerStore.pagination.limit,
-          total: Number(res.meta.total) || 0,
-          totalPages: Number(res.meta.totalPages) || 0,
-        };
-      }
-    },
-  });
+const {
+  query,
+  isSearching,
+  error,
+  onQueryChange,
+  runNow,
+  clear,
+  setFilters,
+  clearFilters,
+  setPage,
+  setPageSize,
+  refresh,
+} = useServerSearch({
+  limit: customerStore.pagination.limit,
+  initialFilters: { city: null, hasDebt: null },
+  load: (params, opts) => customerStore.fetch(params, { ...opts, silent: true }),
+  apply: (res) => {
+    customerStore.customers = res?.data || [];
+    if (res?.meta) {
+      customerStore.pagination = {
+        page: Number(res.meta.page) || 1,
+        limit: Number(res.meta.limit) || customerStore.pagination.limit,
+        total: Number(res.meta.total) || 0,
+        totalPages: Number(res.meta.totalPages) || 0,
+      };
+    }
+  },
+});
 
 const tableLoading = computed(() => isSearching.value || customerStore.loading);
 const initialLoading = computed(

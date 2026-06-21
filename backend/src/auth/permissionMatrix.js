@@ -100,6 +100,13 @@ const PERMISSION_MATRIX = {
   // Legacy convert-to-invoice endpoint (kept for backward compat).
   'online_orders:convert': CASHIER,
   'online_orders:delete': MANAGER,
+  // Opening the linked invoice + viewing the shipment are read-only (the sale
+  // page itself still enforces view:sales). Sending is operational (cashier);
+  // re-sending an already-shipped order is a manager override.
+  'online_orders:open_invoice': ALL,
+  'online_orders:send_to_shipping': CASHIER,
+  'online_orders:resend_to_shipping': MANAGER,
+  'online_orders:view_shipment': ALL,
   'view:online_orders': ALL,
 
   // ── Delivery integration (التوصيل) ───────────────────────────────────────

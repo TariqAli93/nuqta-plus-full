@@ -36,19 +36,6 @@
   min-width: 0;
 }
 
-/* قشرة اللوحة الموحّدة (بطاقة سطح‑مكتب). تُطبَّق على v-card عبر الصنف cc-panel؛
- * تُحصر تحت .control-center لتتفوق على أنماط .v-card الافتراضية (الزوايا/الحدود/
- * الخلفية/التدفّق) فيبقى الشكل مطابقاً تماماً. */
-.control-center .cc-panel {
-  display: flex;
-  flex-direction: column;
-  background: rgb(var(--v-theme-surface));
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.09);
-  border-radius: 16px;
-  overflow: hidden;
-  min-height: 0;
-}
-
 .cc-panel__head {
   display: flex;
   align-items: center;

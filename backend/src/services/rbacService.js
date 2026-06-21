@@ -145,6 +145,12 @@ class RbacService {
       'online_orders:deliver',
       'online_orders:cancel',
       'online_orders:return',
+      // Invoice + shipping actions on an online order (added with the
+      // order→invoice→shipping wiring). Backfilled once on upgrade.
+      'online_orders:open_invoice',
+      'online_orders:send_to_shipping',
+      'online_orders:resend_to_shipping',
+      'online_orders:view_shipment',
     ];
     for (const key of BACKFILL_KEYS) {
       const pid = permIdByKey.get(key);

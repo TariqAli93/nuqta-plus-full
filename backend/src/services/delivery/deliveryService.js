@@ -159,6 +159,38 @@ export class DeliveryService {
     return rows.map((r) => this._maskProvider(r));
   }
 
+  /**
+   * Active carriers for the "send to shipping company" picker. Minimal,
+   * non-sensitive fields only (no credentials/config), so it can be exposed to
+   * anyone who may create/resend a shipment — not just provider admins.
+   */
+  async listActiveProviders() {
+    const db = await getDb();
+    const rows = await db
+      .select({
+        id: deliveryProviders.id,
+        code: deliveryProviders.code,
+        name: deliveryProviders.name,
+        adapterKey: deliveryProviders.adapterKey,
+        isActive: deliveryProviders.isActive,
+        isDefault: deliveryProviders.isDefault,
+        config: deliveryProviders.config,
+      })
+      .from(deliveryProviders)
+      .where(eq(deliveryProviders.isActive, true))
+      .orderBy(desc(deliveryProviders.isDefault), deliveryProviders.id);
+    return rows.map((r) => ({
+      id: r.id,
+      code: r.code,
+      name: r.name,
+      isActive: r.isActive,
+      isDefault: r.isDefault,
+      isImplemented:
+        IMPLEMENTED_ADAPTERS.includes(r.adapterKey) || IMPLEMENTED_ADAPTERS.includes(r.code),
+      notes: r.config?.notes || null,
+    }));
+  }
+
   async getProvider(id) {
     const db = await getDb();
     const [row] = await db.select().from(deliveryProviders).where(eq(deliveryProviders.id, Number(id))).limit(1);
@@ -385,6 +417,7 @@ export class DeliveryService {
           id: sales.id,
           status: sales.status,
           onlineOrderId: sales.onlineOrderId,
+          invoiceNumber: sales.invoiceNumber,
           total: sales.total,
           currency: sales.currency,
           customerId: sales.customerId,
@@ -432,7 +465,55 @@ export class DeliveryService {
     const recipientPhone = def(input.recipientPhone, order?.customerPhone ?? sale?.customerPhone ?? null);
     const recipientAddress = def(input.recipientAddress, order?.customerAddress ?? sale?.customerAddress ?? null);
     const province = def(input.province, order?.province ?? sale?.customerCity ?? null);
+    const region = input.region || null;
     const sourceTotal = order?.totalAmount ?? sale?.total ?? 0;
+    const paymentType = input.paymentType || 'COLLECT_ON_DELIVERY';
+    const currency = input.currency || sale?.currency || 'IQD';
+    const codAmount = money(
+      input.codAmount != null ? input.codAmount : paymentType === 'PREPAID' ? 0 : sourceTotal
+    );
+
+    // ── Unified business payload (provider-agnostic snapshot) ─────────────────
+    // Persisted as `requestPayload` (آخر payload) and merged into the carrier
+    // body by the adapter. Built from the order/invoice — never mutates them.
+    const lineItems = (order?.items || []).map((it) => {
+      const qty = Number(it.quantity) || 0;
+      const price = Number(it.unitPrice) || 0;
+      return {
+        productId: it.productId ?? null,
+        name: it.productName,
+        sku: it.productSku ?? null,
+        quantity: qty,
+        unitPrice: price,
+        subtotal: Number(it.subtotal ?? qty * price) || 0,
+      };
+    });
+    const pieces =
+      input.pieces != null
+        ? Number(input.pieces)
+        : lineItems.reduce((s, i) => s + i.quantity, 0) || null;
+    const shipmentPayload = {
+      onlineOrderId: onlineOrderId || null,
+      onlineOrderNumber: order?.orderNumber || null,
+      saleId: saleId || null,
+      invoiceNumber: order?.convertedInvoiceNumber || sale?.invoiceNumber || null,
+      customer: {
+        name: recipientName,
+        phone: recipientPhone,
+        secondaryPhone: input.secondaryPhone || null,
+        address: recipientAddress,
+        province,
+        region,
+        branchId: order?.branchId ?? null,
+      },
+      items: lineItems,
+      totals: { total: money(sourceTotal), codAmount, currency },
+      paymentType,
+      paymentMethod: input.paymentMethod || null,
+      notes: input.notes || order?.notes || null,
+      pieces,
+      weight: input.weight != null ? Number(input.weight) : null,
+    };
 
     // Insert the local PENDING shipment + CREATED event atomically.
     const shipment = await withTransaction(async (tx) => {
@@ -447,18 +528,19 @@ export class DeliveryService {
           recipientPhone,
           secondaryPhone: input.secondaryPhone || null,
           province,
-          region: input.region || null,
+          region,
           recipientAddress,
           description: input.description || null,
           size: input.size || null,
           fragile: !!input.fragile,
           readyToPickup: !!input.readyToPickup,
-          paymentType: input.paymentType || 'COLLECT_ON_DELIVERY',
+          paymentType,
           feeType: input.feeType || 'BY_MERCHANT',
-          codAmount: money(input.codAmount != null ? input.codAmount : sourceTotal),
+          codAmount,
           deliveryFee: money(input.deliveryFee || 0),
-          currency: input.currency || sale?.currency || 'IQD',
+          currency,
           notes: input.notes || null,
+          requestPayload: shipmentPayload,
           createdBy: userId ?? null,
         })
         .returning();
@@ -527,6 +609,51 @@ export class DeliveryService {
       userId,
     });
     return this.getShipmentById(shipment.id);
+  }
+
+  /**
+   * Re-send an order/sale to the carrier. The normal createShipment refuses when
+   * an active shipment already exists; resend (gated by
+   * online_orders:resend_to_shipping) supersedes any active shipment first, then
+   * creates a fresh one. Purely a delivery-table operation — it never touches
+   * sales, stock or GL, so financial/inventory figures are unaffected.
+   */
+  async resendShipment(input, user) {
+    const userId = typeof user === 'object' && user !== null ? user.id : user;
+    const db = await getDb();
+
+    let onlineOrderId = input.onlineOrderId ? Number(input.onlineOrderId) : null;
+    let saleId = input.saleId ? Number(input.saleId) : null;
+    if (onlineOrderId && !saleId) {
+      const order = await onlineOrderService.getById(onlineOrderId);
+      saleId = order.convertedSaleId || null;
+    }
+
+    const refs = [];
+    if (onlineOrderId) refs.push(eq(deliveryShipments.onlineOrderId, onlineOrderId));
+    if (saleId) refs.push(eq(deliveryShipments.saleId, saleId));
+    if (refs.length) {
+      const existing = await db
+        .select({ id: deliveryShipments.id, status: deliveryShipments.status })
+        .from(deliveryShipments)
+        .where(refs.length === 1 ? refs[0] : or(...refs));
+      const active = existing.filter((s) => !DELIVERY_TERMINAL_STATUSES.includes(s.status));
+      for (const s of active) {
+        // Best-effort provider cancel; always supersede locally so the fresh
+        // shipment can be created (createShipment blocks while one is active).
+        try {
+          await this.cancelShipment(s.id, user);
+        } catch {
+          await this._applyStatus(s.id, DELIVERY_STATUS.CANCELLED, {
+            eventType: DELIVERY_EVENT_TYPE.CANCELLED,
+            message: 'تم تجاوز الشحنة السابقة عند إعادة الإرسال',
+            userId,
+          });
+        }
+      }
+    }
+
+    return this.createShipment(input, user);
   }
 
   async getShipmentById(id) {

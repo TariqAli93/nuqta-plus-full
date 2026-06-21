@@ -1738,6 +1738,13 @@ export const deliveryShipments = pgTable(
     saleIdx: index('delivery_shipments_sale_idx').on(t.saleId),
     statusIdx: index('delivery_shipments_status_idx').on(t.status),
     trackingIdx: index('delivery_shipments_tracking_idx').on(t.trackingNumber),
+    // Composite (order, status) accelerates the EXISTS sub-selects in the
+    // online-commerce shipping reports (sent / not-sent counters + shipping
+    // company/status filters joined to online_orders).
+    orderStatusIdx: index('idx_delivery_shipments_online_order_status').on(
+      t.onlineOrderId,
+      t.status
+    ),
   })
 );
 

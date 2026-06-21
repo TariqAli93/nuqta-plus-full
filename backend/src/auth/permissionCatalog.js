@@ -80,6 +80,12 @@ export const PERMISSION_CATALOG = Object.freeze({
   'online_orders:return': { ar: 'إرجاع طلب أونلاين', group: G.ONLINE },
   'online_orders:convert': { ar: 'تحويل الطلب إلى فاتورة', group: G.ONLINE },
   'online_orders:delete': { ar: 'حذف طلب أونلاين', group: G.ONLINE },
+  // Invoice + shipping actions on an online order (the linked sale lives in the
+  // sales table; shipments live in delivery_shipments — these gate the UI).
+  'online_orders:open_invoice': { ar: 'فتح فاتورة الطلب الأونلاين', group: G.ONLINE },
+  'online_orders:send_to_shipping': { ar: 'إرسال الطلب إلى شركة الشحن', group: G.ONLINE },
+  'online_orders:resend_to_shipping': { ar: 'إعادة إرسال الطلب إلى شركة الشحن', group: G.ONLINE },
+  'online_orders:view_shipment': { ar: 'عرض بيانات شحنة الطلب الأونلاين', group: G.ONLINE },
   'view:online_orders': { ar: 'الوصول إلى صفحة طلبات الأونلاين', group: G.ONLINE, active: false },
 
   // ── Delivery ──

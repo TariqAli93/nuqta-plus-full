@@ -646,7 +646,38 @@ export class OnlineOrderService {
       .filter((it) => Number(it.quantity) > 0)
       .map((it) => ({ saleItemId: it.id, quantity: Number(it.quantity) }));
     if (items.length === 0) return null;
-    return saleService.createReturn(saleId, { items, reason: reason || 'إرجاع طلب أونلاين' }, user);
+    // Refund the paid portion so a fully-paid order can be returned (see
+    // returnOrder). For an unpaid order this resolves to 0 (debt write-off only).
+    const refundAmount = this._defaultRefundFor(sale, items);
+    return saleService.createReturn(
+      saleId,
+      { items, reason: reason || 'إرجاع طلب أونلاين', refundAmount },
+      user
+    );
+  }
+
+  /**
+   * Default cash refund for an online-order return: the customer must be made
+   * whole. Remaining debt is written off first; the already-paid remainder of
+   * the returned goods' value is refunded. Online sales are cash (no interest),
+   * so the goods subtotal is the returned value. Bounded by what was paid.
+   */
+  _defaultRefundFor(sale, items) {
+    const remaining = Number(sale.remainingAmount || 0);
+    const paid = Number(sale.paidAmount || 0);
+    const valueOf = (it) => {
+      const m = (sale.items || []).find(
+        (s) =>
+          (it.saleItemId != null && s.id === it.saleItemId) ||
+          (it.productId != null && s.productId === it.productId)
+      );
+      if (!m) return 0;
+      const qty = Number(m.quantity) || 0;
+      const perUnit = qty > 0 ? Number(m.subtotal || 0) / qty : Number(m.unitPrice || 0);
+      return perUnit * (Number(it.quantity) || 0);
+    };
+    const returnedValue = items.reduce((acc, it) => acc + valueOf(it), 0);
+    return Math.min(paid, Math.max(0, returnedValue - remaining));
   }
 
   /**
@@ -699,16 +730,28 @@ export class OnlineOrderService {
       throw new ValidationError('يجب تحديد صنف واحد على الأقل للإرجاع.');
     }
 
+    const items = returnData.items.map((it) => ({
+      saleItemId: it.saleItemId ?? undefined,
+      productId: it.productId ?? undefined,
+      quantity: Number(it.quantity),
+    }));
+    // A confirmed order's sale is paid in full at confirm time, so a return must
+    // refund the customer (remaining debt is 0). Default the refund to the
+    // paid-back portion when the caller didn't specify one — otherwise the sale
+    // engine rejects the return (returned value exceeds debt + refund).
+    const refundAmount =
+      returnData.refundAmount != null
+        ? returnData.refundAmount
+        : this._defaultRefundFor(await saleService.getById(order.convertedSaleId), items);
+
     const result = await saleService.createReturn(
       order.convertedSaleId,
       {
-        items: returnData.items.map((it) => ({
-          saleItemId: it.saleItemId ?? undefined,
-          productId: it.productId ?? undefined,
-          quantity: Number(it.quantity),
-        })),
+        items,
         reason: returnData.reason || 'إرجاع طلب أونلاين',
-        refundAmount: returnData.refundAmount,
+        refundAmount,
+        refundMethod: returnData.refundMethod,
+        refundReference: returnData.refundReference,
       },
       user
     );

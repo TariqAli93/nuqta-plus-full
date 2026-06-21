@@ -81,6 +81,28 @@ export const useDeliveryProviderStore = defineStore('deliveryProvider', {
       return providersInflight;
     },
 
+    /**
+     * Active carriers for the shipment "choose company" picker. Minimal,
+     * non-sensitive fields; available to anyone who may send/resend a shipment
+     * (gated by `delivery_shipments:create` — falls back to [] silently).
+     */
+    async fetchActiveProviders() {
+      try {
+        const res = await api.get('/delivery/providers/active', {
+          permission: 'delivery_shipments:create',
+          permissionMode: 'optional_feature',
+          fallbackValue: null,
+        });
+        return Array.isArray(res?.data?.data)
+          ? res.data.data
+          : Array.isArray(res?.data)
+            ? res.data
+            : [];
+      } catch {
+        return [];
+      }
+    },
+
     /** Load (or refresh) a single provider by its code, e.g. 'BOXY'. */
     async getByCode(code, { optional = false } = {}) {
       if (!this.providers.length) await this.fetchProviders({ optional });

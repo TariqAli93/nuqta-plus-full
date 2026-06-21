@@ -104,8 +104,14 @@ export function createBoxyAdapter(provider = {}) {
 
     async createShipment(shipment) {
       requireConfig();
+      // Unified business payload persisted on the shipment (order + invoice +
+      // line items + totals). Carriers ignore unknown fields, so this is safe.
+      const ctx = shipment.requestPayload || {};
+      const totals = ctx.totals || {};
       const body = {
         reference: shipment.shipmentNumber,
+        order_number: ctx.onlineOrderNumber || undefined,
+        invoice_number: ctx.invoiceNumber || undefined,
         customer_name: shipment.recipientName,
         customer_phone: shipment.recipientPhone,
         customer_second_phone: shipment.secondaryPhone || undefined,
@@ -117,9 +123,22 @@ export function createBoxyAdapter(provider = {}) {
         fragile: !!shipment.fragile,
         ready_to_pickup: !!shipment.readyToPickup,
         payment_type: shipment.paymentType || 'COLLECT_ON_DELIVERY',
+        payment_method: ctx.paymentMethod || undefined,
         fee_type: shipment.feeType || 'BY_MERCHANT',
         [config.codField || 'cod_amount']: Number(shipment.codAmount) || 0,
-        notes: shipment.notes || undefined,
+        order_total: totals.total != null ? Number(totals.total) : undefined,
+        currency: totals.currency || shipment.currency || undefined,
+        pieces: ctx.pieces != null ? ctx.pieces : undefined,
+        weight: ctx.weight != null ? ctx.weight : undefined,
+        items: Array.isArray(ctx.items) && ctx.items.length
+          ? ctx.items.map((it) => ({
+              name: it.name,
+              quantity: it.quantity,
+              price: it.unitPrice,
+              total: it.subtotal,
+            }))
+          : undefined,
+        notes: shipment.notes || ctx.notes || undefined,
       };
       // Create is retried ONLY on connection-level failure (no response) so we
       // never risk a duplicate shipment after the provider has already accepted.

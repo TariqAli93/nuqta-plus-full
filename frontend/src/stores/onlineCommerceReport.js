@@ -22,6 +22,9 @@ export const useOnlineCommerceReportStore = defineStore('onlineCommerceReport', 
       // Order-status + creator filters (apply to the orders funnel).
       status: null,
       userId: null,
+      // Shipping filters: by carrier (delivery provider) and shipment status.
+      shippingProviderId: null,
+      shippingStatus: null,
     },
   }),
 
@@ -36,6 +39,8 @@ export const useOnlineCommerceReportStore = defineStore('onlineCommerceReport', 
         ...(f.branchId ? { branchId: f.branchId } : {}),
         ...(f.status ? { status: f.status } : {}),
         ...(f.userId ? { userId: f.userId } : {}),
+        ...(f.shippingProviderId ? { shippingProviderId: f.shippingProviderId } : {}),
+        ...(f.shippingStatus ? { shippingStatus: f.shippingStatus } : {}),
       };
     },
 
@@ -51,7 +56,9 @@ export const useOnlineCommerceReportStore = defineStore('onlineCommerceReport', 
           permissionMode: 'optional_feature',
           fallbackValue: null,
         });
-        this.widgets = res?.data?.data || null;
+        // The axios interceptor already unwraps to the response body
+        // ({ success, data }), so the payload is `res.data` (NOT res.data.data).
+        this.widgets = res?.data || null;
         return this.widgets;
       } catch {
         // Any other failure — fail quietly (no data yet, network, etc.).
@@ -67,21 +74,19 @@ export const useOnlineCommerceReportStore = defineStore('onlineCommerceReport', 
       const notificationStore = useNotificationStore();
       const params = this._params();
       try {
+        // Interceptor unwraps to the body, so the payload is `res.data`.
         const overviewRes = await api.get('/reports/online-commerce/overview', { params });
-        this.overview = overviewRes.data?.data || null;
+        this.overview = overviewRes.data || null;
 
-        // Profit is permission-gated — a 403 just means "hide the profit table".
+        // Profit is permission-gated (reports:read_profit). Any failure just
+        // means "hide the profit table" — never block the rest of the report.
         try {
           const profitRes = await api.get('/reports/online-commerce/profit', { params });
-          this.profit = profitRes.data?.data?.profitByChannel || [];
+          this.profit = profitRes.data?.profitByChannel || [];
           this.profitDenied = false;
-        } catch (err) {
-          if (err.response?.status === 403) {
-            this.profit = [];
-            this.profitDenied = true;
-          } else {
-            throw err;
-          }
+        } catch {
+          this.profit = [];
+          this.profitDenied = true;
         }
         return this.overview;
       } catch (error) {

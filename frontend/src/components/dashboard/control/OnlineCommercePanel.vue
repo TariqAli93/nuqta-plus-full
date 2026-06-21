@@ -3,12 +3,14 @@
     <header class="cc-panel__head">
       <div class="cc-panel__title">
         <v-icon icon="mdi-storefront-outline" size="20" color="primary" />
-        <span>التجارة الأونلاين</span>
+        <span>البيع اونلاين</span>
       </div>
-      <RouterLink to="/reports/online-commerce-shipping" class="cc-panel__hint">التقارير ←</RouterLink>
+      <RouterLink to="/reports/online-commerce-shipping" class="cc-panel__hint"
+        >التقارير ←</RouterLink
+      >
     </header>
 
-    <div class="oc-widgets">
+    <div class="oc-widgets pa-3">
       <div class="oc-tile">
         <div class="oc-tile__label">
           <v-icon icon="mdi-inbox-arrow-down" size="15" color="blue-grey" /> طلبات جديدة
@@ -35,6 +37,22 @@
           <v-icon icon="mdi-keyboard-return" size="15" color="orange-darken-3" /> مرتجعة
         </div>
         <div class="oc-tile__value oc-tile__value--num">{{ fmt(w?.totals?.returned) }}</div>
+      </div>
+
+      <div class="oc-tile">
+        <div class="oc-tile__label">
+          <v-icon icon="mdi-truck-fast-outline" size="15" color="teal" /> مرسل للشحن
+        </div>
+        <div class="oc-tile__value oc-tile__value--num">{{ fmt(w?.totals?.sentToShipping) }}</div>
+      </div>
+
+      <div class="oc-tile">
+        <div class="oc-tile__label">
+          <v-icon icon="mdi-truck-alert-outline" size="15" color="blue-grey" /> غير مرسل للشحن
+        </div>
+        <div class="oc-tile__value oc-tile__value--num">
+          {{ fmt(w?.totals?.notSentToShipping) }}
+        </div>
       </div>
 
       <div class="oc-tile">
@@ -114,12 +132,14 @@
       </div>
     </div>
 
-    <div v-if="!store.widgetsLoading && !hasData" class="oc-empty">لا توجد بيانات تجارة أونلاين بعد</div>
+    <div v-if="!store.widgetsLoading && !hasData" class="oc-empty">
+      لا توجد بيانات تجارة أونلاين بعد
+    </div>
   </v-card>
 </template>
 
 <script setup>
-import { computed, onMounted } from 'vue';
+import { computed, watch } from 'vue';
 import { RouterLink } from 'vue-router';
 import { useOnlineCommerceReportStore } from '@/stores/onlineCommerceReport';
 import { usePermissions } from '@/composables/usePermissions';
@@ -137,15 +157,21 @@ const canView = computed(
 );
 
 const w = computed(() => store.widgets);
-const hasData = computed(
-  () => !!(w.value && (w.value.topChannel || w.value.totals?.totalOrders))
-);
+const hasData = computed(() => !!(w.value && (w.value.topChannel || w.value.totals?.totalOrders)));
 
 const fmt = (v) => new Intl.NumberFormat('en-US').format(Number(v) || 0);
 
-onMounted(() => {
-  if (canView.value && !store.widgets) store.fetchWidgets();
-});
+// Fetch as soon as the panel is allowed to show — and refresh on every mount.
+// `immediate` covers the case where the panel mounts BEFORE the auth session /
+// feature flags finish hydrating (canView starts false, then flips true): the
+// watcher fires on that transition instead of needing a full page reload.
+watch(
+  canView,
+  (ok) => {
+    if (ok) store.fetchWidgets();
+  },
+  { immediate: true }
+);
 </script>
 
 <style scoped>
@@ -153,7 +179,6 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 10px;
-  padding: 4px 2px 2px;
 }
 .oc-tile {
   background: rgba(var(--v-theme-on-surface), 0.04);

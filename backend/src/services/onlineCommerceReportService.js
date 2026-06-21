@@ -8,10 +8,12 @@ import {
   salesChannels,
   onlineOrders,
   currencySettings,
+  deliveryShipments,
 } from '../models/index.js';
 import { and, eq, ne, gte, lte, sql } from 'drizzle-orm';
 import { branchFilterFor } from './scopeService.js';
 import { isValidOrderStatus } from '../constants/orders.js';
+import { isValidDeliveryStatus } from '../constants/delivery.js';
 
 /**
  * Online Commerce reports — analytics over the sales-channel dimension and the
@@ -41,6 +43,12 @@ const RETURNED_COGS = sql`COALESCE(SUM(
 
 const ymd = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null);
 const num = (v) => (v == null ? 0 : Number(v) || 0);
+
+// Online-commerce sales/revenue/profit are recognised ONLY when the order is
+// completed (delivered). A confirmed-but-undelivered order, or one that was
+// fully returned (status RETURNED), contributes nothing to the money figures —
+// so "no completed orders" ⇒ sales = 0 and profit = 0.
+const COMPLETED_ORDER_STATUS = 'DELIVERED';
 
 /** Resolve the branch a report is scoped to (null = all, -1 = no access). */
 function resolveBranch(filters, actingUser) {
@@ -80,6 +88,8 @@ export class OnlineCommerceReportService {
       else if (branchId != null) c.push(eq(sales.branchId, branchId));
       if (filters.currency && filters.currency !== 'ALL') c.push(eq(sales.currency, filters.currency));
       if (filters.channelId) c.push(eq(sales.channelId, Number(filters.channelId)));
+      // Recognise revenue/profit at completion only (linked order DELIVERED).
+      c.push(eq(onlineOrders.status, COMPLETED_ORDER_STATUS));
       return c;
     };
 
@@ -94,6 +104,7 @@ export class OnlineCommerceReportService {
       })
       .from(sales)
       .innerJoin(salesChannels, eq(sales.channelId, salesChannels.id))
+      .innerJoin(onlineOrders, eq(sales.onlineOrderId, onlineOrders.id))
       .where(and(...salesScope()))
       .groupBy(sales.channelId, salesChannels.code, salesChannels.name, sales.currency);
 
@@ -106,6 +117,7 @@ export class OnlineCommerceReportService {
       .from(saleReturns)
       .innerJoin(sales, eq(saleReturns.saleId, sales.id))
       .innerJoin(salesChannels, eq(sales.channelId, salesChannels.id))
+      .innerJoin(onlineOrders, eq(sales.onlineOrderId, onlineOrders.id))
       .where(and(...salesScope()))
       .groupBy(sales.channelId, sales.currency);
 
@@ -149,8 +161,22 @@ export class OnlineCommerceReportService {
       cancelled: 0,
       totalOrderValue: 0,
       returnPercentage: 0,
+      sentToShipping: 0,
+      notSentToShipping: 0,
     };
     if (branch === -1) return { ordersByChannel: [], summary: emptySummary };
+
+    // "Sent to shipping" = the order has a real (non-voided) shipment. CANCELLED
+    // / FAILED shipments are voided/superseded, so they don't count as sent.
+    // Read-only EXISTS over delivery_shipments — never mutates anything.
+    const sentExists = sql`EXISTS (
+      SELECT 1 FROM ${deliveryShipments}
+      WHERE ${deliveryShipments.onlineOrderId} = ${onlineOrders.id}
+        AND ${deliveryShipments.status} NOT IN ('CANCELLED', 'FAILED')
+    )`;
+    // "Not sent" = eligible to ship (a confirmed/ready order with a linked sale)
+    // but with no live shipment yet.
+    const shippableSql = sql`${onlineOrders.status} IN ('CONFIRMED', 'READY_FOR_DELIVERY')`;
 
     const conds = [...dateConds(onlineOrders.createdAt, from, to)];
     if (filters.channelId) conds.push(eq(onlineOrders.channelId, Number(filters.channelId)));
@@ -159,6 +185,23 @@ export class OnlineCommerceReportService {
       conds.push(eq(onlineOrders.status, filters.status));
     }
     if (filters.userId) conds.push(eq(onlineOrders.createdBy, Number(filters.userId)));
+    // Filter by shipping company → only orders with a live shipment on it.
+    if (filters.shippingProviderId) {
+      conds.push(sql`EXISTS (
+        SELECT 1 FROM ${deliveryShipments}
+        WHERE ${deliveryShipments.onlineOrderId} = ${onlineOrders.id}
+          AND ${deliveryShipments.providerId} = ${Number(filters.shippingProviderId)}
+          AND ${deliveryShipments.status} NOT IN ('CANCELLED', 'FAILED')
+      )`);
+    }
+    // Filter by shipment status → only orders with a shipment in that state.
+    if (filters.shippingStatus && isValidDeliveryStatus(filters.shippingStatus)) {
+      conds.push(sql`EXISTS (
+        SELECT 1 FROM ${deliveryShipments}
+        WHERE ${deliveryShipments.onlineOrderId} = ${onlineOrders.id}
+          AND ${deliveryShipments.status} = ${filters.shippingStatus}
+      )`);
+    }
 
     const rows = await db
       .select({
@@ -173,6 +216,9 @@ export class OnlineCommerceReportService {
         delivered: sql`COALESCE(SUM(CASE WHEN ${onlineOrders.status} = 'DELIVERED' THEN 1 ELSE 0 END), 0)`,
         returned: sql`COALESCE(SUM(CASE WHEN ${onlineOrders.status} = 'RETURNED' THEN 1 ELSE 0 END), 0)`,
         cancelled: sql`COALESCE(SUM(CASE WHEN ${onlineOrders.status} = 'CANCELLED' THEN 1 ELSE 0 END), 0)`,
+        // Shipping funnel (read-only over delivery_shipments).
+        sentToShipping: sql`COALESCE(SUM(CASE WHEN ${sentExists} THEN 1 ELSE 0 END), 0)`,
+        notSentToShipping: sql`COALESCE(SUM(CASE WHEN ${shippableSql} AND NOT ${sentExists} THEN 1 ELSE 0 END), 0)`,
       })
       .from(onlineOrders)
       .innerJoin(salesChannels, eq(onlineOrders.channelId, salesChannels.id))
@@ -200,6 +246,8 @@ export class OnlineCommerceReportService {
         returned,
         cancelled: num(r.cancelled),
         returnPercentage: rate(delivered, returned),
+        sentToShipping: num(r.sentToShipping),
+        notSentToShipping: num(r.notSentToShipping),
       };
     });
 
@@ -211,6 +259,8 @@ export class OnlineCommerceReportService {
         acc.returned += c.returned;
         acc.cancelled += c.cancelled;
         acc.totalOrderValue += c.totalOrderValue;
+        acc.sentToShipping += c.sentToShipping;
+        acc.notSentToShipping += c.notSentToShipping;
         return acc;
       },
       { ...emptySummary }
@@ -237,6 +287,8 @@ export class OnlineCommerceReportService {
       else if (branchId != null) c.push(eq(sales.branchId, branchId));
       if (filters.currency && filters.currency !== 'ALL') c.push(eq(sales.currency, filters.currency));
       if (filters.channelId) c.push(eq(sales.channelId, Number(filters.channelId)));
+      // Recognise revenue/profit at completion only (linked order DELIVERED).
+      c.push(eq(onlineOrders.status, COMPLETED_ORDER_STATUS));
       return c;
     };
 
@@ -245,6 +297,7 @@ export class OnlineCommerceReportService {
       .from(saleItems)
       .innerJoin(sales, eq(saleItems.saleId, sales.id))
       .innerJoin(salesChannels, eq(sales.channelId, salesChannels.id))
+      .innerJoin(onlineOrders, eq(sales.onlineOrderId, onlineOrders.id))
       .leftJoin(products, eq(saleItems.productId, products.id))
       .where(and(...scopedSales()))
       .groupBy(sales.channelId, sales.currency);
@@ -255,6 +308,7 @@ export class OnlineCommerceReportService {
       .innerJoin(saleReturns, eq(saleReturnItems.returnId, saleReturns.id))
       .innerJoin(sales, eq(saleReturns.saleId, sales.id))
       .innerJoin(salesChannels, eq(sales.channelId, salesChannels.id))
+      .innerJoin(onlineOrders, eq(sales.onlineOrderId, onlineOrders.id))
       // Read the frozen sale-time cost from the original sale line; fall back to
       // the product base cost (legacy rows) — matches reportService.RETURNED_COGS.
       .leftJoin(saleItems, eq(saleReturnItems.saleItemId, saleItems.id))
@@ -389,6 +443,8 @@ export class OnlineCommerceReportService {
         currency: filters.currency || 'ALL',
         status: filters.status || null,
         userId: filters.userId ? Number(filters.userId) : null,
+        shippingProviderId: filters.shippingProviderId ? Number(filters.shippingProviderId) : null,
+        shippingStatus: filters.shippingStatus || null,
       },
       salesByChannel: salesRev.salesByChannel, // #1
       ordersByChannel: orders.ordersByChannel, // #2

@@ -77,6 +77,21 @@ export const useDeliveryShipmentStore = defineStore('deliveryShipment', {
     },
 
     /**
+     * Re-send an order/sale to the carrier (perm online_orders:resend_to_shipping).
+     * Supersedes any active shipment, then creates a fresh one.
+     */
+    async resendShipment(payload) {
+      const notificationStore = useNotificationStore();
+      try {
+        const res = await api.post('/delivery/shipments/resend', payload);
+        return res.data?.data || res.data;
+      } catch (error) {
+        notificationStore.error(error?.message || 'تعذّر إعادة إرسال الشحنة');
+        throw error;
+      }
+    },
+
+    /**
      * Quote shipping cost (provider optional → default). Does NOT toast here so
      * the caller can show an inline hint (e.g. a muted "غير مدعوم" on 409).
      */
