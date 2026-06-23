@@ -109,7 +109,9 @@
             variant="tonal"
             :color="item.channelColor || undefined"
           >
-            <v-icon start size="14">{{ item.channelIcon || 'mdi-bullhorn-variant' }}</v-icon>
+            <v-icon start size="14">{{
+              `mdi-${item.channelIcon}` || 'mdi-bullhorn-variant'
+            }}</v-icon>
             {{ item.channelName }}
           </v-chip>
           <span v-else class="text-disabled">—</span>

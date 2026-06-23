@@ -164,6 +164,11 @@ export class ProductService {
     // always arrive with a positive cost (enforced by productCreateSchema).
     const isService = productOnly.productType === 'service';
     if (productOnly.costPrice == null) productOnly.costPrice = 0;
+    // Selling price is NOT NULL in the DB. A service may legitimately have no
+    // fixed price (it's set at sale time as السعر المستلم) — default it to 0 so
+    // the row can be created. Inventory always arrives with a positive selling
+    // price (enforced by productCreateSchema).
+    if (isService && productOnly.sellingPrice == null) productOnly.sellingPrice = 0;
 
     // Stock quantity is intentionally NOT written here — opening balance must
     // be entered via the inventory movement API (`/inventory/adjust`) so an

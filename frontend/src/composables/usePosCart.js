@@ -1,4 +1,4 @@
-import { computed, reactive, ref } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import { useSaleStore } from '@/stores/sale';
 import { useInventoryStore } from '@/stores/inventory';
 import { useSettingsStore } from '@/stores/settings';
@@ -17,6 +17,15 @@ import {
   calculateUnitProfit,
   resolveTierUnitPrice,
 } from '@/utils/productUnits';
+import {
+  isServiceProduct,
+  isServiceLine,
+  isServiceInvoice as isServiceInvoiceFn,
+  isFullAmountDisabled as isFullAmountDisabledFn,
+  serviceBlockingReason,
+  wouldMixTypes,
+  MIX_TYPES_ERROR,
+} from '@/utils/serviceInvoice';
 
 /**
  * POS cart + checkout state machine.
@@ -115,10 +124,15 @@ export function usePosCart() {
    */
   const addItem = (product, qty = 1, unitOverride = null) => {
     if (!product?.id) return;
+    // Block mixing a service with physical goods (and vice versa) in one invoice.
+    if (wouldMixTypes(items, product)) {
+      notify.error(MIX_TYPES_ERROR);
+      return;
+    }
     // Service products are never stocked: skip the availability gate, and use
     // 0 for the per-unit cap which (by the existing convention below) means
     // "no cap" — quantity can grow freely (e.g. تصليح شاشتين).
-    const isService = product.productType === 'service';
+    const isService = isServiceProduct(product);
     const baseAvailable = resolveStock(product);
     if (!isService && baseAvailable <= 0) {
       notify.warning(`"${product.name}" غير متوفر`);
@@ -156,6 +170,9 @@ export function usePosCart() {
       name: product.name,
       sku: product.sku || null,
       barcode: product.barcode || null,
+      // Kind snapshot — drives the per-line "السعر المستلم" field and the
+      // service/physical mixing + full-amount rules.
+      productType: product.productType || 'inventory',
       // Per-base-unit numbers. Frozen for the lifetime of the line — used as
       // the source of truth when the user switches units.
       basePrice,
@@ -338,6 +355,21 @@ export function usePosCart() {
   });
 
   const total = computed(() => roundCurrency(afterDiscount.value + taxValue.value));
+
+  // ── Service-invoice flags ──────────────────────────────────────────────────
+  // An invoice is service-only when every line is a service (mixing is blocked
+  // at add-time). Drives the "السعر المستلم" field, disables "المبلغ كامل", and
+  // forces full payment (a service is always paid in full = صافي ربح).
+  const isServiceInvoice = computed(() => isServiceInvoiceFn(items));
+  const fullAmountDisabled = computed(() => isFullAmountDisabledFn(items));
+
+  // A service invoice is paid in full by definition (received = paid = total).
+  // Keep the reactive paid amount synced so the readout, change and remaining
+  // all agree — the cashier never tenders separately for a service.
+  watch([isServiceInvoice, total], ([isSvc, t]) => {
+    if (isSvc) payment.paidAmount = t;
+  });
+
   const paidAmount = computed(() => Math.max(0, Number(payment.paidAmount) || 0));
   const change = computed(() => Math.max(0, paidAmount.value - total.value));
   const remaining = computed(() => Math.max(0, total.value - paidAmount.value));
@@ -372,6 +404,9 @@ export function usePosCart() {
   /** Reason the checkout button is disabled (null when submittable). */
   const blockingReason = computed(() => {
     if (items.length === 0) return 'السلة فارغة';
+    // A service line must carry a positive received price before checkout.
+    const serviceReason = serviceBlockingReason(items);
+    if (serviceReason) return serviceReason;
     if (total.value <= 0) return 'الإجمالي صفر';
     if (remaining.value > 0) {
       if (!payment.saveAsInstallment) return 'المبلغ المستلم أقل من الإجمالي';
@@ -420,6 +455,9 @@ export function usePosCart() {
         productId: i.productId,
         quantity: i.qty,
         unitPrice: Number(i.price) || 0,
+        // السعر المستلم — sent only for service lines so the backend uses the
+        // amount the cashier actually entered (not the stored service price).
+        serviceReceivedAmount: isServiceLine(i) ? Number(i.price) || 0 : undefined,
         discount: Number(i.discount) || 0,
         unitId: i.unitId || null,
         // Snapshot fields — the backend re-validates the conversionFactor
@@ -527,6 +565,7 @@ export function usePosCart() {
         name,
         sku: product?.sku || null,
         barcode: product?.barcode || null,
+        productType: product?.productType || it.productType || 'inventory',
         basePrice: Number(product?.sellingPrice) || price / (factor || 1),
         baseCostPrice: Number(product?.costPrice) || 0,
         wholesalePrice: product?.wholesalePrice == null ? null : Number(product.wholesalePrice),
@@ -584,6 +623,8 @@ export function usePosCart() {
     change,
     remaining,
     itemCount,
+    isServiceInvoice,
+    fullAmountDisabled,
     canSubmit,
     blockingReason,
     lineSubtotal,

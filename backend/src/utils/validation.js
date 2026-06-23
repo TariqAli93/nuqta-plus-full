@@ -111,7 +111,11 @@ export const productSchema = z.object({
   // no purchase cost) can be created without one. Inventory products still
   // require a positive cost — enforced by `productCreateSchema` below.
   costPrice: z.coerce.number().nonnegative('Cost price must be zero or more').optional(),
-  sellingPrice: z.coerce.number().positive('Selling price must be positive'),
+  // Selling price is optional at the schema level so a SERVICE product can be
+  // created without a fixed price (the price is then captured at sale time as
+  // "السعر المستلم"). Inventory products still require a positive selling price
+  // — enforced by `productCreateSchema` below.
+  sellingPrice: z.coerce.number().nonnegative('Selling price must be zero or more').optional(),
   currency: z.enum(['USD', 'IQD'], {
     errorMap: () => ({ message: 'Currency must be USD or IQD' }),
   }),
@@ -150,6 +154,15 @@ export const productCreateSchema = productSchema.superRefine((data, ctx) => {
       path: ['costPrice'],
       code: z.ZodIssueCode.custom,
       message: 'Cost price must be positive',
+    });
+  }
+  // Inventory products must carry a positive selling price; services may omit it
+  // (the price is entered at sale time). Service price stays free-form/optional.
+  if (type === 'inventory' && (data.sellingPrice == null || data.sellingPrice <= 0)) {
+    ctx.addIssue({
+      path: ['sellingPrice'],
+      code: z.ZodIssueCode.custom,
+      message: 'Selling price must be positive',
     });
   }
 });
@@ -413,7 +426,16 @@ export const onlineOrderConvertSchema = z.object({
 export const saleItemSchema = z.object({
   productId: z.number().int().positive('Product ID must be a positive integer'),
   quantity: z.number().int().positive('Quantity must be at least 1'),
-  unitPrice: z.coerce.number().positive('Unit price must be positive'),
+  // Unit price is relaxed to "zero or more, optional" so a SERVICE line that
+  // carries no stored price can defer its price to `serviceReceivedAmount`.
+  // Per-type positivity is enforced in the sale service: a physical line must
+  // have a positive unit price; a service line must have a positive received
+  // amount (السعر المستلم). Both raise clear Arabic errors there.
+  unitPrice: z.coerce.number().nonnegative('Unit price cannot be negative').optional(),
+  // السعر المستلم — the amount actually collected for a SERVICE line. When the
+  // service has no fixed price this is the authoritative price used for the
+  // line total, profit and payment. Ignored for physical products.
+  serviceReceivedAmount: z.coerce.number().nonnegative('Received price cannot be negative').optional(),
   discount: z.coerce.number().nonnegative('Discount cannot be negative').optional(),
   unitId: z.number().int().positive().nullable().optional(),
   // Per-line note (ملاحظة المنتج) — independent of the invoice-level note.

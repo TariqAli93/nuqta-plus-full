@@ -452,6 +452,24 @@
               </v-chip>
             </div>
 
+            <!-- Service line: السعر المستلم (required; no fixed stored price) -->
+            <div v-if="isService(item)" class="line__service-price" @click.stop>
+              <v-text-field
+                :model-value="item.price || ''"
+                :data-testid="`pos-service-price-${item.productId}`"
+                type="number"
+                min="0"
+                variant="outlined"
+                density="compact"
+                hide-details
+                hide-spin-buttons
+                label="السعر المستلم"
+                :error="!(Number(item.price) > 0)"
+                prepend-inner-icon="mdi-cash-edit"
+                @update:model-value="(v) => updatePrice(item.id, v)"
+              />
+            </div>
+
             <div v-if="cartExpiryWarning(item)" class="line__warn">
               <v-icon size="13">mdi-alert-outline</v-icon>
               {{ cartExpiryWarning(item) }}
@@ -700,7 +718,8 @@
             color="success"
             variant="elevated"
             prepend-icon="mdi-cash-multiple"
-            :disabled="items.length === 0"
+            :disabled="items.length === 0 || fullAmountDisabled"
+            :title="fullAmountDisabled ? 'غير متاح لفواتير الخدمات — تدفع بالسعر المستلم' : undefined"
             @click="onFullPayment"
           >
             المبلغ كامل
@@ -1149,6 +1168,7 @@ const {
   change,
   remaining,
   itemCount,
+  fullAmountDisabled,
   canSubmit,
   lineSubtotal,
   priceType,
@@ -1161,6 +1181,7 @@ const {
   updateQty,
   incQty,
   decQty,
+  updatePrice,
   updateLineDiscount,
   updateLineNote,
   updateLineUnit,

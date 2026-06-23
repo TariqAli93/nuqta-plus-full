@@ -21,6 +21,7 @@
         variant="tonal"
         prepend-icon="mdi-tune"
         size="default"
+        :loading="isInitialLoading"
         :disabled="!inventoryStore.selectedWarehouseId"
         @click="openAdjustDialog(null)"
       >
@@ -163,7 +164,12 @@
     </v-card>
 
     <!-- Adjust dialog -->
-    <v-dialog v-model="adjustDialog" max-width="520">
+    <v-dialog
+      :model-value="inventoryDialogStore.isAdjustDialogOpen"
+      persistent
+      max-width="520"
+      @update:model-value="(value) => { if (!value) inventoryDialogStore.closeAdjustDialog(); }"
+    >
       <v-card>
         <v-card-title class="d-flex align-center gap-2">
           <v-icon color="warning">mdi-tune</v-icon>
@@ -172,9 +178,9 @@
         <v-divider />
         <v-card-text class="pt-4">
           <v-autocomplete
-            data-testid="inventory-adjust-product"
             v-model="adjustForm.productId"
-            :items="inventoryStore.stock"
+            data-testid="inventory-adjust-product"
+            :items="adjustProductItems"
             item-title="name"
             item-value="productId"
             label="المنتج"
@@ -186,8 +192,8 @@
           <v-row dense class="mb-3">
             <v-col cols="12" sm="6">
               <v-select
-                data-testid="inventory-adjust-type"
                 v-model="adjustForm.movementType"
+                data-testid="inventory-adjust-type"
                 :items="movementTypeOptions"
                 label="نوع حركة المخزون"
                 variant="outlined"
@@ -196,8 +202,8 @@
             </v-col>
             <v-col cols="12" sm="3">
               <v-text-field
-                data-testid="inventory-adjust-qty"
                 v-model.number="adjustForm.quantity"
+                data-testid="inventory-adjust-qty"
                 label="الكمية"
                 type="number"
                 min="1"
@@ -220,8 +226,8 @@
           </v-row>
 
           <v-text-field
-            data-testid="inventory-adjust-reason"
             v-model="adjustForm.reason"
+            data-testid="inventory-adjust-reason"
             label="سبب التعديل (اختياري)"
             variant="outlined"
             density="comfortable"
@@ -250,8 +256,14 @@
         <v-divider />
         <v-card-actions class="pa-3">
           <v-spacer />
-          <v-btn variant="text" @click="adjustDialog = false">إلغاء</v-btn>
-          <v-btn data-testid="inventory-adjust-save" color="primary" :loading="adjusting" @click="submitAdjust">حفظ</v-btn>
+          <v-btn variant="text" @click="inventoryDialogStore.closeAdjustDialog()">إلغاء</v-btn>
+          <v-btn
+            data-testid="inventory-adjust-save"
+            color="primary"
+            :loading="adjusting"
+            @click="submitAdjust"
+            >حفظ</v-btn
+          >
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -259,9 +271,11 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch, nextTick } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
+import { storeToRefs } from 'pinia';
 import { useRoute, useRouter } from 'vue-router';
 import { useInventoryStore } from '@/stores/inventory';
+import { useInventoryDialogStore } from '@/stores/inventoryDialog';
 import { useNotificationStore } from '@/stores/notification';
 import { useAuthStore } from '@/stores/auth';
 import { useProductStore } from '@/stores/product';
@@ -274,11 +288,16 @@ import {
 } from '@/utils/inventoryMovementTypes';
 
 const inventoryStore = useInventoryStore();
+const inventoryDialogStore = useInventoryDialogStore();
 const notificationStore = useNotificationStore();
 const authStore = useAuthStore();
 const productStore = useProductStore();
 const router = useRouter();
 const route = useRoute();
+
+// Dialog state lives in a standalone store so it survives page reload/remount.
+// These refs stay writable (storeToRefs) so v-model bindings keep working.
+const { preselectedProduct, adjustForm } = storeToRefs(inventoryDialogStore);
 
 const canAdjust = computed(() => authStore.hasPermission?.('inventory:adjust') === true);
 // Mirror the StockTransfer route/menu gate (feature flag + capability) in
@@ -335,13 +354,17 @@ const filteredStock = computed(() =>
 
 const reload = async () => {
   if (!inventoryStore.selectedWarehouseId) return;
-  await inventoryStore.fetchWarehouseStock(inventoryStore.selectedWarehouseId, {
-    search: search.value || undefined,
-    lowStockOnly: lowStockOnly.value || undefined,
-  });
-  const alerts = await inventoryStore.fetchExpiryAlerts({
-    warehouseId: inventoryStore.selectedWarehouseId,
-  });
+  // Load the warehouse stock and the expiry alerts in parallel so the page's
+  // base data is ready together — the post-create auto-open waits on this.
+  const [, alerts] = await Promise.all([
+    inventoryStore.fetchWarehouseStock(inventoryStore.selectedWarehouseId, {
+      search: search.value || undefined,
+      lowStockOnly: lowStockOnly.value || undefined,
+    }),
+    inventoryStore.fetchExpiryAlerts({
+      warehouseId: inventoryStore.selectedWarehouseId,
+    }),
+  ]);
   const map = new Map();
   for (const row of alerts || []) {
     const key = `${row.productId}:${row.warehouseId}`;
@@ -353,46 +376,161 @@ const reload = async () => {
   expiryMap.value = map;
 };
 
-watch(() => inventoryStore.selectedWarehouseId, reload);
+// ── Initial load + post-create auto-open ────────────────────────────────────
+// The page's base data (warehouses → stock + expiry alerts) must finish loading
+// BEFORE we open the add-stock dialog for a just-created product. Otherwise an
+// in-flight reload settling after the dialog opened could disrupt it. So we only
+// *record* the deep-link request up front and open the dialog at the very end of
+// the initial load.
+const isInitialLoading = ref(true);
+const pendingOpenAddStockProductId = ref(null);
+const handledAutoOpenAddStock = ref(false);
 
-onMounted(async () => {
-  if (inventoryStore.branches.length === 0) await inventoryStore.fetchBranches();
-  if (inventoryStore.warehouses.length === 0) await inventoryStore.fetchWarehouses();
-  await reload();
-  await maybeOpenAdjustFromRoute();
-});
+// Capture the deep-link request ONCE (immediate) — do NOT open here. Both the
+// preferred `?openAddStock=1` and the legacy `?action=adjust` are honoured.
+watch(
+  () => route.query,
+  () => {
+    if (handledAutoOpenAddStock.value) return;
+    const wants =
+      route.query.openAddStock === '1' ||
+      route.query.openAddStock === 1 ||
+      route.query.action === 'adjust';
+    if (wants && route.query.productId) {
+      pendingOpenAddStockProductId.value = Number(route.query.productId);
+      handledAutoOpenAddStock.value = true;
+    }
+  },
+  { immediate: true }
+);
 
-// Allow other screens (e.g. ProductForm) to deep-link into the adjust flow:
-//   /inventory?productId=42&action=adjust
-// Resolves the row from the loaded warehouse stock and pre-fills the dialog.
-const maybeOpenAdjustFromRoute = async () => {
-  if (route.query.action !== 'adjust') return;
-  const productId = Number(route.query.productId);
-  if (!productId || !canAdjust.value) return;
-  if (!inventoryStore.selectedWarehouseId) {
-    notificationStore.error('اختر مخزناً قبل إضافة كمية افتتاحية');
+// Refresh stock + expiry when the active warehouse changes. IMPORTANT: this must
+// NEVER close the add-stock dialog — it only reloads data. It also stays out of
+// the way during the initial load (initInventoryPage drives that reload itself),
+// so it can't race the auto-open while a deep-link request is still pending.
+watch(
+  () => inventoryStore.selectedWarehouseId,
+  async (id) => {
+    if (!id) return;
+    if (isInitialLoading.value) return;
+    await reload();
+    // NEVER close the dialog or reset the adjust form here — switching the
+    // active warehouse must leave an open add-stock dialog untouched.
+  }
+);
+
+async function initInventoryPage() {
+  isInitialLoading.value = true;
+  try {
+    if (inventoryStore.branches.length === 0) await inventoryStore.fetchBranches();
+    if (inventoryStore.warehouses.length === 0) await inventoryStore.fetchWarehouses();
+    // A deep-link can land here before app-level init resolved a warehouse —
+    // resolve one so the stock/expiry load (and the auto-open) have a target.
+    if (!inventoryStore.selectedWarehouseId) {
+      await inventoryStore.resolveActiveWarehouse();
+    }
+    if (inventoryStore.selectedWarehouseId) {
+      await reload(); // warehouse stock + expiry alerts, in parallel
+    }
+    // Only now — after the base data is loaded — open the dialog if requested.
+    await handlePendingOpenAddStockDialog();
+  } finally {
+    isInitialLoading.value = false;
+  }
+}
+
+// Open the add-stock dialog for the just-created product, AFTER the base data
+// has loaded. Verifies the product exists (never opens an empty dialog). The
+// dialog state lives in the store, so it survives reloads/watchers/remounts —
+// the order here only governs correctness, not survival.
+async function handlePendingOpenAddStockDialog() {
+  const productId = Number(pendingOpenAddStockProductId.value);
+  if (!productId) return;
+
+  pendingOpenAddStockProductId.value = null; // consume once
+
+  if (!canAdjust.value) {
+    cleanInventoryRouteQueryWithoutRouter();
     return;
   }
-  await nextTick();
-  const row = (inventoryStore.stock || []).find((r) => Number(r.productId) === productId);
-  openAdjustDialog(row || { productId });
-  // Clear the query so a refresh doesn't re-open the dialog unexpectedly.
-  router.replace({ name: 'Inventory' });
-};
 
-// Adjust dialog state
-const adjustDialog = ref(false);
+  if (!inventoryStore.selectedWarehouseId) {
+    notificationStore.error('اختر مخزناً قبل إضافة كمية افتتاحية');
+    cleanInventoryRouteQueryWithoutRouter();
+    return;
+  }
+
+  // Prefer the loaded warehouse-stock row; a brand-new product has none yet, so
+  // fall back to loading the product to confirm it exists and show its name.
+  let product = null;
+  const stockRow = (inventoryStore.stock || []).find((r) => Number(r.productId) === productId);
+  if (stockRow) {
+    product = {
+      productId: Number(stockRow.productId),
+      name: stockRow.name,
+      sku: stockRow.sku,
+      tracksExpiry: !!stockRow.tracksExpiry,
+    };
+  } else {
+    try {
+      const loaded = await productStore.fetchProduct(productId);
+      const p = loaded?.data || loaded || productStore.currentProduct;
+      if (!p || Number(p.id) !== productId) {
+        notificationStore.error('تعذر العثور على المنتج الذي تم إنشاؤه');
+        cleanInventoryRouteQueryWithoutRouter();
+        return;
+      }
+      product = {
+        productId: Number(p.id),
+        name: p.name || `#${p.id}`,
+        sku: p.sku || null,
+        tracksExpiry: !!p.tracksExpiry,
+      };
+    } catch {
+      notificationStore.error('تعذّر تحميل بيانات المنتج');
+      cleanInventoryRouteQueryWithoutRouter();
+      return;
+    }
+  }
+
+  // Resolve the base unit BEFORE opening so the dialog shows it immediately.
+  const units = await fetchUnitsFor(productId);
+  const baseUnit = units.find((u) => u.isBase) || units[0] || null;
+
+  inventoryDialogStore.openAdjustDialog({
+    product,
+    warehouseId: inventoryStore.selectedWarehouseId,
+    unitId: baseUnit?.id || null,
+  });
+
+  cleanInventoryRouteQueryWithoutRouter();
+}
+
+// Strip the auto-open trigger params from the URL WITHOUT going through
+// vue-router. router.replace mutates the reactive route (and would remount a
+// keyed <router-view>), which is exactly what used to snap the dialog shut.
+// window.history.replaceState rewrites the address bar silently — no router
+// reactivity, no remount, no effect on the open dialog.
+function cleanInventoryRouteQueryWithoutRouter() {
+  const url = new URL(window.location.href);
+  if (
+    !url.searchParams.has('openAddStock') &&
+    !url.searchParams.has('productId') &&
+    !url.searchParams.has('action')
+  ) {
+    return;
+  }
+  url.searchParams.delete('openAddStock');
+  url.searchParams.delete('productId');
+  url.searchParams.delete('action');
+  const newUrl = url.pathname + (url.search ? url.search : '') + (url.hash ? url.hash : '');
+  window.history.replaceState(window.history.state, '', newUrl);
+}
+
+// Adjust dialog state now lives in `inventoryDialogStore` (isAdjustDialogOpen,
+// preselectedProduct, adjustForm) so it survives page reload/remount. Only the
+// transient submit-spinner stays local.
 const adjusting = ref(false);
-const preselectedProduct = ref(null);
-const adjustForm = ref({
-  productId: null,
-  unitId: null,
-  quantity: 1,
-  movementType: 'stock_in',
-  reason: '',
-  expiryDate: '',
-  costPrice: null,
-});
 const productUnitsCache = ref(new Map());
 
 const fetchUnitsFor = async (productId) => {
@@ -449,26 +587,41 @@ const isIncreaseMovement = computed(() => increaseMovementTypes.has(adjustForm.v
 const selectedProductTracksExpiry = computed(() => {
   const pid = Number(adjustForm.value.productId);
   const row = (inventoryStore.stock || []).find((r) => Number(r.productId) === pid);
-  return !!row?.tracksExpiry;
+  if (row) return !!row.tracksExpiry;
+  // Deep-linked new product isn't in the stock list yet — fall back to the
+  // preselected product snapshot loaded in maybeOpenAdjustFromRoute.
+  const pre = preselectedProduct.value;
+  if (pre && Number(pre.productId) === pid) return !!pre.tracksExpiry;
+  return false;
 });
 
-const openAdjustDialog = async (row) => {
-  preselectedProduct.value = row;
-  adjustForm.value = {
-    productId: row ? row.productId : null,
-    unitId: null,
-    quantity: 1,
-    movementType: 'opening_balance',
-    reason: '',
-    expiryDate: '',
-    costPrice: null,
-  };
-  adjustDialog.value = true;
-  if (row?.productId) {
-    const units = await fetchUnitsFor(row.productId);
-    const baseUnit = units.find((u) => u.isBase) || units[0] || null;
-    adjustForm.value.unitId = baseUnit?.id || null;
+// Items for the (locked) product picker: the warehouse stock list, plus the
+// preselected product when it isn't stocked yet (a freshly created product),
+// so its name renders instead of a blank field.
+const adjustProductItems = computed(() => {
+  const list = inventoryStore.stock || [];
+  const pre = preselectedProduct.value;
+  if (pre?.productId && !list.some((r) => Number(r.productId) === Number(pre.productId))) {
+    return [{ productId: pre.productId, name: pre.name || `#${pre.productId}` }, ...list];
   }
+  return list;
+});
+
+// Manual open (header button / table row). Resolves the base unit first, then
+// opens the dialog via the store. `row` may be null (open with no preselection
+// so the cashier picks a product in the autocomplete).
+const openAdjustDialog = async (row) => {
+  let unitId = null;
+  if (row?.productId) {
+    const units = await fetchUnitsFor(Number(row.productId));
+    const baseUnit = units.find((u) => u.isBase) || units[0] || null;
+    unitId = baseUnit?.id || null;
+  }
+  inventoryDialogStore.openAdjustDialog({
+    product: row || null,
+    warehouseId: inventoryStore.selectedWarehouseId,
+    unitId,
+  });
 };
 
 watch(
@@ -494,7 +647,7 @@ const submitAdjust = async () => {
   try {
     await inventoryStore.adjustStock({
       productId,
-      warehouseId: inventoryStore.selectedWarehouseId,
+      warehouseId: adjustForm.value.warehouseId || inventoryStore.selectedWarehouseId,
       quantityChange: quantity,
       unitId: unitId || undefined,
       movementType,
@@ -509,7 +662,8 @@ const submitAdjust = async () => {
           ? costPrice
           : undefined,
     });
-    adjustDialog.value = false;
+    // Close ONLY on a successful save, then refresh the table.
+    inventoryDialogStore.closeAdjustDialog();
     await reload();
   } catch {
     /* notification already handled */
@@ -521,4 +675,6 @@ const submitAdjust = async () => {
 const openTransferFor = (item) => {
   router.push({ name: 'StockTransfer', query: { productId: item.productId } });
 };
+
+onMounted(initInventoryPage);
 </script>

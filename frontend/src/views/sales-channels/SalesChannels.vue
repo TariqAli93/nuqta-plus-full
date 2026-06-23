@@ -31,7 +31,9 @@
         <template #[`item.name`]="{ item }">
           <div class="d-flex align-center gap-2">
             <v-avatar :color="item.color || 'grey-lighten-1'" size="32">
-              <v-icon color="white" size="18">{{ item.icon || 'mdi-bullhorn-variant' }}</v-icon>
+              <v-icon color="white" size="18">{{
+                `mdi-${item.icon}` || 'mdi-bullhorn-variant'
+              }}</v-icon>
             </v-avatar>
             <span>{{ item.name }}</span>
           </div>
@@ -105,31 +107,50 @@
             <div class="d-flex gap-3 mt-2">
               <v-text-field
                 v-model="formData.icon"
-                label="الأيقونة (mdi)"
-                placeholder="mdi-whatsapp"
+                label="الأيقونة"
+                placeholder="whatsapp"
                 variant="outlined"
                 density="comfortable"
                 class="flex-grow-1"
               >
                 <template #prepend-inner>
                   <v-icon :color="formData.color || undefined">{{
-                    formData.icon || 'mdi-bullhorn-variant'
+                    `mdi-${formData.icon}` || 'mdi-bullhorn-variant'
                   }}</v-icon>
                 </template>
               </v-text-field>
 
-              <v-text-field
-                v-model="formData.color"
-                label="اللون"
-                placeholder="#25D366"
-                variant="outlined"
-                density="comfortable"
-                style="max-width: 160px"
-              >
-                <template #prepend-inner>
-                  <v-avatar :color="formData.color || 'grey-lighten-1'" size="22" />
+              <v-menu :close-on-content-click="false" location="bottom" offset="8">
+                <template #activator="{ props }">
+                  <v-text-field v-bind="props" v-model="formData.color" label="Color" readonly>
+                    <template #prepend-inner>
+                      <div
+                        :style="{
+                          width: '20px',
+                          height: '20px',
+                          borderRadius: '4px',
+                          backgroundColor: formData.color,
+                          border: '1px solid #ccc',
+                        }"
+                      />
+                    </template>
+                  </v-text-field>
                 </template>
-              </v-text-field>
+
+                <v-card elevation="8">
+                  <v-color-picker
+                    v-model="formData.color"
+                    label="اللون"
+                    :placeholder="formData.color || 'grey-lighten-1'"
+                    mode="hexa"
+                    hide-inputs
+                  >
+                    <template #prepend-inner>
+                      <v-avatar :color="formData.color || 'grey-lighten-1'" size="22" />
+                    </template>
+                  </v-color-picker>
+                </v-card>
+              </v-menu>
             </div>
 
             <v-switch
@@ -185,7 +206,13 @@ const form = ref(null);
 const saving = ref(false);
 const selectedChannel = ref(null);
 
-const emptyForm = () => ({ name: '', code: '', color: '', icon: '', isActive: true });
+const emptyForm = () => ({
+  name: '',
+  code: '',
+  color: '',
+  icon: '',
+  isActive: true,
+});
 const formData = ref(emptyForm());
 
 const headers = [
@@ -209,7 +236,7 @@ const openDialog = (channel = null) => {
       name: channel.name ?? '',
       code: channel.code ?? '',
       color: channel.color ?? '',
-      icon: channel.icon ?? '',
+      icon: channel.icon ? `mdi-${channel.icon}` : 'mdi-bullhorn-variant',
       isActive: channel.isActive !== false,
     };
   } else {

@@ -202,7 +202,12 @@
     <v-main class="bg-surface">
       <v-container fluid>
         <router-view v-slot="{ Component, route }">
-          <component v-if="Component" :is="Component" :key="route.fullPath" />
+          <!-- Key by PATH (not fullPath): a page should remount when the route
+               or its params change, but NOT when only the query string changes.
+               Keying on fullPath remounted pages on every query edit — e.g. the
+               inventory deep-link cleanup `?openAddStock=1&productId=…` → `…` —
+               which destroyed in-page state like an open dialog. -->
+          <component v-if="Component" :is="Component" :key="route.path" />
         </router-view>
       </v-container>
     </v-main>

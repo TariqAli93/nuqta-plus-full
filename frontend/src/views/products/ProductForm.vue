@@ -156,9 +156,15 @@
               <v-text-field
                 data-testid="product-selling-price"
                 :model-value="formatNumber(formData.sellingPrice)"
-                label="سعر البيع"
+                :label="isService ? 'سعر البيع (اختياري)' : 'سعر البيع'"
                 :suffix="formData.currency"
-                :rules="[rules.required]"
+                :rules="isService ? [] : [rules.required]"
+                :hint="
+                  isService
+                    ? 'اتركه فارغاً إن لم يكن للخدمة سعر ثابت — يُحدَّد السعر المستلم وقت البيع'
+                    : ''
+                "
+                :persistent-hint="isService"
                 @update:model-value="handleSellingPriceInput"
               ></v-text-field>
             </v-col>
@@ -933,7 +939,9 @@ const goToAddOpeningStock = () => {
   openingStockDialog.value = false;
   router.push({
     name: 'Inventory',
-    query: id ? { productId: id, action: 'adjust' } : {},
+    // Deep-link the inventory page straight into the add-stock dialog for the
+    // product we just created (it auto-opens it, preselected + locked).
+    query: id ? { openAddStock: 1, productId: id } : {},
   });
 };
 

@@ -441,6 +441,74 @@ async function resolveBranchWarehouse({ branchId, warehouseId, actingUser }) {
   return { branchId: effectiveBranchId, warehouseId: defaultWarehouseId };
 }
 
+/**
+ * Load each line's product type, enforce the service/physical business rules,
+ * and normalise SERVICE lines so the rest of the pipeline (totals, snapshot,
+ * profit) treats the received price (السعر المستلم) as the line's unit price.
+ *
+ * Business rules (req: منتجات/خدمات):
+ *   - An invoice is EITHER physical-only OR service-only — never mixed.
+ *   - A physical line needs a positive unit price.
+ *   - A service line needs a positive received amount; the stored service price
+ *     is ignored when blank/zero ("لا تعتمد على سعر الخدمة المخزن إذا كان فارغاً").
+ *
+ * Mutates `items` in place: each service line's `unitPrice` becomes the
+ * received amount. Cost stays 0 for services (no purchase cost), so the whole
+ * received amount falls through as profit downstream.
+ *
+ * @returns {Promise<{hasService: boolean, hasPhysical: boolean}>}
+ */
+async function validateAndNormaliseItemTypes(items) {
+  const ids = [...new Set((items || []).map((i) => i.productId).filter(Boolean))];
+  const db = await getDb();
+  const rows = ids.length
+    ? await db
+        .select({ id: products.id, productType: products.productType })
+        .from(products)
+        .where(inArray(products.id, ids))
+    : [];
+  const typeById = new Map(rows.map((r) => [r.id, r.productType]));
+
+  let hasService = false;
+  let hasPhysical = false;
+
+  for (const item of items) {
+    const isService = (typeById.get(item.productId) || 'inventory') === 'service';
+    if (isService) {
+      hasService = true;
+      const received =
+        item.serviceReceivedAmount != null
+          ? Number(item.serviceReceivedAmount)
+          : Number(item.unitPrice);
+      if (!(received > 0)) {
+        const err = new ValidationError('يجب إدخال السعر المستلم للخدمة');
+        err.code = 'SERVICE_PRICE_REQUIRED';
+        err.statusCode = 422;
+        throw err;
+      }
+      // The received price IS the line price for a service.
+      item.unitPrice = received;
+    } else {
+      hasPhysical = true;
+      if (!(Number(item.unitPrice) > 0)) {
+        const err = new ValidationError('سعر المنتج يجب أن يكون أكبر من صفر');
+        err.code = 'PRODUCT_PRICE_REQUIRED';
+        err.statusCode = 422;
+        throw err;
+      }
+    }
+  }
+
+  if (hasService && hasPhysical) {
+    const err = new ValidationError('لا يمكن دمج خدمة مع منتجات فعلية في نفس الفاتورة');
+    err.code = 'MIXED_SERVICE_PHYSICAL';
+    err.statusCode = 422;
+    throw err;
+  }
+
+  return { hasService, hasPhysical };
+}
+
 export class SaleService {
   async create(saleData, user) {
     // Backward-compat: callers previously passed userId (number). Normalise.
@@ -451,6 +519,11 @@ export class SaleService {
     if (!saleData.items || saleData.items.length === 0) {
       throw new ValidationError('Sale must have at least one item');
     }
+
+    // Enforce the service/physical rules and fold each service line's received
+    // price (السعر المستلم) into its unitPrice before computing totals. Throws a
+    // clear Arabic error on a mixed invoice or a service with no received price.
+    await validateAndNormaliseItemTypes(saleData.items);
 
     const totals = calculateSaleTotals(saleData.items, saleData.discount || 0, saleData.tax || 0);
 
@@ -2409,6 +2482,10 @@ export class SaleService {
     if (!saleData.items || saleData.items.length === 0) {
       throw new ValidationError('Sale must have at least one item');
     }
+
+    // Finalising a draft creates a real invoice — apply the same service/physical
+    // guards and received-price normalisation as a direct sale.
+    await validateAndNormaliseItemTypes(saleData.items);
 
     const totals = calculateSaleTotals(saleData.items, saleData.discount || 0, saleData.tax || 0);
 
