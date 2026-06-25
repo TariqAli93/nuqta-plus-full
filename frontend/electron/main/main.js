@@ -178,6 +178,11 @@ function createWindow() {
     minWidth: 600,
     minHeight: 700,
     show: false,
+    // Frameless: the renderer (Desktop Shell) draws its own title bar + window
+    // controls. `thickFrame` stays at its default (true) on Windows so the
+    // window keeps native resize borders, snapping and shadow.
+    frame: false,
+    backgroundColor: '#0F0F12',
     icon: isDev ? join(__dirname, '../../build/icon.png') : join(__dirname, '../build/icon.png'),
     webPreferences: {
       devTools: true,
@@ -208,6 +213,15 @@ function createWindow() {
   });
 
   mainWindow.removeMenu();
+
+  // Keep the renderer's custom maximize/restore button icon in sync with the
+  // real window state (covers OS-driven maximize: snap, double-click, Win+Up).
+  const emitMaximizeState = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.webContents.send('window:maximizeChanged', mainWindow.isMaximized());
+  };
+  mainWindow.on('maximize', emitMaximizeState);
+  mainWindow.on('unmaximize', emitMaximizeState);
 
   // Add error handlers for debugging
   mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
@@ -1528,6 +1542,26 @@ ipcMain.handle('app:close', () => {
   app.quit();
   app.exit(0);
 });
+
+// --- Custom title-bar window controls (frameless main window) ---
+ipcMain.handle('window:minimize', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.minimize();
+});
+
+ipcMain.handle('window:toggleMaximize', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMaximized()) mainWindow.unmaximize();
+  else mainWindow.maximize();
+});
+
+ipcMain.handle('window:close', () => {
+  // Routes through mainWindow.on('close') → keeps the confirmation dialog.
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
+});
+
+ipcMain.handle('window:isMaximized', () =>
+  mainWindow && !mainWindow.isDestroyed() ? mainWindow.isMaximized() : false
+);
 
 // --- Export backup and reset database ---
 ipcMain.handle('backup:exportAndCreateNewDatabase', async (_e) => {

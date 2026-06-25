@@ -32,6 +32,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   setSize: (width, height) => ipcRenderer.invoke('window:auto-resize', { width, height }),
 
+  // ---- Custom title-bar window controls (frameless main window) ----
+  // The desktop shell draws its own min/max/close buttons; these forward to the
+  // main process. `close` triggers the existing close-confirmation dialog.
+  windowControls: {
+    minimize: () => ipcRenderer.invoke('window:minimize'),
+    toggleMaximize: () => ipcRenderer.invoke('window:toggleMaximize'),
+    close: () => ipcRenderer.invoke('window:close'),
+    isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
+    onMaximizeChange: (callback) => {
+      const handler = (_event, value) => callback(!!value);
+      ipcRenderer.on('window:maximizeChanged', handler);
+      return () => ipcRenderer.removeListener('window:maximizeChanged', handler);
+    },
+  },
+
   // ---- Register update listeners safely ----
   on(channel, callback) {
     if (!UPDATE_CHANNELS.includes(channel)) return null;

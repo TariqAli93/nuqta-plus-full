@@ -11,7 +11,8 @@
  * Companion central helpers:
  *   - `auth/permissions.js`       → permission/role access decisions
  *   - `composables/useFeatureGate`→ per-element {visible,disabled,reason} for buttons
- *   - `composables/useNavigationMenu` → the navigation tree (feature/permission aware)
+ *   - `composables/useNavigation`  → the navigation tree (feature/permission aware),
+ *                                    driven by `shell/navigation/registry`
  */
 
 import { useAuthStore } from '@/stores/auth';

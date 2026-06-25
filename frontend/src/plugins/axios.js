@@ -2,57 +2,59 @@ import axios from 'axios';
 import { useAuthStore } from '@/stores/auth';
 import { useNotificationStore } from '@/stores/notification';
 import { useLoadingStore } from '@/stores/loading';
+import { useInventoryStore } from '@/stores/inventory';
 import router from '@/router';
-import {
-  buildArabicErrorMessage,
-  extractArabicDetails,
-  buildPermissionDeniedDialog,
-} from '@/utils/errorTranslator';
-import { useErrorDialogStore } from '@/stores/errorDialog';
 import { hasPermission } from '@/auth/permissions';
+import { toAppError, ErrorCodes } from '@/api/AppError';
+import { presentAppError } from '@/api/errorPresenter';
 
 /**
- * Is this request an OPTIONAL / silent permission request? Such requests
- * (`permissionMode: 'optional_feature'` or `silentPermissionCheck: true`) never
- * raise a toast/dialog: a 403 just means "the user can't use this optional
- * sub-feature", so we resolve to the configured fallback instead.
+ * Central API client.
+ *
+ * One axios instance for the whole app. Two responsibilities, kept separate:
+ *   1. Request interceptor — enrich every request with shared context
+ *      (auth token, branch, locale, request id).
+ *   2. Response interceptor — unwrap the body on success; on failure convert to
+ *      a unified AppError, run the unavoidable GLOBAL side-effects (session
+ *      expiry / capability refresh), and present it ONCE — unless the caller
+ *      opted out via `meta.silent` (inline UX) or `meta.handled` (the
+ *      command/page presents it itself). The interceptor NEVER re-implements
+ *      per-page error handling, and the conversion (toAppError) is independent
+ *      of the decision to show (presentAppError) — rule 6.
+ *
+ * Callers read the unwrapped JSON body: `res.data` / `res.meta`.
  */
+
+/** Optional/silent permission request — a 403 just means "feature unavailable". */
 const isOptionalPermissionRequest = (config) =>
   config?.permissionMode === 'optional_feature' || config?.silentPermissionCheck === true;
 
-/** The value an optional request resolves to when blocked/denied (default null). */
+/** Fallback value an optional request resolves to when blocked/denied. */
 const optionalFallback = (config) =>
   config && Object.prototype.hasOwnProperty.call(config, 'fallbackValue')
     ? config.fallbackValue
     : null;
 
-// Helper to get help link based on error type
-const getHelpLinkForError = (error) => {
-  const status = error.response?.status;
-  const errorType = error.response?.data?.error;
+/** Correlation id for tracing a request through logs (no PII). */
+function newRequestId() {
+  try {
+    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  } catch {
+    /* not available */
+  }
+  return `req-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+}
 
-  if (status === 401) {
-    return { url: '/auth/login', text: 'تسجيل الدخول' };
+/** Active branch id (best-effort, never throws / blocks a request). */
+function currentBranchId() {
+  try {
+    const inventory = useInventoryStore();
+    return inventory?.selectedBranchId ?? null;
+  } catch {
+    return null;
   }
-  if (status === 403) {
-    return { url: '/profile', text: 'التحقق من الصلاحيات' };
-  }
-  if (status === 404 && error.config?.url?.includes('/products')) {
-    return { url: '/products', text: 'عرض المنتجات' };
-  }
-  if (status === 404 && error.config?.url?.includes('/customers')) {
-    return { url: '/customers', text: 'عرض العملاء' };
-  }
-  if (errorType === 'ValidationError') {
-    return { url: '/settings', text: 'التحقق من الإعدادات' };
-  }
+}
 
-  return null;
-};
-
-// The base URL is set dynamically by the connection store.
-// In server mode it defaults to localhost:41732; in client mode it
-// comes from the user's saved server configuration.
 const api = axios.create({
   baseURL: 'http://127.0.0.1:41732/api', // overridden at runtime by initAxiosBaseUrl()
   timeout: 10000,
@@ -62,39 +64,50 @@ const api = axios.create({
 });
 
 /**
- * Call once at app startup (after Pinia is ready) to sync the axios
- * baseURL with the connection store.  Also installs a reactive watcher
- * so future changes to the server URL propagate automatically.
- *
- * @param {import('@/stores/connection').ReturnType<typeof import('@/stores/connection').useConnectionStore>} connectionStore
+ * Sync the axios baseURL with the connection store (call once after Pinia is
+ * ready) and keep it reactive to future server-URL changes.
  */
 export function initAxiosBaseUrl(connectionStore) {
-  // Set initial baseURL
   if (connectionStore.apiBaseUrl) {
     api.defaults.baseURL = connectionStore.apiBaseUrl;
   }
-
-  // Import watch inline — this function is called after Vue app is ready
   import('vue').then(({ watch }) => {
     watch(
       () => connectionStore.apiBaseUrl,
       (newUrl) => {
-        if (newUrl) {
-          api.defaults.baseURL = newUrl;
-        }
+        if (newUrl) api.defaults.baseURL = newUrl;
       }
     );
   });
 }
 
-// Request interceptor
+/** Attach shared request context: token, branch, locale, request id. */
+function applyRequestContext(config) {
+  const authStore = useAuthStore();
+  const token = authStore.token;
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+
+  // Locale + correlation id (don't clobber a per-call override).
+  if (!config.headers['Accept-Language']) config.headers['Accept-Language'] = 'ar';
+  if (!config.headers['X-Request-Id']) config.headers['X-Request-Id'] = newRequestId();
+
+  // Branch context, when one is active and not explicitly overridden.
+  if (config.headers['X-Branch-Id'] == null) {
+    const branchId = currentBranchId();
+    if (branchId != null) config.headers['X-Branch-Id'] = String(branchId);
+  }
+
+  // Let the browser set the multipart boundary for FormData uploads.
+  if (config.data instanceof FormData) delete config.headers['Content-Type'];
+
+  return config;
+}
+
+// ── Request interceptor ────────────────────────────────────────────────────
 api.interceptors.request.use(
   (config) => {
-    // Optional-feature pre-check (BEFORE starting the loading bar): if this
-    // request declares a `permission` and is an optional/silent request, and
-    // the user lacks that permission, never hit the network. We reject with a
-    // sentinel the response handler turns into a silent fallback — no request,
-    // no loading bar, no toast.
+    // Optional-feature pre-check: never hit the network for an optional request
+    // the user isn't allowed to make. Resolved to a silent fallback below.
     if (
       config.permission &&
       isOptionalPermissionRequest(config) &&
@@ -106,126 +119,74 @@ api.interceptors.request.use(
       return Promise.reject(blocked);
     }
 
-    // بدء تتبع الطلب في نظام التحميل.
-    // Requests flagged `meta.silent` (e.g. live search) opt out of the global
-    // loading bar — they render their own inline loading state — and out of the
-    // global error toast/dialog. Start/end must stay balanced, so we gate both.
+    // Global loading bar (silent requests render their own inline state).
     const loadingStore = useLoadingStore();
     if (!config.meta?.silent) loadingStore.startRequest();
 
-    const authStore = useAuthStore();
-    const token = authStore.token;
-
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-
-    // If the data is FormData, remove Content-Type header to let browser set it with boundary
-    if (config.data instanceof FormData) {
-      delete config.headers['Content-Type'];
-    }
-
-    return config;
+    return applyRequestContext(config);
   },
   (error) => {
-    // في حالة خطأ في الطلب، إنهاء تتبع التحميل
     const loadingStore = useLoadingStore();
     if (!error.config?.meta?.silent) loadingStore.endRequest();
-
-    return Promise.reject(error);
+    return Promise.reject(toAppError(error));
   }
 );
 
-// Response interceptor
+// ── Response interceptor ─────────────────────────────────────────────────────
 api.interceptors.response.use(
   (response) => {
-    // إنهاء تتبع الطلب في حالة النجاح
     const loadingStore = useLoadingStore();
     if (!response.config?.meta?.silent) loadingStore.endRequest();
-
+    // Unwrap to the JSON body `{ success, data, meta }`.
     return response.data;
   },
   (error) => {
-    // Optional-feature request that was short-circuited BEFORE sending (the user
-    // lacks its permission). The loading bar was never started and nothing hit
-    // the network — resolve silently to the configured fallback (null / []).
-    if (error?.__optionalBlocked) {
-      return optionalFallback(error.config);
-    }
+    // Optional request short-circuited before sending → silent fallback.
+    if (error?.__optionalBlocked) return optionalFallback(error.config);
 
-    // إنهاء تتبع الطلب في حالة الخطأ
     const loadingStore = useLoadingStore();
     const isSilent = !!error.config?.meta?.silent;
     if (!isSilent) loadingStore.endRequest();
 
-    // Aborted/superseded requests (e.g. a debounced search replaced by a newer
-    // query) are not real errors — reject quietly so the caller can ignore them
-    // via axios.isCancel(), with no toast.
+    // Canceled/superseded request — keep the RAW error so axios.isCancel() and
+    // isCanceledRequest() still detect it; never a real failure, never shown.
     if (axios.isCancel(error) || error.code === 'ERR_CANCELED') {
       return Promise.reject(error);
     }
 
-    // Silent requests manage their own error UX (inline state). Skip the global
-    // toast/dialog entirely (req #12 — never surface technical errors here).
-    if (isSilent) {
-      return Promise.reject(error);
-    }
+    // Silent requests own their UX inline — convert (for consistent catch) but
+    // never present.
+    if (isSilent) return Promise.reject(toAppError(error));
 
-    // Optional-feature / silent-permission requests that WERE sent: a 403 here
-    // means the user can't use this optional sub-feature — resolve to the
-    // fallback with NO toast/dialog. Any other failure of an optional background
-    // call also stays silent (rejected quietly so callers may handle it).
+    // Optional-feature request that WAS sent: 403 → silent fallback; any other
+    // failure of an optional background call stays quiet.
     if (isOptionalPermissionRequest(error.config)) {
-      if (error.response?.status === 403) {
-        return optionalFallback(error.config);
-      }
-      return Promise.reject(error.response?.data || error.message);
+      if (error.response?.status === 403) return optionalFallback(error.config);
+      return Promise.reject(toAppError(error));
     }
 
-    const notificationStore = useNotificationStore();
+    const appError = toAppError(error);
+    const status = appError.status;
+    // The caller (command/page action) will present this itself.
+    const handled = error.config?.meta?.handled === true;
 
-    // Build a precise, user-friendly message from backend response
-    const buildMessage = (err) => buildArabicErrorMessage(err);
-
-    // Handle 401 Unauthorized — invalid/expired token. Wipe session state
-    // and bounce to login. We deliberately use clearSessionState() instead
-    // of logout() so the noisy "logged out" toast doesn't fire on a silent
-    // session expiry, and we skip the redirect when the failed call WAS
-    // /auth/session itself (refreshSession already handles the 401).
-    if (error.response?.status === 401) {
+    // ── Global side-effects (always, even when `handled`) ──────────────────
+    if (status === 401) {
+      // Invalid/expired token: wipe session and bounce to login. Use
+      // clearSessionState (not logout) so no extra "logged out" toast fires,
+      // and skip redirect when the failed call WAS /auth/session.
       const authStore = useAuthStore();
       const isSessionCheck = error.config?.url?.endsWith('/auth/session');
       authStore.clearSessionState();
       if (!isSessionCheck && router.currentRoute.value.meta?.requiresAuth) {
         router.push({ name: 'Login' });
       }
-      notificationStore.error(
-        buildMessage(error) || 'انتهت صلاحية الجلسة. يرجى تسجيل الدخول مرة أخرى'
-      );
-      return Promise.reject(error.response?.data || error.message);
-    }
-
-    // Handle 429 Rate Limit
-    if (error.response?.status === 429) {
-      const retryAfter = error.response.headers['retry-after'] || 40;
-      notificationStore.warning(`تم تجاوز حد الطلبات. حاول مرة أخرى بعد ${retryAfter} ثانية`, 6000);
-      return Promise.reject(error.response?.data || error.message);
-    }
-
-    // Handle 403 Forbidden
-    if (error.response?.status === 403) {
-      // FEATURE_DISABLED / CAPABILITY_DENIED → backend just rejected an
-      // action that the SPA may still think is available (e.g. another
-      // tab disabled it). Refresh the session so menus/buttons/routes
-      // re-evaluate against the latest state. The refresh latch inside
-      // `refreshSession()` prevents an infinite retry loop if the session
-      // endpoint itself ever started returning 403.
-      const code = error.response?.data?.code;
+    } else if (status === 403) {
+      // FEATURE_DISABLED / CAPABILITY_DENIED → another tab may have changed
+      // state; refresh the session so menus/routes re-evaluate. The refresh
+      // latch prevents an infinite loop.
       const isSessionCheck = error.config?.url?.endsWith('/auth/session');
-      if (
-        !isSessionCheck &&
-        (code === 'FEATURE_DISABLED' || code === 'CAPABILITY_DENIED')
-      ) {
+      if (!isSessionCheck && (appError.code === 'FEATURE_DISABLED' || appError.code === 'CAPABILITY_DENIED')) {
         try {
           const authStore = useAuthStore();
           if (authStore.isAuthenticated && !authStore.isHydrating) {
@@ -235,85 +196,22 @@ api.interceptors.response.use(
           /* non-fatal */
         }
       }
-
-      // Permission/capability denial → show the full structured explanation
-      // (action, required permission, reason, suggestion) in the error dialog
-      // instead of a one-line toast, so the user knows exactly what to do.
-      const permDialog = buildPermissionDeniedDialog(error);
-      if (permDialog) {
-        const dialog = useErrorDialogStore();
-        dialog.show(permDialog);
-        return Promise.reject(error.response?.data || error.message);
-      }
-
-      notificationStore.error(buildMessage(error) || 'ليس لديك صلاحية للوصول إلى هذا المورد');
-      return Promise.reject(error.response?.data || error.message);
     }
 
-    // Handle 404 Not Found
-    if (error.response?.status === 404) {
-      notificationStore.error(buildMessage(error) || 'المورد المطلوب غير موجود');
-      return Promise.reject(error.response?.data || error.message);
-    }
-
-    // Handle 500 Server Error
-    if (error.response?.status >= 500) {
-      notificationStore.error(buildMessage(error) || 'خطأ في الخادم. يرجى المحاولة لاحقاً');
-      return Promise.reject(error.response?.data || error.message);
-    }
-
-    // Handle Network Error
-    if (error.message === 'Network Error') {
-      notificationStore.error('فشل الاتصال بالخادم. تحقق من اتصال الإنترنت');
-      return Promise.reject(error);
-    }
-
-    // Handle Timeout
-    if (error.code === 'ECONNABORTED') {
-      notificationStore.error('انتهت مهلة الطلب. يرجى المحاولة مرة أخرى');
-      return Promise.reject(error);
-    }
-
-    // If we have validation details, show detailed dialog
-    const details = extractArabicDetails(error);
-    if (details.length > 0) {
-      const dialog = useErrorDialogStore();
-      dialog.show({
-        title: 'خطأ في التحقق من البيانات',
-        message: buildMessage(error),
-        details,
-        helpLink:
-          error.response?.status === 422
-            ? {
-                url: '/settings',
-                text: 'التحقق من الإعدادات',
-              }
-            : null,
-      });
-    } else {
-      // Fallback precise message with actionable help
-      const message = buildMessage(error);
-      const helpLink = getHelpLinkForError(error);
-
-      if (helpLink) {
-        notificationStore.showNotification({
-          message,
-          type: 'error',
-          timeout: 6000,
-          action: {
-            label: helpLink.text,
-            onClick: () => {
-              if (helpLink.url) {
-                router.push(helpLink.url);
-              }
-            },
-          },
-        });
-      } else {
-        notificationStore.error(message);
+    // ── Default presentation (skipped when handled by the caller) ──────────
+    if (!handled) {
+      if (status === 429) {
+        const retryAfter = error.response?.headers?.['retry-after'] || 40;
+        useNotificationStore().warning(
+          `تم تجاوز حد الطلبات. حاول مرة أخرى بعد ${retryAfter} ثانية`,
+          6000
+        );
+      } else if (appError.code !== ErrorCodes.CANCELED) {
+        presentAppError(appError);
       }
     }
-    return Promise.reject(error.response?.data || error.message);
+
+    return Promise.reject(appError);
   }
 );
 

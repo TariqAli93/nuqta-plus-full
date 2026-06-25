@@ -27,6 +27,7 @@
                   density="comfortable"
                   prepend-inner-icon="mdi-account"
                   :rules="[rules.required]"
+                  :error-messages="formErrors.messagesFor('name')"
                   required
                 ></v-text-field>
               </v-col>
@@ -38,7 +39,7 @@
                   density="comfortable"
                   prepend-inner-icon="mdi-phone"
                   :hint="phoneHint"
-                  :error-messages="phoneError ? [phoneError] : []"
+                  :error-messages="[...(phoneError ? [phoneError] : []), ...formErrors.messagesFor('phone')]"
                   persistent-hint
                 ></v-text-field>
               </v-col>
@@ -175,45 +176,36 @@
 import { ref, onMounted, computed } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useCustomerStore } from '@/stores/customer';
-import { useNotificationStore } from '@/stores/notification';
 import { useAuthStore } from '@/stores/auth';
 import { normalizeIraqPhone } from '@/utils/phone';
 import PageHeader from '@/components/PageHeader.vue';
+import { useCustomersData } from '../composables/useCustomersData.js';
+import { customerRules, emptyCustomer, customerTypeOptions } from '../schemas/customer.schema.js';
+import { useFormErrors } from '@/composables/useFormErrors';
 
 const router = useRouter();
 const route = useRoute();
-const notification = useNotificationStore();
 const customerStore = useCustomerStore();
 const authStore = useAuthStore();
+const { loadCustomer } = useCustomersData();
+
+// Binds server-side per-field validation errors (AppError.fieldErrors) to inputs.
+const formErrors = useFormErrors();
 
 const agentPricingOn = computed(() => authStore.hasFeature('agentPricing'));
 const canSetCreditLimit = computed(() => authStore.hasPermission?.('customers:set_credit_limit'));
-const customerTypeOptions = [
-  { value: 'retail', label: 'مفرد (تجزئة)' },
-  { value: 'wholesale', label: 'جملة' },
-  { value: 'agent', label: 'وكيل' },
-];
 
 const form = ref(null);
 const loading = ref(false);
 const duplicateDialog = ref(false);
 const duplicateExisting = ref(null);
 
-const formData = ref({
-  name: '',
-  phone: '',
-  city: '',
-  address: '',
-  notes: '',
-  customerType: 'retail',
-  creditLimit: null,
-});
+const formData = ref(emptyCustomer());
 
 const isEdit = computed(() => !!route.params.id);
 
-const rules = {
-  required: (v) => !!v || 'هذا الحقل مطلوب',
-};
+// Shared create/edit validators (features/customers/schemas/customer.schema.js).
+const rules = customerRules;
 
 // Live preview of how the API will store the phone for lookup. Empty input
 // → no hint. Un-normalisable input → soft warning (we don't block save —
@@ -238,6 +230,7 @@ const phoneError = computed(() => {
 
 async function performSave({ allowDuplicatePhone = false } = {}) {
   loading.value = true;
+  formErrors.clear();
   try {
     const payload = { ...formData.value };
     if (allowDuplicatePhone) payload.allowDuplicatePhone = true;
@@ -249,15 +242,18 @@ async function performSave({ allowDuplicatePhone = false } = {}) {
     duplicateDialog.value = false;
     router.push({ name: 'Customers' });
   } catch (error) {
-    const data = error?.response?.data;
-    if (data?.code === 'CUSTOMER_PHONE_DUPLICATE') {
-      // Hand off to the confirmation dialog. The user-entered phone is
-      // preserved verbatim — no silent rewrite.
-      duplicateExisting.value = data.details?.existingCustomer || null;
+    // `error` is a normalized AppError (from the central interceptor).
+    if (error?.code === 'CUSTOMER_PHONE_DUPLICATE') {
+      // Hand off to the confirmation dialog (phone preserved verbatim). The
+      // existing-customer hint lives on the original payload's details.
+      duplicateExisting.value =
+        error.originalError?.response?.data?.details?.existingCustomer || null;
       duplicateDialog.value = true;
       return;
     }
-    notification.error(error?.response?.data?.message || error?.message || 'فشل في حفظ العميل');
+    // The store already presented the toast (it owns customer-write
+    // presentation); here we only bind any per-field validation errors.
+    formErrors.setFromError(error);
   } finally {
     loading.value = false;
   }
@@ -275,22 +271,20 @@ onMounted(async () => {
   if (isEdit.value) {
     loading.value = true;
     try {
-      const customersList = await customerStore.fetch();
-      const currentCustomer = customersList.data.find((c) => {
-        return c.id === parseInt(route.params.id);
-      });
+      // Fetch just this record (via the feature service) instead of loading the
+      // whole list and finding it client-side.
+      const current = await loadCustomer(route.params.id);
       formData.value = {
-        name: currentCustomer?.name,
-        phone: currentCustomer?.phone,
-        city: currentCustomer?.city,
-        address: currentCustomer?.address,
-        notes: currentCustomer?.notes,
-        customerType: currentCustomer?.customerType || 'retail',
-        creditLimit:
-          currentCustomer?.creditLimit == null ? null : Number(currentCustomer.creditLimit),
+        name: current?.name,
+        phone: current?.phone,
+        city: current?.city,
+        address: current?.address,
+        notes: current?.notes,
+        customerType: current?.customerType || 'retail',
+        creditLimit: current?.creditLimit == null ? null : Number(current.creditLimit),
       };
     } catch {
-      // Error handled by notification
+      // Error handled centrally by the axios interceptor.
     } finally {
       loading.value = false;
     }

@@ -12,9 +12,7 @@ import Activation from '@/views/Activation.vue';
 import ServerSetup from '@/views/ServerSetup.vue';
 import Login from '@/views/auth/Login.vue';
 import Dashboard from '@/views/Dashboard.vue';
-import Customers from '@/views/customers/Customers.vue';
-import CustomerForm from '@/views/customers/CustomerForm.vue';
-import CustomerProfile from '@/views/customers/CustomerProfile.vue';
+import { customerRoutes } from '@/features/customers/routes.js';
 import Products from '@/views/products/Products.vue';
 import ProductForm from '@/views/products/ProductForm.vue';
 import Categories from '@/views/categories/Categories.vue';
@@ -116,30 +114,8 @@ const routes = [
       // disabled-feature pages), so it stays reachable by any authenticated
       // user — no page-level permission. Its cards/panels self-gate internally.
       { path: '', name: 'Dashboard', component: Dashboard },
-      {
-        path: 'customers',
-        name: 'Customers',
-        component: Customers,
-        meta: { permission: 'view:customers' },
-      },
-      {
-        path: 'customers/new',
-        name: 'NewCustomer',
-        component: CustomerForm,
-        meta: { permission: 'customers:create' },
-      },
-      {
-        path: 'customers/:id/edit',
-        name: 'EditCustomer',
-        component: CustomerForm,
-        meta: { permission: 'customers:update' },
-      },
-      {
-        path: 'customers/:id',
-        name: 'CustomerProfile',
-        component: CustomerProfile,
-        meta: { permission: 'view:customers' },
-      },
+      // Customer feature routes (declared in features/customers/routes.js).
+      ...customerRoutes,
       {
         path: 'products',
         name: 'Products',
@@ -274,12 +250,6 @@ const routes = [
         component: Reports,
         meta: { permission: 'view:reports' },
       },
-      // {
-      //   path: 'reports/simple',
-      //   name: 'SimpleReports',
-      //   component: SimpleReports,
-      //   meta: { permission: 'view:reports' },
-      // },
       {
         path: 'expenses',
         name: 'Expenses',

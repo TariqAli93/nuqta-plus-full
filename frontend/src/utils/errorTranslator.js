@@ -377,6 +377,24 @@ export function buildPermissionDeniedDialog(error) {
   };
 }
 
+/**
+ * Map a backend validation payload's `details[]` into a per-field error map
+ * `{ fieldName: [arabicMessage, ...] }` for binding to form inputs. Only the
+ * Zod `{ field, message }` shape contributes; reason-based (stock) details are
+ * surfaced as lines via extractArabicDetails instead.
+ */
+export function extractFieldErrors(error) {
+  const data = error?.response?.data || {};
+  const out = {};
+  if (!Array.isArray(data.details)) return out;
+  for (const d of data.details) {
+    if (!d || !d.field) continue;
+    const msg = translateZodDetailMessage(d.message || '') || 'قيمة غير صالحة';
+    (out[d.field] ||= []).push(msg);
+  }
+  return out;
+}
+
 export function extractArabicDetails(error) {
   const data = error?.response?.data || {};
   if (!Array.isArray(data.details)) return [];

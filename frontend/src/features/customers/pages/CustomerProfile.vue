@@ -149,34 +149,7 @@
 
       <!-- 3. Tabs --------------------------------------------------------- -->
       <v-card>
-        <v-tabs v-model="activeTab" color="primary" align-tabs="start" show-arrows>
-          <v-tab value="overview">نظرة عامة</v-tab>
-          <v-tab value="purchases">
-            المشتريات
-            <v-chip v-if="profile.sales.length" size="x-small" class="ms-2">
-              {{ profile.sales.length }}
-            </v-chip>
-          </v-tab>
-          <v-tab value="installments">
-            الأقساط
-            <v-chip v-if="profile.installments.length" size="x-small" class="ms-2">
-              {{ profile.installments.length }}
-            </v-chip>
-          </v-tab>
-          <v-tab value="payments">
-            الدفعات
-            <v-chip v-if="profile.payments.length" size="x-small" class="ms-2">
-              {{ profile.payments.length }}
-            </v-chip>
-          </v-tab>
-          <v-tab v-if="canCollect" value="collections">
-            التحصيل
-            <v-chip v-if="overdueInstallments.length" size="x-small" color="error" class="ms-2">
-              {{ overdueInstallments.length }}
-            </v-chip>
-          </v-tab>
-          <v-tab value="timeline">سجل الديون</v-tab>
-        </v-tabs>
+        <WorkspaceTabs v-model="activeTab" :items="profileTabs" aria-label="أقسام ملف العميل" />
 
         <v-divider />
 
@@ -837,7 +810,6 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, RouterLink } from 'vue-router';
-import { useCustomerStore } from '@/stores/customer';
 import { useAuthStore } from '@/stores/auth';
 import { useNotificationSettingsStore } from '@/stores/notificationSettings';
 import { useNotificationStore } from '@/stores/notification';
@@ -847,7 +819,8 @@ import EmptyState from '@/components/EmptyState.vue';
 import AgingPanel from '@/components/reports/AgingPanel.vue';
 import PageHeader from '@/components/PageHeader.vue';
 import StatCard from '@/components/StatCard.vue';
-import api from '@/plugins/axios';
+import WorkspaceTabs from '@/components/WorkspaceTabs.vue';
+import { useCustomersData } from '../composables/useCustomersData.js';
 import {
   formatCurrency,
   toYmdWithTime,
@@ -857,7 +830,7 @@ import {
 } from '@/utils/helpers';
 
 const route = useRoute();
-const customerStore = useCustomerStore();
+const { loadProfile: fetchProfile, loadAging } = useCustomersData();
 const authStore = useAuthStore();
 const notificationSettingsStore = useNotificationSettingsStore();
 const toastStore = useNotificationStore();
@@ -878,8 +851,7 @@ async function loadCustomerAging(customerId) {
   }
   agingLoading.value = true;
   try {
-    const res = await api.get(`/customers/${customerId}/aging`);
-    customerAging.value = res?.data || null;
+    customerAging.value = (await loadAging(customerId)) || null;
   } catch {
     customerAging.value = null;
   } finally {
@@ -1328,12 +1300,31 @@ watch(activeTab, (tab) => {
   if (tab === 'collections') loadCollections();
 });
 
+// Desktop in-context tabs for the customer record (details / operations /
+// history). Counts surface as badges; the collections tab is permission-gated.
+const profileTabs = computed(() =>
+  [
+    { value: 'overview', label: 'نظرة عامة' },
+    { value: 'purchases', label: 'المشتريات', badge: profile.value?.sales?.length || null },
+    { value: 'installments', label: 'الأقساط', badge: profile.value?.installments?.length || null },
+    { value: 'payments', label: 'الدفعات', badge: profile.value?.payments?.length || null },
+    {
+      value: 'collections',
+      label: 'التحصيل',
+      badge: overdueInstallments.value.length || null,
+      badgeColor: 'error',
+      hidden: !canCollect.value,
+    },
+    { value: 'timeline', label: 'سجل الديون' },
+  ].filter((t) => !t.hidden)
+);
+
 // ── Lifecycle ───────────────────────────────────────────────────────────
 const loadProfile = async () => {
   loading.value = true;
   error.value = null;
   try {
-    profile.value = await customerStore.fetchCustomerProfile(route.params.id);
+    profile.value = await fetchProfile(route.params.id);
     if (profile.value?.customer?.id) {
       // Aging is optional — failures should not break the profile page.
       loadCustomerAging(profile.value.customer.id);

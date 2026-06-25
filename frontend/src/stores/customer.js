@@ -88,7 +88,10 @@ export const useCustomerStore = defineStore('customer', {
       this.customers.unshift(optimisticCustomer);
 
       try {
-        const response = await api.post('/customers', customerData);
+        // `handled` → the interceptor defers presentation to this store, so the
+        // user sees exactly one toast (and never one for the phone-duplicate
+        // case, which the caller resolves via a confirm dialog).
+        const response = await api.post('/customers', customerData, { meta: { handled: true } });
         const index = this.customers.findIndex((c) => c.id === tempId);
         if (index !== -1) {
           this.customers[index] = response.data;
@@ -97,10 +100,9 @@ export const useCustomerStore = defineStore('customer', {
         return response;
       } catch (error) {
         this.customers = this.customers.filter((c) => c.id !== tempId);
-        // Phone-duplicate is handled by the caller (it shows a confirm
-        // dialog, retries with allowDuplicatePhone). Don't toast it here
-        // or the user will see the error twice.
-        if (error.response?.data?.code !== 'CUSTOMER_PHONE_DUPLICATE') {
+        // `error` is a normalized AppError. Phone-duplicate is handled by the
+        // caller (confirm dialog) — don't toast it here.
+        if (error?.code !== 'CUSTOMER_PHONE_DUPLICATE') {
           notificationStore.error(error?.message || 'فشل إضافة العميل');
         }
         throw error;
@@ -119,7 +121,7 @@ export const useCustomerStore = defineStore('customer', {
       }
 
       try {
-        const response = await api.put(`/customers/${id}`, customerData);
+        const response = await api.put(`/customers/${id}`, customerData, { meta: { handled: true } });
         if (index !== -1) {
           this.customers[index] = response.data;
         }
@@ -129,7 +131,7 @@ export const useCustomerStore = defineStore('customer', {
         if (index !== -1 && originalCustomer) {
           this.customers[index] = originalCustomer;
         }
-        if (error.response?.data?.code !== 'CUSTOMER_PHONE_DUPLICATE') {
+        if (error?.code !== 'CUSTOMER_PHONE_DUPLICATE') {
           notificationStore.error(error?.message || 'فشل تحديث العميل');
         }
         throw error;
@@ -148,7 +150,7 @@ export const useCustomerStore = defineStore('customer', {
       }
 
       try {
-        const response = await api.delete(`/customers/${id}`);
+        const response = await api.delete(`/customers/${id}`, { meta: { handled: true } });
         notificationStore.success('تم حذف العميل بنجاح');
         return response;
       } catch (error) {

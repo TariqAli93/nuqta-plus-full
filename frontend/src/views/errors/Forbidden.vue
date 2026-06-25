@@ -57,13 +57,13 @@
 <script setup>
 import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { useNavigationMenu } from '@/composables/useNavigationMenu';
+import { useNavigation } from '@/composables/useNavigation';
 import { featureLabels } from '@/auth/featureFlags';
 import { useAuthStore } from '@/stores/auth';
 
 const router = useRouter();
 const route = useRoute();
-const { getPageTitle } = useNavigationMenu();
+const { getPageTitle } = useNavigation();
 const authStore = useAuthStore();
 
 // A disabled OPTIONAL MODULE (feature flag off) is distinct from a missing
