@@ -10,7 +10,9 @@
       density="comfortable"
       variant="outlined"
       clearable
+      placeholder="العميل"
       :loading="loading"
+      hide-details
       no-data-text="لا توجد نتائج"
       @update:model-value="handleSelect"
       @update:search="handleSearch"
@@ -100,7 +102,9 @@
             هذا الرقم مسجّل لدى عميل آخر:
             <strong v-if="duplicateExisting">
               {{ duplicateExisting.name }}
-              <span v-if="duplicateExisting.phone" class="text-grey">({{ duplicateExisting.phone }})</span>
+              <span v-if="duplicateExisting.phone" class="text-grey"
+                >({{ duplicateExisting.phone }})</span
+              >
             </strong>
           </p>
           <p class="text-body-2 text-grey">

@@ -1,14 +1,18 @@
 /**
  * Central navigation registry.
  *
- * The single source of truth for the desktop navigation rail. Nav items are
- * declared here as plain data and rendered generically by <DesktopNavigation>
- * via the <useNavigation> service — NO nav items are hand-written in any Vue
- * template, and NO permission logic lives in the template.
+ * The single source of truth for the desktop navigation drawer AND the command
+ * palette's "open module" commands (derived in commands/navCommands.js). Nav
+ * items are declared here as plain data and rendered generically by
+ * <DesktopNavigation> via the <useNavigation> service — NO nav items are
+ * hand-written in any Vue template, and NO permission logic lives in a template.
  *
  * Each `route` maps to an existing Vue Router path; renaming a `label` never
- * changes a path or a permission gate. Gating fields mirror the router guard so
- * "visible ⟺ accessible".
+ * changes a path or a permission gate. Gating fields MIRROR the route guard
+ * (meta.permission / feature / capability) so "visible ⟺ accessible".
+ *
+ * Labels stay deliberately owner-friendly (no raw accounting jargon): e.g.
+ * "التسجيلات المالية" not «القيود اليومية», "ترتيب الحسابات" not «دليل الحسابات».
  *
  * @typedef {Object} NavigationItem
  * @property {string}            id          Stable unique id (kebab-case).
@@ -25,6 +29,7 @@
  * @property {string[]}          [anyFeature] Show if ANY listed flag is on.
  * @property {string}            [capability] Backend capability that must be true.
  * @property {string[]}          [roles]     Explicit role allow-list (rare).
+ * @property {string[]}          [keywords]  Extra search terms for the palette.
  * @property {number}            [order]     Sort order within its level.
  * @property {NavigationItem[]}  [children]  Sub-items (makes this a group).
  * @property {string|number}     [badge]     Static badge value (dynamic badges
@@ -40,16 +45,17 @@ export const navigationRegistry = [
   {
     id: 'dashboard',
     label: 'الرئيسية',
-    icon: 'mdi-view-dashboard',
+    icon: 'mdi-view-dashboard-outline',
     route: '/',
     order: 10,
+    keywords: ['dashboard', 'home', 'رئيسية', 'لوحة', 'لوحة التحكم'],
   },
 
-  // ── البيع ──────────────────────────────────────────────────────────────
+  // ── المبيعات ───────────────────────────────────────────────────────────
   {
-    id: 'sell',
-    label: 'البيع',
-    icon: 'mdi-point-of-sale',
+    id: 'sales',
+    label: 'المبيعات',
+    icon: 'mdi-cart-outline',
     order: 20,
     children: [
       {
@@ -57,16 +63,61 @@ export const navigationRegistry = [
         label: 'بيع جديد',
         icon: 'mdi-cash-register',
         route: '/sales/pos',
+        permission: 'sales:create',
         feature: 'pos',
         capability: 'canUsePOS',
+        keywords: ['pos', 'sell', 'نقطة بيع', 'كاشير', 'بيع'],
       },
       {
+        // Unified "فاتورة بيع جديدة": a full sale invoice supporting cash OR
+        // installment (cash default). Still gated by the installments feature —
+        // the fast cash-only path is the POS screen above. `id` is kept stable
+        // so existing pins/recents and the derived `nav.sell-installment`
+        // command id don't break.
         id: 'sell-installment',
-        label: 'بيع بالتقسيط',
-        icon: 'mdi-calendar-clock',
+        label: 'فاتورة بيع جديدة',
+        icon: 'mdi-cart-plus',
         route: '/sales/new',
+        permission: 'sales:create',
         feature: 'installments',
         capability: 'canUseInstallments',
+        keywords: [
+          'new sale',
+          'invoice',
+          'فاتورة بيع',
+          'فاتورة جديدة',
+          'بيع جديد',
+          'نقدي',
+          'cash',
+          'installment',
+          'تقسيط',
+          'اقساط',
+          'أقساط',
+        ],
+      },
+      {
+        id: 'invoices',
+        label: 'الفواتير',
+        icon: 'mdi-receipt-text-outline',
+        route: '/sales',
+        permission: 'view:sales',
+        keywords: ['invoices', 'sales', 'فواتير', 'مبيعات'],
+      },
+      {
+        id: 'customers-list',
+        label: 'العملاء',
+        icon: 'mdi-account-multiple',
+        route: '/customers',
+        permission: 'view:customers',
+        keywords: ['customers', 'عملاء', 'زبائن'],
+      },
+      {
+        id: 'collections',
+        label: 'قبض الديون',
+        icon: 'mdi-hand-coin-outline',
+        route: '/collections',
+        permission: 'sales:read',
+        keywords: ['collections', 'debts', 'قبض', 'ديون', 'تحصيل'],
       },
     ],
   },
@@ -85,22 +136,25 @@ export const navigationRegistry = [
         route: '/online-orders',
         permission: 'online_orders:read',
         feature: 'onlineOrders',
+        keywords: ['online orders', 'طلبات', 'اونلاين'],
       },
       {
         id: 'sales-channels',
         label: 'قنوات البيع',
-        icon: 'mdi-bullhorn-variant',
+        icon: 'mdi-bullhorn-variant-outline',
         route: '/sales-channels',
         permission: 'sales_channels:read',
         feature: 'onlineOrders',
+        keywords: ['channels', 'قنوات', 'منصات'],
       },
       {
         id: 'delivery-shipments',
         label: 'الشحنات والتتبع',
-        icon: 'mdi-truck-fast',
+        icon: 'mdi-truck-fast-outline',
         route: '/delivery/shipments',
         permission: 'delivery_shipments:read',
         feature: 'shipping',
+        keywords: ['shipping', 'tracking', 'شحن', 'تتبع', 'توصيل'],
       },
       {
         id: 'delivery-providers',
@@ -109,6 +163,7 @@ export const navigationRegistry = [
         route: '/settings/integrations/delivery-providers',
         permission: 'delivery_providers:read',
         feature: 'shipping',
+        keywords: ['carriers', 'شركات نقل', 'مندوب'],
       },
       {
         id: 'online-commerce-reports',
@@ -118,40 +173,7 @@ export const navigationRegistry = [
         // ANY of the two report permissions opens the page; each tab self-gates.
         permission: ['online_commerce_reports:read', 'delivery_reports:view'],
         anyFeature: ['onlineOrders', 'shipping'],
-      },
-    ],
-  },
-
-  // ── الفواتير ───────────────────────────────────────────────────────────
-  {
-    id: 'invoices',
-    label: 'الفواتير',
-    icon: 'mdi-receipt-text-outline',
-    route: '/sales',
-    permission: 'view:sales',
-    order: 40,
-  },
-
-  // ── العملاء والديون ────────────────────────────────────────────────────
-  {
-    id: 'customers',
-    label: 'العملاء والديون',
-    icon: 'mdi-account-group',
-    order: 50,
-    children: [
-      {
-        id: 'customers-list',
-        label: 'العملاء',
-        icon: 'mdi-account-multiple',
-        route: '/customers',
-        permission: 'view:customers',
-      },
-      {
-        id: 'collections',
-        label: 'قبض الديون',
-        icon: 'mdi-hand-coin-outline',
-        route: '/collections',
-        permission: 'view:sales',
+        keywords: ['online reports', 'تقارير اونلاين', 'شحن'],
       },
     ],
   },
@@ -161,7 +183,7 @@ export const navigationRegistry = [
     id: 'stock',
     label: 'البضاعة والمخزون',
     icon: 'mdi-package-variant-closed',
-    order: 60,
+    order: 40,
     children: [
       {
         id: 'products',
@@ -169,13 +191,15 @@ export const navigationRegistry = [
         icon: 'mdi-package-variant',
         route: '/products',
         permission: 'view:products',
+        keywords: ['products', 'بضاعة', 'منتجات', 'اصناف'],
       },
       {
         id: 'categories',
         label: 'التصنيفات',
-        icon: 'mdi-shape',
+        icon: 'mdi-shape-outline',
         route: '/categories',
         permission: 'view:categories',
+        keywords: ['categories', 'تصنيفات', 'أصناف'],
       },
       {
         id: 'inventory',
@@ -184,6 +208,7 @@ export const navigationRegistry = [
         route: '/inventory',
         permission: 'view:inventory',
         feature: 'inventory',
+        keywords: ['inventory', 'stock', 'مخزون'],
       },
       {
         id: 'inventory-movements',
@@ -192,14 +217,17 @@ export const navigationRegistry = [
         route: '/inventory/movements',
         permission: 'view:inventory',
         feature: 'inventory',
+        keywords: ['movements', 'حركات', 'جرد', 'تسوية'],
       },
       {
         id: 'inventory-transfer',
         label: 'نقل بين المخازن',
         icon: 'mdi-transfer',
         route: '/inventory/transfer',
+        permission: 'inventory:transfer',
         feature: 'inventoryTransfers',
         capability: 'canTransferStock',
+        keywords: ['transfer', 'نقل', 'تحويل مخزون'],
       },
       {
         id: 'inventory-transfer-requests',
@@ -208,14 +236,16 @@ export const navigationRegistry = [
         route: '/inventory/transfers',
         permission: 'inventory:transfer',
         feature: 'inventoryTransfers',
+        keywords: ['transfer requests', 'طلبات نقل'],
       },
       {
         id: 'inventory-low-stock',
         label: 'البضاعة القليلة',
-        icon: 'mdi-alert',
+        icon: 'mdi-alert-outline',
         route: '/inventory/low-stock',
         permission: 'view:inventory',
         feature: 'inventory',
+        keywords: ['low stock', 'قليلة', 'نواقص'],
       },
       {
         id: 'inventory-expiry',
@@ -224,6 +254,7 @@ export const navigationRegistry = [
         route: '/inventory/expiry-alerts',
         permission: 'view:inventory',
         feature: 'inventory',
+        keywords: ['expiry', 'صلاحية', 'انتهاء'],
       },
     ],
   },
@@ -232,9 +263,9 @@ export const navigationRegistry = [
   {
     id: 'purchases',
     label: 'المشتريات والموردين',
-    icon: 'mdi-truck-delivery',
+    icon: 'mdi-truck-delivery-outline',
     anyFeature: ['purchases', 'suppliers'],
-    order: 70,
+    order: 50,
     children: [
       {
         id: 'purchases-list',
@@ -244,6 +275,7 @@ export const navigationRegistry = [
         permission: 'view:purchases',
         feature: 'purchases',
         capability: 'canUsePurchases',
+        keywords: ['purchases', 'مشتريات', 'شراء'],
       },
       {
         id: 'suppliers',
@@ -253,40 +285,18 @@ export const navigationRegistry = [
         permission: 'view:suppliers',
         feature: 'suppliers',
         capability: 'canUseSuppliers',
+        keywords: ['suppliers', 'موردين', 'موردون'],
       },
     ],
   },
 
-  // ── المالية ────────────────────────────────────────────────────────────
+  // ── المالية والمحاسبة (المالية + المحاسبة المتقدمة مدموجتان) ────────────
   {
     id: 'finance',
-    label: 'المالية',
-    icon: 'mdi-safe-square-outline',
-    order: 80,
+    label: 'المالية والمحاسبة',
+    icon: 'mdi-cash-multiple',
+    order: 60,
     children: [
-      {
-        id: 'expenses',
-        label: 'المصاريف',
-        icon: 'mdi-cash-minus',
-        route: '/expenses',
-        permission: 'expenses:read',
-      },
-      {
-        id: 'recurring-expenses',
-        label: 'المصاريف الثابتة',
-        icon: 'mdi-calendar-sync',
-        route: '/recurring-expenses',
-        permission: 'recurring_expenses:read',
-      },
-      {
-        id: 'cash-box-report',
-        label: 'حركة وتقرير الصندوق',
-        icon: 'mdi-cash-register',
-        // Opens the merged cash-box report window instead of navigating in-app.
-        report: 'cash-box',
-        permission: 'reports:read_financial',
-        pinnable: false,
-      },
       {
         id: 'cashboxes',
         label: 'الصناديق',
@@ -294,6 +304,8 @@ export const navigationRegistry = [
         route: '/treasury/cashboxes',
         permission: 'view:treasury',
         feature: 'treasury',
+        capability: 'canUseTreasury',
+        keywords: ['cash', 'treasury', 'صناديق', 'خزينة'],
       },
       {
         id: 'vouchers',
@@ -302,6 +314,8 @@ export const navigationRegistry = [
         route: '/treasury/vouchers',
         permission: 'view:treasury',
         feature: 'treasury',
+        capability: 'canUseTreasury',
+        keywords: ['vouchers', 'وصولات', 'سند', 'قبض', 'دفع'],
       },
       {
         id: 'treasury-transfers',
@@ -310,6 +324,8 @@ export const navigationRegistry = [
         route: '/treasury/transfers',
         permission: 'view:treasury',
         feature: 'treasury',
+        capability: 'canUseTreasury',
+        keywords: ['transfer', 'تحويل', 'صناديق'],
       },
       {
         id: 'bank-accounts',
@@ -319,6 +335,23 @@ export const navigationRegistry = [
         permission: 'view:treasury',
         feature: 'bankAccounts',
         capability: 'canUseBankAccounts',
+        keywords: ['bank', 'بنك', 'مصرف'],
+      },
+      {
+        id: 'expenses',
+        label: 'المصاريف',
+        icon: 'mdi-cash-minus',
+        route: '/expenses',
+        permission: 'expenses:read',
+        keywords: ['expenses', 'مصاريف', 'مصروف'],
+      },
+      {
+        id: 'recurring-expenses',
+        label: 'المصاريف الثابتة',
+        icon: 'mdi-calendar-sync',
+        route: '/recurring-expenses',
+        permission: 'recurring_expenses:read',
+        keywords: ['recurring', 'ثابتة', 'شهرية'],
       },
       {
         id: 'accounting-periods',
@@ -326,6 +359,67 @@ export const navigationRegistry = [
         icon: 'mdi-book-clock-outline',
         route: '/accounting-periods',
         permission: 'accounting_periods:read',
+        keywords: ['periods', 'فترات', 'اقفال', 'إقفال'],
+      },
+      {
+        id: 'cash-box-report',
+        label: 'حركة وتقرير الصندوق',
+        icon: 'mdi-cash-register',
+        // Opens the merged cash-box report window instead of navigating in-app.
+        report: 'cash-box',
+        permission: 'reports:read_financial',
+        pinnable: false,
+        keywords: ['cash report', 'حركة الصندوق', 'تقرير الصندوق'],
+      },
+      // ── المحاسبة المتقدمة (gated generalLedger + canUseGL) ──────────────
+      {
+        id: 'gl-accounts',
+        label: 'ترتيب الحسابات',
+        icon: 'mdi-file-tree',
+        route: '/gl/accounts',
+        permission: 'gl:read',
+        feature: 'generalLedger',
+        capability: 'canUseGL',
+        keywords: ['accounts', 'حسابات', 'ترتيب'],
+      },
+      {
+        id: 'gl-journal',
+        label: 'التسجيلات المالية',
+        icon: 'mdi-book-open-variant',
+        route: '/gl/journal',
+        permission: 'gl:read',
+        feature: 'generalLedger',
+        capability: 'canUseGL',
+        keywords: ['journal', 'تسجيلات', 'قيود'],
+      },
+      {
+        id: 'gl-system-accounts',
+        label: 'ربط الحسابات',
+        icon: 'mdi-link-variant',
+        route: '/gl/system-accounts',
+        permission: 'gl:manage_system_accounts',
+        feature: 'generalLedger',
+        capability: 'canUseGL',
+        keywords: ['system accounts', 'ربط حسابات'],
+      },
+      {
+        id: 'gl-opening-balances',
+        label: 'رصيد بداية التشغيل',
+        icon: 'mdi-clipboard-list-outline',
+        route: '/settings/opening-balances',
+        permission: 'opening_balances:manage',
+        feature: 'generalLedger',
+        keywords: ['opening balances', 'رصيد افتتاحي', 'بداية'],
+      },
+      {
+        id: 'gl-posting-failures',
+        label: 'تسجيلات تحتاج مراجعة',
+        icon: 'mdi-wrench-clock',
+        route: '/gl/posting-failures',
+        permission: 'gl:repair_postings',
+        feature: 'generalLedger',
+        capability: 'canUseGL',
+        keywords: ['posting failures', 'مراجعة', 'اخطاء'],
       },
     ],
   },
@@ -334,15 +428,16 @@ export const navigationRegistry = [
   {
     id: 'reports',
     label: 'التقارير',
-    icon: 'mdi-chart-box',
-    order: 90,
+    icon: 'mdi-chart-box-outline',
+    order: 70,
     children: [
       {
         id: 'reports-detailed',
         label: 'تقارير مفصّلة',
-        icon: 'mdi-chart-box-outline',
+        icon: 'mdi-file-chart-outline',
         route: '/reports',
         permission: 'view:reports',
+        keywords: ['reports', 'تقارير', 'مفصلة'],
       },
       {
         id: 'reports-financial',
@@ -352,14 +447,52 @@ export const navigationRegistry = [
         permission: 'reports:read_financial',
         feature: 'financialReports',
         capability: 'canViewFinancialReports',
+        keywords: ['profit loss', 'ربح', 'خسارة', 'مركز مالي'],
       },
       {
         id: 'reports-inventory-valuation',
         label: 'قيمة المخزون حسب السعر',
-        icon: 'mdi-cash-multiple',
+        icon: 'mdi-chart-bar',
         route: '/reports/inventory-valuation',
         permission: 'view:inventory',
         feature: 'inventory',
+        keywords: ['valuation', 'قيمة المخزون', 'تقييم'],
+      },
+      {
+        id: 'report-sales',
+        label: 'تقرير المبيعات',
+        icon: 'mdi-chart-line',
+        report: 'sales',
+        permission: 'sales:read',
+        pinnable: false,
+        keywords: ['sales report', 'تقرير مبيعات'],
+      },
+      {
+        id: 'report-profit',
+        label: 'تقرير الأرباح',
+        icon: 'mdi-chart-areaspline',
+        report: 'profit',
+        permission: 'reports:read_profit',
+        pinnable: false,
+        keywords: ['profit report', 'تقرير ارباح', 'أرباح'],
+      },
+      {
+        id: 'report-debts',
+        label: 'تقرير الديون',
+        icon: 'mdi-account-cash-outline',
+        report: 'debts',
+        permission: 'sales:read',
+        pinnable: false,
+        keywords: ['debts report', 'تقرير ديون', 'مديونية'],
+      },
+      {
+        id: 'report-expenses',
+        label: 'تقرير المصاريف',
+        icon: 'mdi-chart-bar-stacked',
+        report: 'expenses',
+        permission: 'view:expenses',
+        pinnable: false,
+        keywords: ['expenses report', 'تقرير مصاريف'],
       },
     ],
   },
@@ -368,15 +501,16 @@ export const navigationRegistry = [
   {
     id: 'admin',
     label: 'الإدارة',
-    icon: 'mdi-cog',
-    order: 100,
+    icon: 'mdi-cog-outline',
+    order: 80,
     children: [
       {
         id: 'users',
         label: 'الموظفون',
-        icon: 'mdi-account-cog',
+        icon: 'mdi-account-cog-outline',
         route: '/users',
         permission: 'view:users',
+        keywords: ['users', 'موظفين', 'مستخدمين'],
       },
       {
         id: 'roles',
@@ -384,99 +518,61 @@ export const navigationRegistry = [
         icon: 'mdi-shield-account-outline',
         route: '/roles',
         permission: 'roles:read',
+        keywords: ['roles', 'permissions', 'ادوار', 'صلاحيات'],
       },
       {
         id: 'branches-warehouses',
         label: 'الفروع والمخازن',
-        icon: 'mdi-store',
+        icon: 'mdi-store-outline',
         route: '/inventory/settings',
         permission: 'inventory:manage',
         anyFeature: ['multiBranch', 'multiWarehouse'],
-      },
-      {
-        id: 'settings',
-        label: 'إعدادات النظام',
-        icon: 'mdi-tune',
-        route: '/settings',
-        permission: 'view:settings',
+        keywords: ['branches', 'warehouses', 'فروع', 'مخازن'],
       },
       {
         id: 'feature-flags',
         label: 'إعدادات الميزات والنمط',
-        icon: 'mdi-toggle-switch',
+        icon: 'mdi-toggle-switch-outline',
         route: '/settings/feature-flags',
         permission: 'manage_feature_toggles',
+        keywords: ['features', 'flags', 'ميزات', 'نمط'],
       },
     ],
   },
+];
 
-  // ── المحاسبة المتقدمة ──────────────────────────────────────────────────
+/**
+ * Fixed footer items (rendered pinned at the bottom of the drawer, NOT in the
+ * scrolling tree). The current-user block and logout are dedicated footer UI
+ * (they need auth state + a logout action), so only the plain route links live
+ * here. Gated by the same {@link useNavigation} `passes()` filter.
+ *
+ * @type {NavigationItem[]}
+ */
+export const navigationFooter = [
   {
-    id: 'gl',
-    label: 'المحاسبة المتقدمة',
-    icon: 'mdi-bank',
-    feature: 'generalLedger',
-    capability: 'canUseGL',
-    order: 110,
-    children: [
-      {
-        id: 'gl-accounts',
-        label: 'ترتيب الحسابات',
-        icon: 'mdi-file-tree',
-        route: '/gl/accounts',
-        permission: 'gl:read',
-        feature: 'generalLedger',
-      },
-      {
-        id: 'gl-journal',
-        label: 'التسجيلات المالية',
-        icon: 'mdi-book-open-variant',
-        route: '/gl/journal',
-        permission: 'gl:read',
-        feature: 'generalLedger',
-      },
-      {
-        id: 'gl-system-accounts',
-        label: 'ربط الحسابات',
-        icon: 'mdi-link-variant',
-        route: '/gl/system-accounts',
-        permission: 'gl:manage_system_accounts',
-        feature: 'generalLedger',
-      },
-      {
-        id: 'gl-opening-balances',
-        label: 'رصيد بداية التشغيل',
-        icon: 'mdi-clipboard-list-outline',
-        route: '/settings/opening-balances',
-        permission: 'opening_balances:manage',
-        feature: 'generalLedger',
-      },
-      {
-        id: 'gl-posting-failures',
-        label: 'تسجيلات تحتاج مراجعة',
-        icon: 'mdi-wrench-clock',
-        route: '/gl/posting-failures',
-        permission: 'gl:repair_postings',
-        feature: 'generalLedger',
-      },
-    ],
+    id: 'settings',
+    label: 'الإعدادات',
+    icon: 'mdi-cog-outline',
+    route: '/settings',
+    permission: 'view:settings',
+    pinnable: false,
+    keywords: ['settings', 'اعدادات', 'إعدادات'],
   },
-
-  // ── حول البرنامج ───────────────────────────────────────────────────────
   {
     id: 'about',
     label: 'حول البرنامج',
-    icon: 'mdi-information',
+    icon: 'mdi-information-outline',
     route: '/about',
-    order: 120,
     pinnable: false,
+    keywords: ['about', 'version', 'حول', 'اصدار', 'إصدار'],
   },
 ];
 
 /**
  * Titles for routes that are intentionally NOT in the nav rail, so the title
- * bar / command bar still show a correct heading. (Migrated verbatim from the
- * previous useNavigationMenu `extraTitles`.)
+ * bar / command bar still show a correct heading. (Footer routes — /settings,
+ * /about — resolve via the service's footer-aware lookup.)
  */
 export const extraRouteTitles = {
   '/profile': 'الملف الشخصي',

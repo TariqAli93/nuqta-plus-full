@@ -16,6 +16,7 @@ import {
 import { globalCommands } from './globalCommands.js';
 import { pageCommands } from './pageCommands.js';
 import { appCatalog } from './catalog.js';
+import { navCommandsFromRegistry } from './navCommands.js';
 import { openCommandPalette } from './useCommandPalette.js';
 import { useCommandNavigator } from './commandNavigator.js';
 import { openReportWindow } from '@/composables/useReportWindow';
@@ -37,6 +38,9 @@ registry.registerMany(globalCommands);
 registry.registerMany(pageCommands);
 // The full module command catalog (open-section + real operations).
 registry.registerMany(appCatalog);
+// "Open module" navigation commands derived from the single nav registry —
+// so a page is declared exactly once (registry) and never re-listed by hand.
+registry.registerMany(navCommandsFromRegistry);
 // Feature-owned commands (aggregated centrally as features are migrated).
 registry.registerMany(customerCommands);
 
@@ -73,6 +77,8 @@ export function useCommands() {
   /** Build the full runtime context handed to every command. */
   const buildContext = (extra = {}) => ({
     hasPermission: (p) => auth.hasPermission(p),
+    hasFeature: (f) => auth.hasFeature(f),
+    can: (c) => auth.can(c),
     route: route.path,
     params: route.params,
     query: route.query,
@@ -110,6 +116,8 @@ export function useCommands() {
   /** Lightweight context for visibility/enabled filtering (reactive deps). */
   const filterContext = computed(() => ({
     hasPermission: (p) => auth.hasPermission(p),
+    hasFeature: (f) => auth.hasFeature(f),
+    can: (c) => auth.can(c),
     route: route.path,
     selection: selectionState.items,
   }));

@@ -10,7 +10,7 @@
     :class="rowClass"
     @contextmenu="onContextMenu"
   >
-    <v-icon class="dt-nav__icon" :size="collapsed ? 21 : 19">{{ item.icon }}</v-icon>
+    <v-icon class="dt-nav__icon" :size="collapsed ? 22 : 20">{{ item.icon }}</v-icon>
     <span v-if="!collapsed" class="dt-nav__label text-truncate">{{ item.label }}</span>
     <span v-if="!collapsed && badge != null" class="dt-nav__badge">{{ badge }}</span>
     <span v-else-if="collapsed && badge != null" class="dt-nav__badge-dot" aria-hidden="true"></span>
@@ -35,7 +35,7 @@
     :class="rowClass"
     @click="$emit('activate')"
   >
-    <v-icon class="dt-nav__icon" :size="collapsed ? 21 : 19">{{ item.icon }}</v-icon>
+    <v-icon class="dt-nav__icon" :size="collapsed ? 22 : 20">{{ item.icon }}</v-icon>
     <span v-if="!collapsed" class="dt-nav__label text-truncate">{{ item.label }}</span>
     <v-tooltip v-if="collapsed" activator="parent" location="end" :text="tooltipText" />
   </button>
@@ -77,9 +77,9 @@ const onContextMenu = (e) => {
 .dt-nav__row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
-  min-height: 34px;
+  min-height: 40px;
   padding-inline: 10px;
   border: none;
   background: transparent;
@@ -87,7 +87,7 @@ const onContextMenu = (e) => {
   font-size: 13px;
   text-align: start;
   text-decoration: none;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
   position: relative;
   transition: background-color 0.12s ease, color 0.12s ease;
@@ -108,8 +108,8 @@ const onContextMenu = (e) => {
   }
 
   &--indented {
-    padding-inline-start: 30px;
-    min-height: 31px;
+    padding-inline-start: 36px;
+    min-height: 36px;
     font-size: 12.5px;
   }
 

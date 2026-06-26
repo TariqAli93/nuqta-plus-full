@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { buildRouteLocation, moduleKeyForTarget } from '../src/commands/navigationTarget.js';
 import { createPageActionRegistry } from '../src/commands/pageActionCore.js';
 import { appCatalog } from '../src/commands/catalog.js';
+import { navCommandsFromRegistry } from '../src/commands/navCommands.js';
 import { globalCommands } from '../src/commands/globalCommands.js';
 import { pageCommands } from '../src/commands/pageCommands.js';
 import { customerCommands } from '../src/features/customers/commands/customerCommands.js';
@@ -89,13 +90,24 @@ test('unregister removes only the entries it added', () => {
 });
 
 // ── Catalog contracts — real actions, not bare routes ───────────────────────
-const byId = Object.fromEntries(
-  [...globalCommands, ...pageCommands, ...customerCommands, ...appCatalog].map((c) => [c.id, c])
-);
+const allCommands = [
+  ...globalCommands,
+  ...pageCommands,
+  ...customerCommands,
+  ...appCatalog,
+  ...navCommandsFromRegistry,
+];
+const byId = Object.fromEntries(allCommands.map((c) => [c.id, c]));
 
 test('all command ids are unique across every registry', () => {
-  const ids = [...globalCommands, ...pageCommands, ...customerCommands, ...appCatalog].map((c) => c.id);
+  const ids = allCommands.map((c) => c.id);
   assert.equal(new Set(ids).size, ids.length);
+});
+
+test('registry-derived nav commands open the module by path', async () => {
+  const calls = [];
+  await byId['nav.products'].execute({ app: { navigate: (t) => calls.push(t) } });
+  assert.deepEqual(calls.at(-1), { path: '/products' });
 });
 
 test('open vs operation backup commands are separate and target the backup tab', async () => {

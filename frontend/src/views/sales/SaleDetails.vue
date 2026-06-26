@@ -223,7 +223,7 @@
       <!-- Interest Information Card for Installment Sales -->
       <v-card
         v-if="sale && sale.paymentType === 'installment' && sale.interestAmount > 0"
-        class="page-section"
+        class="page-section mb-4"
       >
         <div class="section-title">
           <span class="section-title__label">

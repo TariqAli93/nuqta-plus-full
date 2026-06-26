@@ -22,9 +22,9 @@
               size="default"
               :to="installmentsDisabled ? undefined : '/sales/new'"
               :disabled="installmentsDisabled"
-              aria-label="إنشاء بيع جديد"
+              aria-label="إنشاء فاتورة مبيعات"
             >
-              قسط جديد
+              انشاء فاتورة مبيعات
             </v-btn>
           </span>
         </template>

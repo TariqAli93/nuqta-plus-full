@@ -483,6 +483,17 @@ export const saleSchema = z
       .nullable(),
     paidAmount: z.number().nonnegative('Paid amount cannot be negative').optional().default(0),
     installmentCount: z.number().int().positive('Installment count must be at least 1').optional(),
+    // ── جدولة الأقساط (installment-only, optional for cash) ─────────────────────
+    // First installment due date (تاريخ أول قسط) — YYYY-MM-DD. Required for an
+    // installment sale (enforced in the superRefine below); the schedule
+    // generator falls back to "one period from today" when it is absent.
+    firstInstallmentDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'تاريخ أول قسط غير صالح')
+      .optional()
+      .nullable(),
+    // Installment periodicity (دورية الأقساط). Defaults to monthly in the service.
+    installmentPeriod: z.enum(['weekly', 'monthly']).optional(),
     // Invoice-level note (ملاحظة الفاتورة). Trimmed and capped so an over-long
     // value is rejected with a clear message instead of being silently stored.
     notes: z.string().trim().max(1000, 'الملاحظة طويلة جداً (الحد الأقصى 1000 حرف)').nullable().optional(),
@@ -524,20 +535,32 @@ export const saleSchema = z
       }
     }
 
-    // ── NewSale: installments only ──────────────────────────────────────────
-    if (data.saleSource === SALE_SOURCE_NEW_SALE) {
-      if (data.saleType !== SALE_TYPE_INSTALLMENT) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['saleType'],
-          message: 'NewSale accepts installment sales only.',
-        });
-      }
+    // ── NewSale (فاتورة بيع جديدة): cash OR installment ──────────────────────
+    // A cash invoice needs NO installment fields — the old rule that forced
+    // every NewSale to be an installment (and rejected cash with a generic
+    // "Validation Error") is gone. An installment invoice is held to the same
+    // rules as the form: a customer, a positive installment count and a first
+    // installment date are all required (so a direct API call can't skip them).
+    if (data.saleSource === SALE_SOURCE_NEW_SALE && data.saleType === SALE_TYPE_INSTALLMENT) {
       if (!data.customerId) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['customerId'],
-          message: 'Customer is required for installment sales.',
+          message: 'يرجى اختيار العميل لإكمال البيع بالأقساط',
+        });
+      }
+      if (!data.installmentCount || data.installmentCount < 1) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['installmentCount'],
+          message: 'عدد الأقساط يجب أن يكون أكبر من صفر',
+        });
+      }
+      if (!data.firstInstallmentDate) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['firstInstallmentDate'],
+          message: 'تاريخ أول قسط مطلوب',
         });
       }
     }

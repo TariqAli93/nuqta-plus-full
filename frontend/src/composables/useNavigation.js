@@ -1,26 +1,30 @@
 import { ref, computed, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
-import { navigationRegistry, extraRouteTitles, APP_TITLE } from '@/shell/navigation/registry';
+import {
+  navigationRegistry,
+  navigationFooter,
+  extraRouteTitles,
+  APP_TITLE,
+} from '@/shell/navigation/registry';
 
 /**
  * Central navigation service.
  *
  * Single place that turns the {@link navigationRegistry} data into the visible,
- * RBAC-filtered, sorted tree the desktop rail renders. ALL gating
+ * RBAC-filtered, sorted tree the desktop drawer renders. ALL gating
  * (permission / feature / capability / role / hidden) lives here — never in a
  * template — so visibility rules can't drift between components.
  *
  * This composable performs NO API calls. It reads only already-hydrated auth
- * state (permissions, feature flags, capabilities). Pinned items, recent pages
- * and group-expand state are UI preferences persisted to localStorage as
- * module-level singletons (shared across every consumer, no prop-drilling).
+ * state (permissions, feature flags, capabilities). Pinned items and the
+ * accordion's manually-expanded group are UI preferences persisted to
+ * localStorage as module-level singletons (shared across every consumer).
  */
 
 // ── Persisted UI preferences (module-level singletons) ────────────────────
 const PINNED_KEY = 'nuqta-nav-pinned';
-const RECENT_KEY = 'nuqta-nav-opened-recent';
-const OPENED_KEY = 'nuqta-nav-opened-groups';
-const RECENT_LIMIT = 6;
+const OPEN_GROUP_KEY = 'nuqta-nav-open-group';
 
 const readJson = (key, fallback) => {
   try {
@@ -39,12 +43,13 @@ const writeJson = (key, value) => {
 };
 
 const pinnedIds = ref(readJson(PINNED_KEY, []));
-const recentRoutes = ref(readJson(RECENT_KEY, []));
-const openedGroupIds = ref(readJson(OPENED_KEY, []));
+// Accordion state: the ONE group the user manually expanded. The group that
+// contains the active route is always open on top of this (so navigating never
+// hides where you are). `null` = nothing manually expanded.
+const manualOpenId = ref(readJson(OPEN_GROUP_KEY, null));
 
 watch(pinnedIds, (v) => writeJson(PINNED_KEY, v), { deep: true });
-watch(recentRoutes, (v) => writeJson(RECENT_KEY, v), { deep: true });
-watch(openedGroupIds, (v) => writeJson(OPENED_KEY, v), { deep: true });
+watch(manualOpenId, (v) => writeJson(OPEN_GROUP_KEY, v));
 
 // ── Static helpers over the (unfiltered) registry ─────────────────────────
 const isGroup = (item) => Array.isArray(item.children) && item.children.length > 0;
@@ -58,19 +63,41 @@ const flattenAll = (items = navigationRegistry, acc = []) => {
   return acc;
 };
 
-/** Leaf items that navigate to an in-app route (used for title/recent lookup). */
-const allRouteLeaves = () => flattenAll().filter((i) => i.route && !isGroup(i));
+/** Leaf items that navigate to an in-app route — registry tree + fixed footer
+ *  (so /settings & /about still resolve a title and an active state). The
+ *  registry is static, so this is computed once. */
+const ROUTE_LEAVES = [...flattenAll(navigationRegistry), ...navigationFooter].filter(
+  (i) => i.route && !isGroup(i)
+);
 
-const findByRoute = (path) => allRouteLeaves().find((i) => i.route === path) || null;
+const findByRoute = (path) => ROUTE_LEAVES.find((i) => i.route === path) || null;
 
-const isRouteActive = (route, path) => {
-  if (!route) return false;
-  if (route === '/') return path === '/';
-  return path === route || path.startsWith(`${route}/`);
+/**
+ * The ONE active leaf route for a path: the LONGEST registry route that matches
+ * on a path-segment boundary (an exact match always wins). This is what stops a
+ * parent-ish route like '/sales' (الفواتير) from lighting up while you're on
+ * '/sales/pos' (بيع جديد) — only the single most-specific item is active.
+ * Memoised on the last path since it's called once per row each render.
+ */
+let activeRouteCache = { path: null, route: undefined };
+const resolveActiveRoute = (path) => {
+  if (activeRouteCache.path === path) return activeRouteCache.route;
+  let result = null;
+  if (ROUTE_LEAVES.some((i) => i.route === path)) {
+    result = path; // exact match wins
+  } else {
+    const match = ROUTE_LEAVES.filter(
+      (i) => i.route !== '/' && path.startsWith(`${i.route}/`)
+    ).sort((a, b) => b.route.length - a.route.length)[0];
+    result = match ? match.route : null;
+  }
+  activeRouteCache = { path, route: result };
+  return result;
 };
 
 export function useNavigation() {
   const auth = useAuthStore();
+  const route = useRoute();
 
   // Single gate evaluated for both group parents and leaves.
   const passes = (item) => {
@@ -112,15 +139,22 @@ export function useNavigation() {
       .sort(byOrder);
   });
 
-  /** Visible leaf items, flattened — for keyboard nav / search / recent. */
+  /** Visible leaf items, flattened — for pinned / search. */
   const visibleLeaves = computed(() =>
     tree.value.flatMap((item) => (isGroup(item) ? item.children : [item]))
   );
 
-  // ── Active state ────────────────────────────────────────────────────────
-  const isItemActive = (item, path) => isRouteActive(item.route, path);
-  const isGroupActive = (group, path) =>
-    isGroup(group) && group.children.some((c) => isRouteActive(c.route, path));
+  /** Fixed footer links (settings / about), gated the same way. */
+  const footerItems = computed(() => navigationFooter.filter(passes));
+
+  // ── Active state (single most-specific match — never two rows at once) ────
+  const isItemActive = (item, path = route.path) =>
+    !!item.route && item.route === resolveActiveRoute(path);
+  const isGroupActive = (group, path = route.path) => {
+    if (!isGroup(group)) return false;
+    const active = resolveActiveRoute(path);
+    return group.children.some((c) => c.route && c.route === active);
+  };
 
   // ── Page title (migrated from the old useNavigationMenu) ─────────────────
   const getPageTitle = (path) => {
@@ -128,27 +162,27 @@ export function useNavigation() {
     if (exact) return exact.label;
     if (extraRouteTitles[path]) return extraRouteTitles[path];
 
-    // Longest-prefix match on a path-segment boundary so a parent like '/sales'
-    // still labels '/sales/new', while '/' never swallows unrelated routes.
-    const match = allRouteLeaves()
-      .filter((i) => i.route !== '/' && (path === i.route || path.startsWith(`${i.route}/`)))
-      .sort((a, b) => b.route.length - a.route.length)[0];
-    return match?.label || APP_TITLE;
+    // Fall back to the most-specific matching nav route (same resolver as the
+    // active state) so e.g. '/sales/123' is still titled "الفواتير".
+    const active = resolveActiveRoute(path);
+    return (active && findByRoute(active)?.label) || APP_TITLE;
   };
 
-  // ── Group expand / collapse (persisted) ──────────────────────────────────
-  const isGroupOpen = (id) => openedGroupIds.value.includes(id);
-  const toggleGroup = (id) => {
-    openedGroupIds.value = isGroupOpen(id)
-      ? openedGroupIds.value.filter((g) => g !== id)
-      : [...openedGroupIds.value, id];
+  // ── Accordion: one manual-open group + the active group always open ──────
+  const isGroupOpen = (group) =>
+    manualOpenId.value === group.id || isGroupActive(group, route.path);
+  const toggleGroup = (group) => {
+    // Toggling the manual slot; the active group stays open regardless because
+    // isGroupOpen ORs in isGroupActive. Opening a new group collapses the
+    // previously manually-opened one.
+    manualOpenId.value = manualOpenId.value === group.id ? null : group.id;
   };
-  /** Open the group containing the active route without collapsing others. */
-  const ensureActiveGroupOpen = (path) => {
-    const group = tree.value.find((item) => isGroupActive(item, path));
-    if (group && !isGroupOpen(group.id)) {
-      openedGroupIds.value = [...openedGroupIds.value, group.id];
-    }
+  /** On navigation, make the active route's group THE manually-open one so other
+   *  sections collapse (accordion). On a group-less route (dashboard) we keep
+   *  the last opened section, honouring "remember the last open section". */
+  const openActiveGroup = (path = route.path) => {
+    const active = tree.value.find((item) => isGroupActive(item, path));
+    if (active) manualOpenId.value = active.id;
   };
 
   // ── Pinned items ─────────────────────────────────────────────────────────
@@ -165,19 +199,6 @@ export function useNavigation() {
     return pinnedIds.value.map((id) => visibleById.get(id)).filter(Boolean);
   });
 
-  // ── Recent pages ─────────────────────────────────────────────────────────
-  /** Record a visited route (call once, from the nav, on route change). */
-  const trackRoute = (path) => {
-    const leaf = findByRoute(path);
-    if (!leaf || leaf.route === '/') return; // skip unknown + dashboard noise
-    const next = [leaf.route, ...recentRoutes.value.filter((r) => r !== leaf.route)];
-    recentRoutes.value = next.slice(0, RECENT_LIMIT);
-  };
-  const recentItems = computed(() => {
-    const visibleByRoute = new Map(visibleLeaves.value.map((i) => [i.route, i]));
-    return recentRoutes.value.map((r) => visibleByRoute.get(r)).filter(Boolean);
-  });
-
   // ── Badges ───────────────────────────────────────────────────────────────
   // Extension point: live counts can be layered on here from already-loaded
   // stores (NO data fetching). Static badges declared in the registry win when
@@ -192,6 +213,7 @@ export function useNavigation() {
     // data
     tree,
     visibleLeaves,
+    footerItems,
     isGroup,
     // active
     isItemActive,
@@ -199,18 +221,15 @@ export function useNavigation() {
     // titles
     getPageTitle,
     findByRoute,
-    // groups
+    // groups (accordion)
     isGroupOpen,
     toggleGroup,
-    ensureActiveGroupOpen,
+    openActiveGroup,
     // pinned
     isPinned,
     canPin,
     togglePin,
     pinnedItems,
-    // recent
-    trackRoute,
-    recentItems,
     // badges
     badgeFor,
   };

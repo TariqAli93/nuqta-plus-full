@@ -69,7 +69,7 @@
       </v-btn>
 
       <!-- Overflow menu for secondary page commands -->
-      <v-menu v-if="bar.secondary.length" location="bottom end">
+      <!-- <v-menu v-if="bar.secondary.length" location="bottom end">
         <template #activator="{ props }">
           <v-btn
             v-bind="props"
@@ -93,15 +93,13 @@
             </template>
           </v-list-item>
         </v-list>
-      </v-menu>
+      </v-menu> -->
     </div>
 
     <div class="dt-cmdbar__spacer"></div>
 
     <!-- ── End: global tools ─────────────────────────────────────── -->
     <div class="dt-cmdbar__end">
-      <HeaderQuickActions />
-
       <BranchWarehouseSelector />
 
       <v-btn
@@ -140,31 +138,8 @@
         :aria-label="isDark ? 'الوضع الفاتح' : 'الوضع الداكن'"
         @click="execute('app.toggle-theme')"
       />
-
-      <v-menu location="bottom end">
-        <template #activator="{ props }">
-          <v-btn
-            v-bind="props"
-            icon="mdi-account-circle-outline"
-            variant="text"
-            size="small"
-            aria-label="قائمة المستخدم"
-          />
-        </template>
-        <v-list density="compact" min-width="220">
-          <v-list-item>
-            <v-list-item-title>{{ authStore.user?.username }}</v-list-item-title>
-            <v-list-item-subtitle>{{ authStore.user?.role?.name }}</v-list-item-subtitle>
-          </v-list-item>
-          <v-divider class="my-1" />
-          <v-list-item prepend-icon="mdi-account-circle" to="/profile">
-            <v-list-item-title>الملف الشخصي</v-list-item-title>
-          </v-list-item>
-          <v-list-item prepend-icon="mdi-logout" @click="execute('app.logout')">
-            <v-list-item-title>تسجيل خروج</v-list-item-title>
-          </v-list-item>
-        </v-list>
-      </v-menu>
+      <!-- The current-user block + profile/logout now live in the drawer footer
+           (DesktopNavigation), so the command bar no longer duplicates them. -->
     </div>
   </div>
 </template>

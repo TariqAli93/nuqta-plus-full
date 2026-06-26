@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import {
   SALE_TYPE_INSTALLMENT,
   SALE_SOURCE_POS,
+  SALE_SOURCE_NEW_SALE,
   saleTypeToPaymentType,
 } from '../constants/sales.js';
 import {
@@ -363,6 +364,59 @@ function n(val) {
 }
 
 /**
+ * Build an installment schedule (جدول الأقساط) for the deferred balance.
+ *
+ * Splits `totalRemaining` across `count` installments, rounding each by the
+ * currency and folding the rounding drift into the LAST installment so the rows
+ * always sum back to exactly the remaining amount. Due dates start at
+ * `firstInstallmentDate` (YYYY-MM-DD) and step by `period` ('weekly' |
+ * 'monthly'); when no first date is supplied it falls back to "one period from
+ * today" — the historical monthly behaviour, so legacy callers are unchanged.
+ *
+ * @returns {Array<{installmentNumber:number, dueAmount:number, dueDate:string}>}
+ */
+function buildInstallmentSchedule({ totalRemaining, count, currency, firstInstallmentDate, period }) {
+  const installmentCount = parseInt(count, 10) || 0;
+  const remaining = roundByCurrency(Number(totalRemaining) || 0, currency);
+  if (installmentCount < 1 || remaining <= 0) return [];
+
+  const step = period === 'weekly' ? 'weekly' : 'monthly';
+  const base = roundByCurrency(remaining / installmentCount, currency);
+  // Drift between the evenly-rounded rows and the real remaining, charged to the
+  // final installment so Σ(dueAmount) === remaining to the currency's precision.
+  const adjustment = base * installmentCount - remaining;
+
+  let firstDue;
+  if (firstInstallmentDate && /^\d{4}-\d{2}-\d{2}$/.test(firstInstallmentDate)) {
+    firstDue = new Date(`${firstInstallmentDate}T00:00:00`);
+  } else {
+    firstDue = new Date();
+    if (step === 'weekly') firstDue.setDate(firstDue.getDate() + 7);
+    else firstDue.setMonth(firstDue.getMonth() + 1);
+  }
+
+  const rows = [];
+  for (let i = 0; i < installmentCount; i++) {
+    const due = new Date(firstDue);
+    if (step === 'weekly') due.setDate(due.getDate() + i * 7);
+    else due.setMonth(due.getMonth() + i);
+    const isLast = i === installmentCount - 1;
+    const amount = roundByCurrency(isLast ? base - adjustment : base, currency);
+    // Format from LOCAL components (not toISOString) so a first date the user
+    // picked — e.g. 2026-07-01 — is never shifted a day back by the UTC offset.
+    const y = due.getFullYear();
+    const mo = String(due.getMonth() + 1).padStart(2, '0');
+    const da = String(due.getDate()).padStart(2, '0');
+    rows.push({
+      installmentNumber: i + 1,
+      dueAmount: amount,
+      dueDate: `${y}-${mo}-${da}`,
+    });
+  }
+  return rows;
+}
+
+/**
  * Resolve the branch + warehouse pair for a sale.
  *
  * Preference order:
@@ -581,11 +635,19 @@ export class SaleService {
     const currency = saleData.currency || currencySettings.defaultCurrency;
     finalTotal = roundByCurrency(finalTotal, currency);
 
-    const paidAmount = roundByCurrency(parseFloat(saleData.paidAmount) || 0, currency);
+    let paidAmount = roundByCurrency(parseFloat(saleData.paidAmount) || 0, currency);
     let remainingAmount = Math.max(0, finalTotal - paidAmount);
 
     const threshold = currency === 'IQD' ? 250 : 0.01;
     remainingAmount = remainingAmount < threshold ? 0 : roundByCurrency(remainingAmount, currency);
+
+    // فاتورة بيع جديدة نقدية: كامل مبلغ الفاتورة مدفوع والمتبقي صفر — لا تنشئ
+    // أقساطاً ولا تضف ديناً على العميل. (A cash New-Sale invoice is always paid in
+    // full, so it never leaves a balance regardless of the paidAmount sent.)
+    if (saleSource === SALE_SOURCE_NEW_SALE && !isInstallmentSale) {
+      paidAmount = finalTotal;
+      remainingAmount = 0;
+    }
 
     const exchangeRate =
       saleData.exchangeRate ||
@@ -601,7 +663,7 @@ export class SaleService {
       : 'retail';
 
     if (isInstallmentSale && !customerId) {
-      throw new ValidationError('Customer is required for installment payments');
+      throw new ValidationError('يرجى اختيار العميل لإكمال البيع بالأقساط');
     }
 
     // Enforce credit-limit policy before any DB writes.
@@ -790,40 +852,28 @@ export class SaleService {
 
       if (isInstallmentSale && remainingAmount > 0) {
         const installmentCount = parseInt(saleData.installmentCount) || 3;
-
         if (installmentCount < 1) {
-          throw new ValidationError('Installment count must be at least 1');
+          throw new ValidationError('عدد الأقساط يجب أن يكون أكبر من صفر');
         }
 
-        const roundedRemainingAmount = roundByCurrency(remainingAmount, currency);
-        const baseInstallmentAmount = roundByCurrency(
-          roundedRemainingAmount / installmentCount,
-          currency
-        );
-        const totalWithBaseAmount = baseInstallmentAmount * installmentCount;
-        const adjustment = totalWithBaseAmount - roundedRemainingAmount;
-        const currentDate = new Date();
+        const schedule = buildInstallmentSchedule({
+          totalRemaining: remainingAmount,
+          count: installmentCount,
+          currency,
+          firstInstallmentDate: saleData.firstInstallmentDate,
+          period: saleData.installmentPeriod,
+        });
 
-        for (let i = 0; i < installmentCount; i++) {
-          const dueDate = new Date(currentDate);
-          dueDate.setMonth(dueDate.getMonth() + i + 1);
-
-          const isLastInstallment = i === installmentCount - 1;
-          const installmentAmount = isLastInstallment
-            ? baseInstallmentAmount - adjustment
-            : baseInstallmentAmount;
-
-          const roundedAmount = roundByCurrency(installmentAmount, currency);
-
+        for (const row of schedule) {
           await tx.insert(installments).values({
             saleId: newSale.id,
             customerId,
-            installmentNumber: i + 1,
-            dueAmount: String(roundedAmount),
+            installmentNumber: row.installmentNumber,
+            dueAmount: String(row.dueAmount),
             paidAmount: '0',
-            remainingAmount: String(roundedAmount),
+            remainingAmount: String(row.dueAmount),
             currency,
-            dueDate: dueDate.toISOString().split('T')[0],
+            dueDate: row.dueDate,
             status: 'pending',
           });
         }
@@ -2489,13 +2539,16 @@ export class SaleService {
 
     const totals = calculateSaleTotals(saleData.items, saleData.discount || 0, saleData.tax || 0);
 
+    // Cash vs installment for the completed invoice (same rule as create()).
+    const completingInstallment =
+      saleData.paymentType === 'installment' ||
+      saleData.paymentType === 'mixed' ||
+      saleData.saleType === SALE_TYPE_INSTALLMENT;
+
     let interestAmount = 0;
     let finalTotal = totals.total;
 
-    if (
-      (saleData.paymentType === 'installment' || saleData.paymentType === 'mixed') &&
-      saleData.interestRate > 0
-    ) {
+    if (completingInstallment && saleData.interestRate > 0) {
       interestAmount = (totals.total * saleData.interestRate) / 100;
       finalTotal = totals.total + interestAmount;
     }
@@ -2505,11 +2558,17 @@ export class SaleService {
 
     finalTotal = roundByCurrency(finalTotal, currency);
 
-    const paidAmount = roundByCurrency(parseFloat(saleData.paidAmount) || 0, currency);
+    let paidAmount = roundByCurrency(parseFloat(saleData.paidAmount) || 0, currency);
     let remainingAmount = Math.max(0, finalTotal - paidAmount);
 
     const threshold = currency === 'IQD' ? 250 : 0.01;
     remainingAmount = remainingAmount < threshold ? 0 : roundByCurrency(remainingAmount, currency);
+
+    // فاتورة بيع جديدة نقدية مكتملة من مسودة: كامل المبلغ مدفوع والمتبقي صفر.
+    if (saleData.saleSource === SALE_SOURCE_NEW_SALE && !completingInstallment) {
+      paidAmount = finalTotal;
+      remainingAmount = 0;
+    }
 
     const exchangeRate =
       saleData.exchangeRate !== undefined ? saleData.exchangeRate : draft.exchangeRate;
@@ -2682,43 +2741,47 @@ export class SaleService {
         });
       }
 
-      const draftIsInstallment =
-        saleData.paymentType === 'installment' ||
-        saleData.paymentType === 'mixed' ||
-        saleData.saleType === SALE_TYPE_INSTALLMENT;
-
-      if (draftIsInstallment && saleData.installments && saleData.installments.length > 0) {
+      // Build the installment schedule from the requested count + first date +
+      // period (the same derivation create() uses). The sale schema strips any
+      // client-sent `installments` array, so deriving it here also fixes the
+      // long-standing case of an installment draft completing with NO schedule.
+      if (completingInstallment && remainingAmount > 0) {
         const customerId = saleData.customerId || draft.customerId;
         if (!customerId) {
-          throw new ValidationError('Customer ID is required for installment sales');
+          throw new ValidationError('يرجى اختيار العميل لإكمال البيع بالأقساط');
         }
 
-        for (const installment of saleData.installments) {
-          const roundedAmount = roundByCurrency(installment.amount, currency);
+        const installmentCount = parseInt(saleData.installmentCount) || 3;
+        const schedule = buildInstallmentSchedule({
+          totalRemaining: remainingAmount,
+          count: installmentCount,
+          currency,
+          firstInstallmentDate: saleData.firstInstallmentDate,
+          period: saleData.installmentPeriod,
+        });
 
+        for (const row of schedule) {
           await tx.insert(installments).values({
             saleId: updatedSale.id,
             customerId,
-            installmentNumber: installment.number,
-            dueAmount: String(roundedAmount),
+            installmentNumber: row.installmentNumber,
+            dueAmount: String(row.dueAmount),
             paidAmount: '0',
-            remainingAmount: String(roundedAmount),
+            remainingAmount: String(row.dueAmount),
             currency,
-            dueDate: installment.dueDate,
+            dueDate: row.dueDate,
             status: 'pending',
             createdBy: userId,
           });
         }
 
-        if (customerId && remainingAmount > 0) {
-          await tx
-            .update(customers)
-            .set({
-              totalDebt: sql`${customers.totalDebt}::numeric + ${remainingAmount}`,
-              totalPurchases: sql`${customers.totalPurchases}::numeric + ${finalTotal}`,
-            })
-            .where(eq(customers.id, customerId));
-        }
+        await tx
+          .update(customers)
+          .set({
+            totalDebt: sql`${customers.totalDebt}::numeric + ${remainingAmount}`,
+            totalPurchases: sql`${customers.totalPurchases}::numeric + ${finalTotal}`,
+          })
+          .where(eq(customers.id, customerId));
       }
 
       // GL: post the completed draft's sale entry in the same tx.

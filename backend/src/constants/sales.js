@@ -4,7 +4,8 @@
  *
  * Business rules encoded here:
  *   - POS screen: direct sales only, cash or card, no deferred balance.
- *   - NewSale screen: installment sales only.
+ *   - NewSale screen (فاتورة بيع جديدة): a full sale invoice that supports BOTH
+ *     a cash payment and an installment plan (cash is the default).
  */
 
 // ── Sale source ────────────────────────────────────────────────────────────

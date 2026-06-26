@@ -73,9 +73,9 @@ const menus = computed(() => [
         action: () => go('/sales/pos'),
       },
       {
-        key: 'new-installment',
-        label: 'فاتورة تقسيط',
-        icon: 'mdi-calendar-clock',
+        key: 'new-sale-invoice',
+        label: 'فاتورة بيع جديدة',
+        icon: 'mdi-cart-plus',
         show: can('canUseInstallments'),
         action: () => go('/sales/new'),
       },

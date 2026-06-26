@@ -47,39 +47,18 @@ export const appCatalog = [
     execute: () => window.dispatchEvent(new CustomEvent('open-shortcuts-help')),
   },
 
-  // ══ Navigation (open module) ═══════════════════════════════════════════
-  ...[
-    { id: 'nav.products', title: 'فتح المنتجات', icon: 'mdi-package-variant', route: '/products', perm: 'view:products', kw: ['products', 'بضاعة', 'منتجات'] },
-    { id: 'nav.invoices', title: 'فتح الفواتير', icon: 'mdi-receipt-text-outline', route: '/sales', perm: 'view:sales', kw: ['invoices', 'sales', 'فواتير', 'مبيعات'] },
-    { id: 'nav.customers', title: 'فتح العملاء', icon: 'mdi-account-multiple', route: '/customers', perm: 'view:customers', kw: ['customers', 'عملاء'] },
-    { id: 'nav.suppliers', title: 'فتح الموردين', icon: 'mdi-truck', route: '/suppliers', perm: 'view:suppliers', kw: ['suppliers', 'موردين', 'موردون'] },
-    { id: 'nav.purchases', title: 'فتح المشتريات', icon: 'mdi-cart-arrow-down', route: '/purchases', perm: 'view:purchases', kw: ['purchases', 'مشتريات', 'شراء'] },
-    { id: 'nav.inventory', title: 'فتح المخزون', icon: 'mdi-warehouse', route: '/inventory', perm: 'view:inventory', kw: ['inventory', 'stock', 'مخزون'] },
-    { id: 'nav.warehouses', title: 'فتح الفروع والمخازن', icon: 'mdi-store', route: '/inventory/settings', perm: 'inventory:manage', kw: ['warehouses', 'branches', 'مخازن', 'فروع'] },
-    { id: 'nav.expenses', title: 'فتح المصاريف', icon: 'mdi-cash-minus', route: '/expenses', perm: 'expenses:read', kw: ['expenses', 'مصاريف'] },
-    { id: 'nav.treasury', title: 'فتح الصناديق', icon: 'mdi-safe-square-outline', route: '/treasury/cashboxes', perm: 'view:treasury', kw: ['cash', 'treasury', 'صناديق', 'خزينة'] },
-    { id: 'nav.gl', title: 'فتح القيود المحاسبية', icon: 'mdi-book-open-variant', route: '/gl/journal', perm: 'gl:read', kw: ['journal', 'gl', 'قيود', 'محاسبة'] },
-    { id: 'nav.reports', title: 'فتح التقارير', icon: 'mdi-chart-box', route: '/reports', perm: 'view:reports', kw: ['reports', 'تقارير'] },
-    { id: 'nav.users', title: 'فتح المستخدمين', icon: 'mdi-account-cog', route: '/users', perm: 'view:users', kw: ['users', 'مستخدمين', 'موظفين'] },
-    { id: 'nav.roles', title: 'فتح الأدوار', icon: 'mdi-shield-account-outline', route: '/roles', perm: 'roles:read', kw: ['roles', 'permissions', 'أدوار', 'صلاحيات'] },
-    { id: 'nav.notifications', title: 'فتح التنبيهات', icon: 'mdi-bell-outline', route: '/notifications', perm: null, kw: ['notifications', 'alerts', 'تنبيهات', 'إشعارات'] },
-  ].map((m) => ({
-    id: m.id,
-    title: m.title,
-    icon: m.icon,
-    group: 'Navigation',
-    keywords: m.kw,
-    ...(m.perm ? { permission: m.perm } : {}),
-    execute: (ctx) => ctx.app.navigate({ path: m.route }),
-  })),
+  // ══ Navigation ═════════════════════════════════════════════════════════
+  // "Open module" commands are DERIVED from the nav registry
+  // (commands/navCommands.js) so a page is declared exactly once. Only routes
+  // that are NOT drawer items are declared here by hand.
   {
-    id: 'nav.pos',
-    title: 'فتح نقطة البيع',
-    icon: 'mdi-cash-register',
-    group: 'Sales',
-    permission: 'sales:create',
-    keywords: ['pos', 'sell', 'نقطة بيع', 'كاشير', 'بيع'],
-    execute: (ctx) => ctx.app.navigate({ path: '/sales/pos' }),
+    id: 'app.notifications',
+    title: 'فتح التنبيهات',
+    icon: 'mdi-bell-outline',
+    group: 'Navigation',
+    permission: 'view:notifications',
+    keywords: ['notifications', 'alerts', 'تنبيهات', 'إشعارات'],
+    execute: (ctx) => ctx.app.navigate({ path: '/notifications' }),
   },
 
   // ══ Products (operations — run real page actions) ══════════════════════
