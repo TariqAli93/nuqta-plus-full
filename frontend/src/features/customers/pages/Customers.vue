@@ -13,7 +13,7 @@
       </v-btn>
     </PageHeader>
 
-    <v-card class="page-section filter-toolbar pa-3">
+    <v-card ref="filterCardEl" class="page-section filter-toolbar pa-3">
       <div class="search-toolbar">
         <SearchBar
           :model-value="query"
@@ -71,11 +71,25 @@
           prepend-icon="mdi-download"
           :disabled="!customerStore.customers || customerStore.customers.length === 0"
           aria-label="تصدير البيانات"
-          @click="handleExport"
+          @click="exportCustomers"
         >
           تصدير
         </v-btn>
       </div>
+
+      <!-- Bulk-action bar — appears only when rows are selected (#22) -->
+      <DesktopSelectionBar :count="selected.length" class="mx-3 mt-2" @clear="selected = []">
+        <v-btn
+          v-if="canDeleteCustomers"
+          size="small"
+          color="error"
+          variant="tonal"
+          prepend-icon="mdi-delete"
+          @click="bulkDeleteDialog = true"
+        >
+          حذف المحدد
+        </v-btn>
+      </DesktopSelectionBar>
       <v-alert
         v-if="error"
         type="error"
@@ -91,9 +105,8 @@
         </template>
       </v-alert>
 
-      <TableSkeleton v-if="initialLoading" :rows="8" :columns="headers.length" class="pa-3" />
-      <v-data-table
-        v-else
+      <DesktopDataGrid
+        v-model="selected"
         :headers="headers"
         :items="customerStore.customers"
         :loading="tableLoading"
@@ -102,7 +115,10 @@
         :items-length="customerStore.pagination.total"
         server-items-length
         hide-default-footer
-        density="comfortable"
+        show-select
+        item-value="id"
+        @open="openCustomer"
+        @row-menu="onRowMenu"
       >
         <template #no-data>
           <EmptyState
@@ -185,7 +201,7 @@
             <v-icon size="20">mdi-delete</v-icon>
           </v-btn>
         </template>
-      </v-data-table>
+      </DesktopDataGrid>
 
       <PaginationControls
         :pagination="customerStore.pagination"
@@ -206,30 +222,57 @@
       @confirm="handleDelete"
       @cancel="deleteDialog = false"
     />
+
+    <!-- Bulk delete (#7, #22) -->
+    <ConfirmDialog
+      v-model="bulkDeleteDialog"
+      title="تأكيد الحذف"
+      :message="`هل أنت متأكد من حذف ${selected.length} عميل؟`"
+      type="error"
+      confirm-text="حذف الكل"
+      cancel-text="إلغاء"
+      :loading="bulkDeleting"
+      @confirm="handleBulkDelete"
+      @cancel="bulkDeleteDialog = false"
+    />
+
+    <!-- Right-click context menu (#3), positioned at the pointer -->
+    <v-menu v-model="ctxMenu.open" :target="[ctxMenu.x, ctxMenu.y]" location="end">
+      <v-list density="compact" min-width="180">
+        <template v-for="(it, i) in ctxItems" :key="i">
+          <v-divider v-if="it.divider" class="my-1" />
+          <v-list-item v-else :prepend-icon="it.icon" @click="runCtx(it)">
+            <v-list-item-title :class="{ 'text-error': it.danger }">{{ it.title }}</v-list-item-title>
+          </v-list-item>
+        </template>
+      </v-list>
+    </v-menu>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
-import { RouterLink } from 'vue-router';
+import { RouterLink, useRouter } from 'vue-router';
 import { useCustomerStore } from '@/stores/customer';
 import { useAuthStore } from '@/stores/auth';
 import { usePermissions } from '@/composables/usePermissions';
 import * as uiAccess from '@/auth/uiAccess.js';
 import EmptyState from '@/components/EmptyState.vue';
-import TableSkeleton from '@/components/TableSkeleton.vue';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import PaginationControls from '@/components/PaginationControls.vue';
 import PageHeader from '@/components/PageHeader.vue';
 import SearchBar from '@/components/SearchBar.vue';
 import AdvancedFilters from '@/components/AdvancedFilters.vue';
 import MatchBadge from '@/components/MatchBadge.vue';
+import { DesktopDataGrid, DesktopSelectionBar } from '@/ui';
 import { useServerSearch } from '@/composables/useServerSearch';
 import { highlightSegments } from '@/utils/highlight';
-import { useExport } from '@/composables/useExport';
-import { useUndo } from '@/composables/useUndo';
 import { useNotificationStore } from '@/stores/notification';
+import { usePageShortcuts } from '@/composables/usePageShortcuts';
+import { useNativeFile } from '@/composables/useNativeFile';
+import { usePageActions } from '@/commands/pageActions';
 
+const router = useRouter();
 const customerStore = useCustomerStore();
 const authStore = useAuthStore();
 const { can } = usePermissions();
@@ -288,9 +331,6 @@ const {
 });
 
 const tableLoading = computed(() => isSearching.value || customerStore.loading);
-const initialLoading = computed(
-  () => tableLoading.value && (customerStore.customers?.length || 0) === 0
-);
 
 const filterChips = computed(() => {
   const chips = [];
@@ -327,48 +367,109 @@ const confirmDelete = (customer) => {
   deleteDialog.value = true;
 };
 
-const { exportToCSV } = useExport();
-const { registerUndo } = useUndo();
 const notificationStore = useNotificationStore();
+const { saveFile } = useNativeFile();
 
-const handleExport = () => {
-  try {
-    const exportHeaders = headers.map((h) => ({
-      title: h.title,
-      key: h.key,
-    }));
-    exportToCSV(customerStore.customers, exportHeaders, 'customers.csv');
-    notificationStore.success('تم تصدير البيانات بنجاح');
-  } catch {
-    notificationStore.error('فشل تصدير البيانات');
-  }
+// ── Multi-selection + bulk delete (#22) ──────────────────────────────────
+const selected = ref([]);
+const bulkDeleteDialog = ref(false);
+const bulkDeleting = ref(false);
+
+// ── Open the record / right-click context menu (#3, #4) ──────────────────
+const openCustomer = (item) => router.push(`/customers/${item.id}`);
+const ctxMenu = ref({ open: false, x: 0, y: 0, item: null });
+const onRowMenu = ({ item, event }) => {
+  ctxMenu.value = { open: true, x: event.clientX, y: event.clientY, item };
 };
+const ctxItems = computed(() => {
+  const item = ctxMenu.value.item;
+  if (!item) return [];
+  const list = [{ title: 'عرض الملف', icon: 'mdi-account-details', handler: () => openCustomer(item) }];
+  if (canManageCustomers.value)
+    list.push({ title: 'تعديل', icon: 'mdi-pencil', handler: () => router.push(`/customers/${item.id}/edit`) });
+  if (canDeleteCustomers.value)
+    list.push({ divider: true }, { title: 'حذف', icon: 'mdi-delete', danger: true, handler: () => confirmDelete(item) });
+  return list;
+});
+const runCtx = (it) => {
+  ctxMenu.value.open = false;
+  it.handler?.();
+};
+
+// ── Native CSV export via the OS save dialog (#17) ───────────────────────
+const csvCell = (v) => {
+  const s = String(v ?? '');
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+const exportCustomers = async () => {
+  const rows = customerStore.customers || [];
+  if (!rows.length) {
+    notificationStore.error('لا توجد بيانات للتصدير');
+    return;
+  }
+  const cols = headers.filter((h) => h.key !== 'actions');
+  const csv = [
+    cols.map((c) => c.title).join(','),
+    ...rows.map((r) => cols.map((c) => csvCell(r[c.key])).join(',')),
+  ].join('\n');
+  const res = await saveFile({
+    data: '﻿' + csv, // UTF-8 BOM so Excel reads Arabic correctly
+    defaultPath: 'customers.csv',
+    filters: [{ name: 'CSV', extensions: ['csv'] }],
+  });
+  if (!res.canceled) notificationStore.success('تم تصدير البيانات بنجاح');
+};
+
+// ── Keyboard: Ctrl+F focuses search, Delete removes the selection (#7,#10) ─
+const filterCardEl = ref(null);
+const focusSearch = () => {
+  const root = filterCardEl.value?.$el || filterCardEl.value;
+  const input = root?.querySelector?.('input');
+  input?.focus();
+  input?.select?.();
+};
+const onDeleteKey = () => {
+  if (selected.value.length) bulkDeleteDialog.value = true;
+};
+usePageShortcuts({ onSearch: focusSearch, onDelete: onDeleteKey });
 
 const handleDelete = async () => {
   deleting.value = true;
-  const customerId = selectedCustomer.value.id;
-  const customerName = selectedCustomer.value.name;
-
   try {
-    await customerStore.deleteCustomer(customerId);
+    await customerStore.deleteCustomer(selectedCustomer.value.id);
     deleteDialog.value = false;
     refresh();
-
-    // Register undo
-    registerUndo(
-      {
-        undo: async () => {
-          notificationStore.info('لا يمكن التراجع عن حذف العميل');
-        },
-      },
-      `تم حذف العميل "${customerName}"`
-    );
   } catch {
-    // Error handled by notification
+    /* presented centrally */
   } finally {
     deleting.value = false;
   }
 };
+
+const handleBulkDelete = async () => {
+  bulkDeleting.value = true;
+  try {
+    for (const id of [...selected.value]) {
+      try {
+        await customerStore.deleteCustomer(id);
+      } catch {
+        /* keep deleting the rest */
+      }
+    }
+    selected.value = [];
+    bulkDeleteDialog.value = false;
+    refresh();
+  } finally {
+    bulkDeleting.value = false;
+  }
+};
+
+// Expose real page actions to the Command Registry. The `customers.export` /
+// `customers.refresh` commands (catalog) navigate here + run these handlers.
+usePageActions('customers', {
+  export: () => exportCustomers(),
+  refresh: () => refresh(),
+});
 
 onMounted(() => {
   refresh();

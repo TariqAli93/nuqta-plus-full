@@ -1,23 +1,20 @@
 <template>
   <div class="page-shell space-y-3">
-    <!-- Loading state ---------------------------------------------------- -->
-    <div v-if="loading" class="loading-state">
-      <v-progress-circular indeterminate color="primary" size="56" />
-      <div class="text-body-2 text-medium-emphasis">جاري تحميل بيانات العميل…</div>
-    </div>
+    <!-- Loading / error states (Desktop UI Kit) -------------------------- -->
+    <DesktopLoadingState v-if="loading" label="جاري تحميل بيانات العميل…" />
 
-    <!-- Error / not-found state ------------------------------------------ -->
-    <v-card v-else-if="error" class="pa-6">
-      <EmptyState
-        :title="errorTitle"
-        :description="errorDescription"
-        icon="mdi-alert-circle-outline"
-        icon-color="error"
-        :actions="[
-          { text: 'العودة للعملاء', icon: 'mdi-arrow-right', to: '/customers', color: 'primary' },
-        ]"
-      />
-    </v-card>
+    <DesktopErrorState
+      v-else-if="error"
+      :title="errorTitle"
+      :message="errorDescription"
+      :error="error"
+    >
+      <template #actions>
+        <v-btn color="primary" variant="tonal" prepend-icon="mdi-arrow-right" to="/customers">
+          العودة للعملاء
+        </v-btn>
+      </template>
+    </DesktopErrorState>
 
     <template v-else-if="profile">
       <!-- 1. Page Header --------------------------------------------------- -->
@@ -820,6 +817,7 @@ import AgingPanel from '@/components/reports/AgingPanel.vue';
 import PageHeader from '@/components/PageHeader.vue';
 import StatCard from '@/components/StatCard.vue';
 import WorkspaceTabs from '@/components/WorkspaceTabs.vue';
+import { DesktopLoadingState, DesktopErrorState } from '@/ui';
 import { useCustomersData } from '../composables/useCustomersData.js';
 import {
   formatCurrency,
@@ -861,7 +859,6 @@ async function loadCustomerAging(customerId) {
 
 const userRole = computed(() => authStore.user?.role);
 const canEdit = computed(() => uiAccess.canManageCustomers(userRole.value));
-const canAddPayment = computed(() => uiAccess.canAddPayments(userRole.value));
 // Collections actions reuse the sales:update permission gate (same backend
 // rule as adding a payment), so the UI surfaces the workflow exactly when
 // the user could already record a payment elsewhere.

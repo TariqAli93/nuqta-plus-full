@@ -112,15 +112,27 @@ const setItemRef = (el, index) => {
   if (el) itemEls[index] = el;
 };
 
-// Ordered, sectioned rows. Empty query → recents then all; query → ranked
-// results. Only `cmd` rows are selectable (carry an `index`).
+// Stable group order so the palette reads top-down like the spec.
+const GROUP_ORDER = [
+  'Navigation', 'تنقّل', 'Application', 'عام',
+  'Products', 'Sales', 'Customers', 'Inventory',
+  'Accounting', 'Reports', 'Administration', 'Settings',
+  'إجراءات', 'حساب',
+];
+const groupRank = (g) => {
+  const i = GROUP_ORDER.indexOf(g || '');
+  return i === -1 ? GROUP_ORDER.length : i;
+};
+
+// Ordered, sectioned rows. Empty query → recents then commands grouped by their
+// `group`; query → ranked results, also grouped. Only `cmd` rows are selectable.
 const rows = computed(() => {
   const visible = visibleCommands.value;
   const out = [];
   let idx = 0;
   const pushSection = (label, cmds) => {
     if (!cmds.length) return;
-    out.push({ type: 'header', label, key: `h-${label}` });
+    out.push({ type: 'header', label, key: `h-${label}-${out.length}` });
     for (const cmd of cmds) {
       out.push({
         type: 'cmd',
@@ -132,18 +144,26 @@ const rows = computed(() => {
       });
     }
   };
+  const pushGrouped = (cmds) => {
+    const groups = new Map();
+    for (const c of cmds) {
+      const g = c.group || 'أخرى';
+      if (!groups.has(g)) groups.set(g, []);
+      groups.get(g).push(c);
+    }
+    [...groups.keys()]
+      .sort((a, b) => groupRank(a) - groupRank(b) || a.localeCompare(b, 'ar'))
+      .forEach((g) => pushSection(g, groups.get(g)));
+  };
 
   if (query.value.trim()) {
-    pushSection('النتائج', searchCommands(visible, query.value));
+    pushGrouped(searchCommands(visible, query.value));
   } else {
     const byId = new Map(visible.map((c) => [c.id, c]));
     const recents = recentIds.value.map((id) => byId.get(id)).filter(Boolean);
     const recentSet = new Set(recents.map((c) => c.id));
-    const rest = visible
-      .filter((c) => !recentSet.has(c.id))
-      .sort((a, b) => (a.group || '').localeCompare(b.group || '', 'ar') || a.title.localeCompare(b.title, 'ar'));
     pushSection('آخر الأوامر', recents);
-    pushSection('كل الأوامر', rest);
+    pushGrouped(visible.filter((c) => !recentSet.has(c.id)));
   }
   return out;
 });

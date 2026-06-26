@@ -7,6 +7,7 @@ import { useNotificationStore } from '@/stores/notification';
 import { useResetStore } from '@/stores/reset';
 import { useAuthStore } from '@/stores/auth';
 import { usePermissions } from '@/composables/usePermissions';
+import { usePageActions } from '@/commands/pageActions';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import { useTheme } from 'vuetify';
 
@@ -111,6 +112,14 @@ const exportBackup = async (filename) => {
 const importBackup = () => {
   importDialog.value = true;
 };
+
+// Expose the real backup operations to the Command Registry so
+// `settings.backup.create` / `settings.backup.restore` actually run them after
+// navigating to the backup tab (lifecycle-aware, runs once).
+usePageActions('settings', {
+  'backup.create': () => createBackup(),
+  'backup.restore': () => importBackup(),
+});
 
 const confirmImport = async () => {
   startLoading();

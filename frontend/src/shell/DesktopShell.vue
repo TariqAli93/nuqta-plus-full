@@ -25,6 +25,7 @@ import { onMounted } from 'vue';
 import { useAppTheme } from '@/composables/useAppTheme';
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts';
 import { useCommandShortcuts } from '@/commands/useCommandShortcuts';
+import { useWindowTitle } from '@/composables/useWindowTitle';
 
 import DesktopTitleBar from './DesktopTitleBar.vue';
 
@@ -45,6 +46,9 @@ useKeyboardShortcuts();
 
 // Command-system keyboard shortcuts (executes registered commands by id).
 useCommandShortcuts();
+
+// Keep the window/document title in sync with the active page (#20).
+useWindowTitle();
 
 onMounted(() => {
   // Theme is already applied in setup; nothing else to bootstrap here. Realtime

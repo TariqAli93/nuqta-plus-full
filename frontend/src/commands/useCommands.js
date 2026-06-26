@@ -15,7 +15,10 @@ import {
 } from './core.js';
 import { globalCommands } from './globalCommands.js';
 import { pageCommands } from './pageCommands.js';
+import { appCatalog } from './catalog.js';
 import { openCommandPalette } from './useCommandPalette.js';
+import { useCommandNavigator } from './commandNavigator.js';
+import { openReportWindow } from '@/composables/useReportWindow';
 import { customerCommands } from '@/features/customers/commands/customerCommands.js';
 
 /**
@@ -32,6 +35,8 @@ import { customerCommands } from '@/features/customers/commands/customerCommands
 const registry = createCommandRegistry();
 registry.registerMany(globalCommands);
 registry.registerMany(pageCommands);
+// The full module command catalog (open-section + real operations).
+registry.registerMany(appCatalog);
 // Feature-owned commands (aggregated centrally as features are migrated).
 registry.registerMany(customerCommands);
 
@@ -63,6 +68,7 @@ export function useCommands() {
   const notify = useNotificationStore();
   const shell = useShellLayout();
   const theme = useAppTheme();
+  const navigator = useCommandNavigator();
 
   /** Build the full runtime context handed to every command. */
   const buildContext = (extra = {}) => ({
@@ -77,7 +83,11 @@ export function useCommands() {
     notify,
     electron: typeof window !== 'undefined' ? window.electronAPI : undefined,
     app: {
-      navigate: (to) => router.push(to),
+      // Accepts a path string OR a CommandNavigationTarget ({routeName, tab,
+      // action, payload, ...}) — the navigator handles tab selection + running
+      // the page action once the page is ready.
+      navigate: (target) => navigator.navigate(target),
+      openReport: (type, params) => openReportWindow(type, params),
       refreshWorkspace: () => shell.refreshWorkspace(),
       toggleTheme: () => theme.toggleTheme(),
       openCommandPalette: () => openCommandPalette(),

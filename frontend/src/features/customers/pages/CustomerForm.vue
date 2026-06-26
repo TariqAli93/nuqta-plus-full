@@ -182,6 +182,8 @@ import PageHeader from '@/components/PageHeader.vue';
 import { useCustomersData } from '../composables/useCustomersData.js';
 import { customerRules, emptyCustomer, customerTypeOptions } from '../schemas/customer.schema.js';
 import { useFormErrors } from '@/composables/useFormErrors';
+import { useUnsavedChanges } from '@/composables/useUnsavedChanges';
+import { usePageShortcuts } from '@/composables/usePageShortcuts';
 
 const router = useRouter();
 const route = useRoute();
@@ -206,6 +208,13 @@ const isEdit = computed(() => !!route.params.id);
 
 // Shared create/edit validators (features/customers/schemas/customer.schema.js).
 const rules = customerRules;
+
+// Unsaved-changes protection (#19): dirty = form differs from the last saved
+// baseline. Ctrl+S saves (#9).
+const baseline = ref(JSON.stringify(formData.value));
+const isDirty = computed(() => JSON.stringify(formData.value) !== baseline.value);
+useUnsavedChanges(isDirty);
+usePageShortcuts({ onSave: () => handleSubmit() });
 
 // Live preview of how the API will store the phone for lookup. Empty input
 // → no hint. Un-normalisable input → soft warning (we don't block save —
@@ -240,6 +249,7 @@ async function performSave({ allowDuplicatePhone = false } = {}) {
       await customerStore.createCustomer(payload);
     }
     duplicateDialog.value = false;
+    baseline.value = JSON.stringify(formData.value); // clean → unsaved guard passes
     router.push({ name: 'Customers' });
   } catch (error) {
     // `error` is a normalized AppError (from the central interceptor).
@@ -283,6 +293,7 @@ onMounted(async () => {
         customerType: current?.customerType || 'retail',
         creditLimit: current?.creditLimit == null ? null : Number(current.creditLimit),
       };
+      baseline.value = JSON.stringify(formData.value); // loaded data is the clean baseline
     } catch {
       // Error handled centrally by the axios interceptor.
     } finally {

@@ -104,7 +104,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { useSettingsStore } from '../stores/settings';
 import { useConnectionStore } from '@/stores/connection';
 import { useAuthStore } from '@/stores/auth';
@@ -125,19 +125,35 @@ const settingsStore = useSettingsStore();
 const connectionStore = useConnectionStore();
 const authStore = useAuthStore();
 const route = useRoute();
-// State
+// State. Tabs are addressed by STABLE string ids (never a numeric index), so
+// `?tab=backup` deep-links work — even after a reload or while already on the
+// page (a watcher re-applies it, not a one-time onMounted read).
 const activeTab = ref('company');
+const availableTabs = [
+  'company',
+  'currency',
+  'connection',
+  'remote-access',
+  'messaging',
+  'backup',
+  'license',
+];
+
+watch(
+  () => route.query.tab,
+  (tab) => {
+    if (typeof tab === 'string' && availableTabs.includes(tab)) {
+      activeTab.value = tab;
+    }
+  },
+  { immediate: true }
+);
 
 // Permission-based (NOT role-name): messaging config is an administrative
 // settings surface, gated by the same grant as the rest of system settings.
 const canManageMessaging = computed(() => authStore.hasPermission('settings:manage'));
 
 onMounted(async () => {
-  // Check for tab query parameter
-  if (route.query.tab) {
-    activeTab.value = route.query.tab;
-  }
-
   try {
     await settingsStore.initialize();
     await settingsStore.fetchCurrencySettings();

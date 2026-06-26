@@ -187,7 +187,8 @@ const onKeydown = (e) => {
   const idx = rows.indexOf(document.activeElement);
   let next;
   if (e.key === 'ArrowDown') next = rows[idx < 0 ? 0 : (idx + 1) % rows.length];
-  else if (e.key === 'ArrowUp') next = rows[idx < 0 ? rows.length - 1 : (idx - 1 + rows.length) % rows.length];
+  else if (e.key === 'ArrowUp')
+    next = rows[idx < 0 ? rows.length - 1 : (idx - 1 + rows.length) % rows.length];
   else if (e.key === 'Home') next = rows[0];
   else next = rows[rows.length - 1];
   next?.focus();
@@ -212,7 +213,9 @@ watch(
   background: rgb(var(--v-theme-surface));
   border-inline-end: 1px solid rgba(var(--v-border-color), 0.08);
   overflow: hidden;
-  transition: width 0.16s ease, flex-basis 0.16s ease;
+  transition:
+    width 0.16s ease,
+    flex-basis 0.16s ease;
 
   &--collapsed {
     width: 56px;
@@ -271,7 +274,9 @@ watch(
   border-radius: 6px;
   cursor: pointer;
   position: relative;
-  transition: background-color 0.12s ease, color 0.12s ease;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
 
   &:hover {
     background: rgba(var(--v-theme-on-surface), 0.06);

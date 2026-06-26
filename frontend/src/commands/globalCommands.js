@@ -43,9 +43,13 @@ export const globalCommands = [
     id: 'app.refresh',
     title: 'تحديث الصفحة',
     icon: 'mdi-refresh',
+    shortcut: 'F5',
     group: 'عام',
     keywords: ['refresh', 'reload', 'تحديث'],
     scope: 'global',
+    // Remounts the current page (re-runs its data load) — NOT an Electron
+    // window reload. The shortcut engine preventDefault's F5 so Chromium never
+    // reloads the renderer.
     execute: (ctx) => ctx.app.refreshWorkspace(),
   },
   {
@@ -60,14 +64,15 @@ export const globalCommands = [
   {
     id: 'app.backup',
     title: 'النسخ الاحتياطي',
-    description: 'فتح أدوات النسخ الاحتياطي والاستعادة',
+    description: 'فتح تبويب النسخ الاحتياطي في الإعدادات',
     icon: 'mdi-backup-restore',
     group: 'عام',
-    // The backup tools live on the Settings page; gate by the same permission.
     permission: 'view:settings',
     keywords: ['backup', 'restore', 'نسخ', 'احتياطي', 'استعادة'],
     scope: 'global',
-    execute: (ctx) => ctx.app.navigate('/settings'),
+    // Real action: open Settings AND select the backup tab (not just the page).
+    // The operation commands `settings.backup.create` / `.restore` actually run.
+    execute: (ctx) => ctx.app.navigate({ routeName: 'Settings', tab: 'backup' }),
   },
   {
     id: 'app.logout',

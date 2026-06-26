@@ -74,9 +74,12 @@ export function useCommandShortcuts() {
     const combo = comboFromEvent(e);
     if (!combo || RESERVED.has(combo)) return;
 
-    // Bare single-key shortcuts (no modifier) must not fire while typing.
+    // Bare single-key shortcuts (no modifier) must not fire while typing —
+    // EXCEPT function keys (F1–F12), which must always work (e.g. F5 refresh,
+    // so it preventDefault's the Chromium reload even from inside an input).
     const hasModifier = e.ctrlKey || e.metaKey || e.altKey;
-    if (!hasModifier && isTypingTarget(e.target)) return;
+    const isFunctionKey = /^f\d{1,2}$/.test(combo);
+    if (!hasModifier && !isFunctionKey && isTypingTarget(e.target)) return;
 
     const match = visibleCommands.value.find(
       (c) => c.shortcut && normalizeShortcut(c.shortcut) === combo

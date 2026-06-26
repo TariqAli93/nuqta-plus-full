@@ -333,6 +333,7 @@ import { useServerSearch } from '@/composables/useServerSearch';
 import { highlightSegments } from '@/utils/highlight';
 import { formatCurrency } from '@/utils/formatters';
 import { useExport } from '@/composables/useExport';
+import { usePageActions } from '@/commands/pageActions';
 import { useUndo } from '@/composables/useUndo';
 import { useNotificationStore } from '@/stores/notification';
 
@@ -570,6 +571,13 @@ const handleExport = () => {
     notificationStore.error('فشل تصدير البيانات');
   }
 };
+
+// Expose real page actions to the Command Registry so `products.export` /
+// `products.refresh` (palette, command bar, shortcuts) run THESE handlers.
+usePageActions('products', {
+  export: () => handleExport(),
+  refresh: () => refresh(),
+});
 
 const handleDelete = async () => {
   const productId = selectedProduct.value.id;
