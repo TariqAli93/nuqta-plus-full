@@ -871,7 +871,7 @@ import SelectPrinter from '@/components/SelectPrinter.vue';
 import PageHeader from '@/components/PageHeader.vue';
 import BoxyShipmentButton from '@/components/delivery/BoxyShipmentButton.vue';
 import BoxyShipmentPanel from '@/components/delivery/BoxyShipmentPanel.vue';
-import { formatReceiptData } from '@/utils/receiptFormatter';
+import { normalizeInvoiceForPrint } from '@/printing/dto/normalizeInvoiceForPrint.js';
 import { priceTierLabel } from '@/utils/productUnits';
 import {
   toYmd,
@@ -1226,35 +1226,42 @@ const buildSaleForPrint = () => {
   };
 };
 
+// Build the print settings from company/print settings. The printer/copies/silent
+// can be overridden later from the preview toolbar.
+const buildPrintSettings = (printerName = null) => {
+  const c = settingsStore.companyInfo || {};
+  return {
+    paper: c.invoiceType || 'roll-80',
+    theme: c.invoiceTheme || 'classic',
+    printerName: printerName || c.receiptPrinterName || null,
+    copies: Number(c.defaultCopies) || 1,
+    silent: c.silentPrint === 'true',
+  };
+};
+
+// Open the new Vue-based preview window. The SAME ReceiptPrint component drives
+// preview, print and PDF — no HTML is built in Electron main.
 const previewPrint = async () => {
   if (!sale.value) {
     notificationStore.error('لا توجد بيانات فاتورة للمعاينة');
     return;
   }
-
-  // Get company info from settings
-  const companyInfo = settingsStore.companyInfo;
-  if (!companyInfo || !companyInfo.invoiceType) {
-    notificationStore.error('يرجى إعداد نوع الفاتورة من إعدادات الشركة');
+  if (!window.electronAPI?.print) {
+    notificationStore.error('المعاينة متاحة فقط داخل تطبيق سطح المكتب');
     return;
   }
 
   try {
-    // Format receipt data
-    const receiptData = formatReceiptData(buildSaleForPrint(), companyInfo);
-
-    // Ensure all data is serializable by creating clean copies
-    const cleanReceiptData = JSON.parse(JSON.stringify(receiptData));
-    const cleanCompanyInfo = JSON.parse(JSON.stringify(companyInfo));
-
-    // Call electron API to preview
-    const result = await window.electronAPI.previewReceipt({
-      receiptData: cleanReceiptData,
-      companyInfo: cleanCompanyInfo,
+    const data = normalizeInvoiceForPrint({
+      sale: buildSaleForPrint(),
+      companyInfo: settingsStore.companyInfo,
     });
-
-    if (!result.success) {
-      notificationStore.error(result.error || 'فشل في عرض المعاينة');
+    const result = await window.electronAPI.print.previewInvoice({
+      data,
+      settings: buildPrintSettings(),
+    });
+    if (!result?.success) {
+      notificationStore.error(result?.error || 'فشل في عرض المعاينة');
     }
   } catch (error) {
     console.error('Preview error:', error);
@@ -1395,48 +1402,35 @@ const addPayment = async () => {
   }
 };
 
+// Direct print (no preview). Prefers an explicitly selected printer, then the
+// configured default; if neither is set and silent is off, the OS print dialog
+// appears. Print/PDF are rendered from the SAME Vue component as the preview.
 const handlePrint = async () => {
   if (!sale.value) {
     notificationStore.error('لا توجد بيانات فاتورة للطباعة');
     return;
   }
-
-  // Get selected printer
-  const selectedPrinter = saleStore.getPrinter();
-  if (!selectedPrinter) {
-    notificationStore.error('يرجى اختيار طابعة أولاً');
-    return;
-  }
-
-  // Get company info from settings
-  const companyInfo = settingsStore.companyInfo;
-  if (!companyInfo || !companyInfo.invoiceType) {
-    notificationStore.error('يرجى إعداد نوع الفاتورة من إعدادات الشركة');
+  if (!window.electronAPI?.print) {
+    notificationStore.error('الطباعة متاحة فقط داخل تطبيق سطح المكتب');
     return;
   }
 
   try {
     printing.value = true;
-
-    // Format receipt data
-    const receiptData = formatReceiptData(buildSaleForPrint(), companyInfo);
-
-    // Ensure all data is serializable by creating clean copies
-    // This prevents "object could not be cloned" errors in Electron IPC
-    const cleanReceiptData = JSON.parse(JSON.stringify(receiptData));
-    const cleanCompanyInfo = JSON.parse(JSON.stringify(companyInfo));
-
-    // Call electron API to print
-    const result = await window.electronAPI.printReceipt({
-      printerName: selectedPrinter.name,
-      receiptData: cleanReceiptData,
-      companyInfo: cleanCompanyInfo,
+    const selectedPrinter = saleStore.getPrinter?.();
+    const data = normalizeInvoiceForPrint({
+      sale: buildSaleForPrint(),
+      companyInfo: settingsStore.companyInfo,
+    });
+    const result = await window.electronAPI.print.printInvoice({
+      data,
+      settings: buildPrintSettings(selectedPrinter?.name || null),
     });
 
-    if (result.success) {
-      notificationStore.success('تمت الطباعة بنجاح');
-    } else {
-      notificationStore.error(result.error || 'فشل في الطباعة');
+    if (result?.success) {
+      notificationStore.success(result.message || 'تم إرسال الفاتورة للطباعة');
+    } else if (!result?.canceled) {
+      notificationStore.error(result?.error || 'فشل في الطباعة');
     }
   } catch (error) {
     console.error('Print error:', error);

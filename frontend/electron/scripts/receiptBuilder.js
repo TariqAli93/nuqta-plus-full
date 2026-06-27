@@ -1,6 +1,12 @@
 /**
  * Receipt Builder for Electron printing
  * Generates HTML for receipt printing and preview
+ *
+ * @deprecated Superseded by the unified printing pipeline (electron/print/* +
+ * src/printing/*). Invoice HTML is no longer built in the main process — preview,
+ * print and PDF all render the shared Vue `ReceiptPrint` component. This module is
+ * only kept alive by the legacy `print-receipt` / `preview-receipt` IPC handlers
+ * for backward compatibility and should be removed once those are retired.
  */
 
 /**

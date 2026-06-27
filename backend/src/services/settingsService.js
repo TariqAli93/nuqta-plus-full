@@ -147,9 +147,21 @@ export class SettingsService {
       street: companyInfo.street || '',
       phone: companyInfo.phone || '',
       phone2: companyInfo.phone2 || '',
+      taxNumber: companyInfo.taxNumber || '',
       logoUrl: companyInfo.logoUrl || '',
       invoiceType: companyInfo.invoiceType || '',
       invoiceTheme: companyInfo.invoiceTheme || 'classic',
+      // Printing settings (logo stored as path only — never the image bytes).
+      companyLogoFileName: companyInfo.companyLogoFileName || '',
+      companyLogoPath: companyInfo.companyLogoPath || '',
+      invoiceHeaderText: companyInfo.invoiceHeaderText || '',
+      invoiceSubHeaderText: companyInfo.invoiceSubHeaderText || '',
+      invoiceFooterText: companyInfo.invoiceFooterText || '',
+      invoiceTermsText: companyInfo.invoiceTermsText || '',
+      invoiceHeaderLayout: companyInfo.invoiceHeaderLayout || 'auto',
+      receiptPrinterName: companyInfo.receiptPrinterName || '',
+      silentPrint: companyInfo.silentPrint || 'false',
+      defaultCopies: companyInfo.defaultCopies || '1',
     };
   }
 

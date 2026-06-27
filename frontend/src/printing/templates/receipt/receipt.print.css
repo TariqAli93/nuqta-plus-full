@@ -1,0 +1,421 @@
+/**
+ * Receipt print stylesheet (GLOBAL — imported, not scoped) so it applies inside
+ * the hidden render window identically to the on-screen preview.
+ *
+ * SAFETY (PDF must never be blank):
+ *   - We NEVER do `body * { visibility: hidden }` or hide `.receipt-paper`.
+ *   - `.no-print` is only ever placed on the preview toolbar — never on a parent
+ *     of the receipt.
+ *   - Text colour and background never collapse to the same colour.
+ *   - No `height:100vh` / `position:fixed` / `overflow:hidden` that could clip the
+ *     page in PDF.
+ *
+ * All visual variation = CSS custom properties per theme (receipt.themes.js).
+ * Paper width = `.receipt-paper--<paper>` modifier. Roll height is content-driven;
+ * A4/A5 get a min-height so a short invoice still fills the sheet.
+ */
+
+html.print-host,
+body.print-host {
+  margin: 0;
+  padding: 0;
+  background: #ffffff;
+  color: #111827;
+  direction: rtl;
+}
+
+/* The print/preview/render windows mount the full Vue app, which may be in a dark
+   Vuetify theme (v-theme--dark). Force a clean LIGHT surface for the print host so
+   the receipt always renders on white — independent of the app's theme. */
+html.print-host .v-application,
+html.print-host .v-application__wrap,
+html.print-host #app {
+  min-height: 0 !important;
+}
+
+.print-page {
+  min-height: 100%;
+  background: #ffffff;
+  display: block;
+}
+
+.receipt-paper {
+  display: block;
+  box-sizing: border-box;
+  margin: 0 auto;
+  background: #ffffff;
+  color: var(--r-fg, #111827);
+  font-family: var(--r-font);
+  font-size: var(--r-size);
+  line-height: 1.55;
+  direction: rtl;
+  text-align: right;
+}
+.receipt-paper * {
+  box-sizing: border-box;
+}
+
+/* ── Paper widths (rolls: content height; sheets: fixed) ──────────────────── */
+.receipt-paper--roll-58 {
+  width: 58mm;
+  padding: 3mm 2mm;
+}
+.receipt-paper--roll-80 {
+  width: 80mm;
+  padding: 4mm 3mm;
+}
+.receipt-paper--roll-88 {
+  width: 88mm;
+  padding: 4mm 3mm;
+}
+.receipt-paper--a4 {
+  width: 210mm;
+  min-height: 297mm;
+  padding: 14mm;
+}
+.receipt-paper--a5 {
+  width: 148mm;
+  min-height: 210mm;
+  padding: 9mm;
+}
+
+/* ── Header ───────────────────────────────────────────────────────────────── */
+.receipt-header {
+  border-bottom: var(--r-header-border);
+  padding-bottom: var(--r-gap);
+  margin-bottom: var(--r-gap);
+}
+.receipt-brand {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 4mm;
+  min-width: 0;
+}
+.receipt-company-text {
+  min-width: 0;
+}
+.receipt-company-name {
+  font-size: var(--r-company-size);
+  font-weight: 800;
+  line-height: 1.25;
+  margin: 0;
+  color: var(--r-fg);
+  word-break: break-word;
+}
+.receipt-header-text {
+  font-size: var(--r-small);
+  line-height: 1.5;
+  color: var(--r-fg);
+  font-weight: 600;
+  white-space: pre-line;
+  margin-top: 1mm;
+}
+.receipt-subheader-text {
+  font-size: var(--r-small);
+  color: var(--r-muted);
+  white-space: pre-line;
+}
+.receipt-company-meta {
+  font-size: var(--r-small);
+  color: var(--r-muted);
+  line-height: 1.6;
+  direction: ltr;
+}
+.receipt-logo {
+  object-fit: contain;
+  flex: 0 0 auto;
+  display: block;
+  margin-inline: auto;
+}
+
+/* Header layout: HORIZONTAL — logo+name on one side, company meta on the other. */
+.receipt-header--horizontal {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12mm;
+}
+.receipt-header--horizontal .receipt-company-meta {
+  text-align: left;
+}
+
+/* Header layout: CENTERED / COMPACT — stacked & centered (thermal-friendly). */
+.receipt-header--centered,
+.receipt-header--compact {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 1mm;
+}
+.receipt-header--centered .receipt-brand,
+.receipt-header--compact .receipt-brand {
+  flex-direction: column;
+  align-items: center;
+  gap: 1mm;
+}
+.receipt-header--centered .receipt-company-meta,
+.receipt-header--compact .receipt-company-meta {
+  text-align: center;
+}
+.receipt-header--compact {
+  padding-bottom: 2mm;
+  margin-bottom: 2mm;
+}
+
+/* Logo sizing per paper (kept small on thermal so it never crowds the name). */
+.receipt-paper--a4 .receipt-logo,
+.receipt-paper--a5 .receipt-logo {
+  width: 22mm;
+  height: 22mm;
+  max-width: 22mm;
+  max-height: 22mm;
+}
+.receipt-paper--roll-58 .receipt-logo {
+  width: 10mm;
+  height: 10mm;
+}
+.receipt-paper--roll-80 .receipt-logo,
+.receipt-paper--roll-88 .receipt-logo {
+  width: 14mm;
+  height: 14mm;
+}
+
+/* ── Title + meta ─────────────────────────────────────────────────────────── */
+.receipt-title {
+  text-align: center;
+  font-size: var(--r-title-size);
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  margin: var(--r-gap) 0;
+  color: var(--r-accent);
+}
+.receipt-meta,
+.receipt-customer {
+  font-size: var(--r-size);
+  margin: var(--r-gap) 0;
+}
+.receipt-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 2px 0;
+}
+.receipt-row > span:first-child {
+  color: var(--r-muted);
+}
+
+.receipt-divider {
+  border: 0;
+  border-top: var(--r-divider);
+  margin: var(--r-gap) 0;
+}
+.receipt-divider--soft {
+  border-top: 1px solid var(--r-line-soft);
+  margin: calc(var(--r-gap) / 2) 0;
+}
+
+/* ── Items: SHEET table (A4/A5) ──────────────────────────────────────────── */
+.receipt-items {
+  width: 100%;
+  border-collapse: collapse;
+  margin: var(--r-gap) 0;
+  font-size: var(--r-size);
+}
+.receipt-items th {
+  text-align: right;
+  font-weight: 700;
+  background: var(--r-th-bg);
+  color: var(--r-th-fg);
+  border: var(--r-cell-border);
+  padding: 6px 6px;
+}
+.receipt-items td {
+  text-align: right;
+  border: var(--r-cell-border);
+  padding: 6px 6px;
+  vertical-align: top;
+}
+.receipt-items tbody tr:nth-child(even) {
+  background: var(--r-zebra);
+}
+.receipt-items .num {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.receipt-items .item-sub {
+  display: block;
+  font-size: var(--r-small);
+  color: var(--r-muted);
+  margin-top: 1px;
+}
+.receipt-items .item-discount {
+  display: block;
+  font-size: var(--r-small);
+  color: var(--r-due);
+  margin-top: 1px;
+}
+
+/* ── Items: THERMAL line layout (rolls) ──────────────────────────────────── */
+.receipt-tlist {
+  margin: var(--r-gap) 0;
+}
+.receipt-titem {
+  padding: 1.5mm 0;
+  border-bottom: 1px dashed var(--r-line-soft);
+}
+.receipt-titem:last-child {
+  border-bottom: 0;
+}
+.receipt-titem-name {
+  font-weight: 700;
+}
+.receipt-titem-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.receipt-titem-line .qxp {
+  color: var(--r-muted);
+}
+.receipt-titem-sub {
+  font-size: var(--r-small);
+  color: var(--r-muted);
+}
+.receipt-titem-sub.discount {
+  color: var(--r-due);
+}
+
+/* ── Totals box ───────────────────────────────────────────────────────────── */
+.receipt-totals {
+  margin-top: var(--r-gap);
+  padding: 4mm;
+  border-radius: var(--r-radius);
+  background: var(--r-box-bg);
+  border: 1px solid var(--r-box-border);
+}
+.receipt-total-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  line-height: 1.8;
+  font-variant-numeric: tabular-nums;
+}
+.receipt-total-row .discount {
+  color: var(--r-due);
+}
+.receipt-total-row .interest {
+  color: var(--r-accent);
+}
+.receipt-total-row--grand {
+  font-size: var(--r-grand-size);
+  font-weight: 900;
+  border-top: 1px solid var(--r-line);
+  margin-top: 2mm;
+  padding-top: 2mm;
+}
+.receipt-total-row .paid {
+  color: var(--r-paid);
+  font-weight: 700;
+}
+.receipt-total-row .remaining {
+  color: var(--r-due);
+  font-weight: 800;
+}
+
+/* Thermal: lighter totals (avoid heavy fills that smear on thermal heads). */
+.receipt-paper--roll-58 .receipt-totals,
+.receipt-paper--roll-80 .receipt-totals,
+.receipt-paper--roll-88 .receipt-totals {
+  padding: 2mm 0;
+  background: transparent;
+  border: 0;
+  border-top: 1px dashed var(--r-line);
+  border-radius: 0;
+}
+
+/* ── Installments ─────────────────────────────────────────────────────────── */
+.receipt-installments {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 4px;
+  font-size: var(--r-small);
+}
+.receipt-installments th,
+.receipt-installments td {
+  border: 1px solid var(--r-line-soft);
+  padding: 3px;
+  text-align: center;
+}
+.receipt-installments .paid-row {
+  background: #ecfdf5;
+}
+
+/* ── Footer ───────────────────────────────────────────────────────────────── */
+.receipt-footer {
+  text-align: center;
+  margin-top: var(--r-gap);
+  color: var(--r-muted);
+  font-size: var(--r-small);
+}
+.receipt-footer-text {
+  white-space: pre-line;
+  color: var(--r-fg);
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+.receipt-terms-text {
+  white-space: pre-line;
+  margin-top: 2px;
+}
+.receipt-printed-at {
+  margin-top: 4px;
+  font-size: var(--r-small);
+  opacity: 0.85;
+}
+.receipt-note {
+  font-size: var(--r-small);
+  color: var(--r-fg);
+}
+
+/* ── Print rules (safe) ──────────────────────────────────────────────────── */
+@media print {
+  html.print-host,
+  body.print-host {
+    background: #ffffff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .no-print {
+    display: none !important;
+  }
+  /* CRITICAL: the SmartTable global print stylesheet hides every direct <body>
+     child except `.st-print-root` (`body > *:not(.st-print-root){display:none}`).
+     In the print/render window the receipt lives inside `#app`, so that rule would
+     blank the whole PDF. Re-show the app wrapper chain here. Scoped to `.print-host`
+     (ID specificity + !important) so it ONLY affects the print windows and never
+     interferes with SmartTable's own printing in the main app. */
+  html.print-host body > #app,
+  html.print-host #app,
+  html.print-host .v-application,
+  html.print-host .v-application__wrap {
+    display: block !important;
+    visibility: visible !important;
+  }
+  /* Guarantee the receipt is always visible/printed (never blank). */
+  .print-page,
+  .receipt-paper {
+    visibility: visible !important;
+    display: block !important;
+  }
+  .receipt-paper {
+    margin: 0;
+    background: #ffffff !important;
+  }
+  @page {
+    margin: 0;
+  }
+}

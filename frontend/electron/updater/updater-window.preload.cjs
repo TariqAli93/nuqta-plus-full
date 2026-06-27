@@ -7,7 +7,7 @@
  * push channel — no fs, no arbitrary invoke.
  */
 
-const { contextBridge, ipcRenderer } = require('electron');
+import { contextBridge, ipcRenderer } from 'electron';
 
 const EVENT_CHANNEL = 'updater:event';
 const CMD = {

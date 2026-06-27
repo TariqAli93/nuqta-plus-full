@@ -3,6 +3,12 @@
  * Uses table-based layout for better printer compatibility
  * Supports all paper sizes: 58mm, 80mm, 88mm, A4, A5
  * Special layout for installment sales
+ *
+ * @deprecated Replaced by `src/printing/dto/normalizeInvoiceForPrint.js`, which
+ * produces a clean serializable Print DTO rendered by the shared Vue
+ * `ReceiptPrint` component. No current code imports this module; it is retained
+ * only as a temporary reference for the legacy IPC path and can be deleted once
+ * the deprecated `preview-receipt` / `print-receipt` handlers are removed.
  */
 
 /**

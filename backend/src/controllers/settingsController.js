@@ -16,9 +16,23 @@ const companySchema = z.object({
   street: z.string().optional(),
   phone: z.string().optional(),
   phone2: z.string().optional(),
+  taxNumber: z.string().optional(),
   logoUrl: z.string().optional(),
   invoiceType: z.string().optional(),
   invoiceTheme: z.string().optional(),
+  // ── Printing settings (logo path + custom texts + printer prefs) ──────────
+  // The logo IMAGE never lives in the DB — only its file name / relative path
+  // (resolved to a data URL by Electron main at print time).
+  companyLogoFileName: z.string().optional(),
+  companyLogoPath: z.string().optional(),
+  invoiceHeaderText: z.string().optional(),
+  invoiceSubHeaderText: z.string().optional(),
+  invoiceFooterText: z.string().optional(),
+  invoiceTermsText: z.string().optional(),
+  invoiceHeaderLayout: z.string().optional(), // auto | horizontal | centered | compact
+  receiptPrinterName: z.string().optional(),
+  silentPrint: z.string().optional(), // 'true' | 'false'
+  defaultCopies: z.string().optional(),
 });
 
 const currencySchema = z.object({

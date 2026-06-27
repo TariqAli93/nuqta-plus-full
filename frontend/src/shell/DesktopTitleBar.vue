@@ -35,7 +35,13 @@
     <div class="dt-titlebar__spacer"></div>
 
     <!-- desktop top menu -->
-    <DesktopMenuBar v-if="menuBarVisible" class="desktop-shell__menubar" />
+    <DesktopMenuBar
+      v-if="
+        (props.isMenuVisible !== undefined && props.isMenuVisible) ||
+        (props.isMenuVisible === undefined && menuBarVisible)
+      "
+      class="desktop-shell__menubar"
+    />
 
     <!-- App identity + current workspace name (start / logical right in RTL) -->
     <div class="dt-titlebar__start">
@@ -52,6 +58,12 @@ import { useBackendStateStore } from '@/stores/backendState';
 import DesktopMenuBar from './DesktopMenuBar.vue';
 
 const { menuBarVisible } = useShellLayout();
+const props = defineProps({
+  isMenuVisible: {
+    type: Boolean,
+    default: true,
+  },
+});
 
 const { isElectron, isMaximized, minimize, toggleMaximize, close } = useWindowControls();
 

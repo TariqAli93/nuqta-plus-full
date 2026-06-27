@@ -79,6 +79,9 @@ import TopProductsReportPage from '@/views/reports/TopProductsReportPage.vue';
 import DebtsReportPage from '@/views/reports/DebtsReportPage.vue';
 import CashBoxReportPage from '@/views/reports/CashBoxReportPage.vue';
 import ExpensesReportPage from '@/views/reports/ExpensesReportPage.vue';
+// Standalone print preview / hidden render windows (own Electron BrowserWindow).
+import PrintPreviewWindow from '@/printing/preview/PrintPreviewWindow.vue';
+import PrintRenderWindow from '@/printing/preview/PrintRenderWindow.vue';
 // CashMovementReportPage retired: «حركة الصندوق» merged into «حركة وتقرير الصندوق»
 // (cash-box). The /reports/cash-movement route now redirects to it.
 
@@ -504,6 +507,25 @@ const routes = [
     path: '/reports/cash-movement',
     name: 'Report_cash_movement',
     redirect: { name: 'Report_cash_box' },
+  },
+  // ── Print preview / hidden render window ──────────────────────────────────
+  // Chrome-free, top-level (NOT under MainLayout). Deliberately NOT requiresAuth:
+  // it renders a self-contained Print DTO pulled over IPC (no backend calls), so
+  // it must paint instantly without waiting for session hydration. `?raw=1` is
+  // the offscreen render used by the actual print/PDF jobs.
+  {
+    path: '/print/preview/:jobId',
+    name: 'PrintPreview',
+    component: PrintPreviewWindow,
+    meta: { standalonePrint: true },
+  },
+  {
+    // The actual print/PDF surface — toolbar-free, just <ReceiptPrint/>. Loaded by
+    // the hidden print/PDF windows so the output is exactly the receipt.
+    path: '/print/render/:jobId',
+    name: 'PrintRender',
+    component: PrintRenderWindow,
+    meta: { standalonePrint: true },
   },
 ];
 

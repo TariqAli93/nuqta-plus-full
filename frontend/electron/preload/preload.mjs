@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+import { contextBridge, ipcRenderer } from 'electron';
 
 const UPDATE_CHANNELS = [
   'update-checking',
@@ -81,9 +81,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ---- First run setup ----
   createLockFile: () => ipcRenderer.invoke('firstRun:createLock'),
 
+  // @deprecated legacy receipt printing (HTML built in main). Prefer `print.*`.
   getPrinters: () => ipcRenderer.invoke('getPrinters'),
   printReceipt: (receiptData) => ipcRenderer.invoke('print-receipt', receiptData),
   previewReceipt: (receiptData) => ipcRenderer.invoke('preview-receipt', receiptData),
+
+  // ---- Unified printing pipeline (preview / print / PDF all share the Vue
+  // ReceiptPrint template). payload = { data, settings } or { jobId, settings }.
+  print: {
+    previewInvoice: (payload) => ipcRenderer.invoke('print:preview-invoice', payload),
+    printInvoice: (payload) => ipcRenderer.invoke('print:invoice', payload),
+    exportInvoicePdf: (payload) => ipcRenderer.invoke('print:invoice-pdf', payload),
+    getPrinters: () => ipcRenderer.invoke('print:get-printers'),
+    getJob: (jobId) => ipcRenderer.invoke('print:get-job', jobId),
+    notifyReady: (token) => ipcRenderer.invoke('print:ready', token),
+    // Dev diagnostics: open /print/render/:jobId in a VISIBLE window.
+    openRenderDebug: (payload) => ipcRenderer.invoke('print:open-render-debug', payload),
+    // Company logo lives on disk under userData; only its path is persisted in DB.
+    saveLogo: () => ipcRenderer.invoke('print:save-logo'),
+    deleteLogo: (relativePath) => ipcRenderer.invoke('print:delete-logo', relativePath),
+    getLogoPreview: (relativePath) => ipcRenderer.invoke('print:get-logo-preview', relativePath),
+  },
 
   cutPaper: () => ipcRenderer.invoke('cut-paper'),
   kickDrawer: () => ipcRenderer.invoke('kick-drawer'),
@@ -111,7 +129,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ---- Quick-question report windows ----
   // Opens (or focuses) a standalone report window for `type`, passing initial
   // filters as `params`. Returns { opened } or { focused }.
-  openReportWindow: (type, params) => ipcRenderer.invoke('reports:open', { type, params: params || {} }),
+  openReportWindow: (type, params) =>
+    ipcRenderer.invoke('reports:open', { type, params: params || {} }),
   // A report window subscribes to receive fresh filters when the user re-clicks
   // the same dashboard card (the window is focused, not duplicated).
   onReportParams(callback) {

@@ -13,9 +13,21 @@ export const useSettingsStore = defineStore('settings', () => {
     street: '',
     phone: '',
     phone2: '',
+    taxNumber: '',
     logoUrl: '',
     invoiceType: '',
     invoiceTheme: '',
+    // Printing settings (logo stored as path/filename only — never the image).
+    companyLogoFileName: '',
+    companyLogoPath: '',
+    invoiceHeaderText: '',
+    invoiceSubHeaderText: '',
+    invoiceFooterText: '',
+    invoiceTermsText: '',
+    invoiceHeaderLayout: 'auto',
+    receiptPrinterName: '',
+    silentPrint: 'false',
+    defaultCopies: '1',
   });
   const isLoading = ref(false);
   const error = ref(null);
@@ -152,9 +164,20 @@ export const useSettingsStore = defineStore('settings', () => {
         street: data?.street || '',
         phone: data?.phone || '',
         phone2: data?.phone2 || '',
+        taxNumber: data?.taxNumber || '',
         logoUrl: data?.logoUrl || '',
         invoiceType: data?.invoiceType || '',
         invoiceTheme: data?.invoiceTheme || 'classic',
+        companyLogoFileName: data?.companyLogoFileName || '',
+        companyLogoPath: data?.companyLogoPath || '',
+        invoiceHeaderText: data?.invoiceHeaderText || '',
+        invoiceSubHeaderText: data?.invoiceSubHeaderText || '',
+        invoiceFooterText: data?.invoiceFooterText || '',
+        invoiceTermsText: data?.invoiceTermsText || '',
+        invoiceHeaderLayout: data?.invoiceHeaderLayout || 'auto',
+        receiptPrinterName: data?.receiptPrinterName || '',
+        silentPrint: data?.silentPrint || 'false',
+        defaultCopies: data?.defaultCopies || '1',
       };
     } catch (err) {
       error.value = err.response?.data?.message || err.message;

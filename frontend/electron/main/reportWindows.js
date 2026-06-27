@@ -5,7 +5,7 @@ import logger from '../scripts/logger.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
-const PRELOAD = join(__dirname, '../preload/preload.mjs');
+const PRELOAD = join(__dirname, '../preload/preload.cjs');
 
 // Report type → window title (Arabic). Whitelist: anything else is rejected so a
 // compromised renderer can't ask main to open an arbitrary route.
@@ -61,7 +61,9 @@ async function loadReportRoute(win, type, params) {
       logger.warn(`reports:open — failed to load ${indexPath}: ${err.message}`);
     }
   }
-  throw new Error(`Failed to locate index.html for report window: ${lastErr?.message || 'unknown'}`);
+  throw new Error(
+    `Failed to locate index.html for report window: ${lastErr?.message || 'unknown'}`
+  );
 }
 
 function openReportWindow(parentWindow, { type, params }) {
@@ -74,7 +76,11 @@ function openReportWindow(parentWindow, { type, params }) {
     if (existing.isMinimized()) existing.restore();
     existing.show(); // no-op if already visible; guarantees a still-loading one surfaces
     existing.focus();
-    try { existing.webContents.send('reports:params', params || {}); } catch { /* ignore */ }
+    try {
+      existing.webContents.send('reports:params', params || {});
+    } catch {
+      /* ignore */
+    }
     return { ok: true, focused: true };
   }
 
@@ -111,8 +117,12 @@ function openReportWindow(parentWindow, { type, params }) {
     }
   });
 
-  win.once('ready-to-show', () => { win.focus(); });
-  win.on('closed', () => { windows.delete(type); });
+  win.once('ready-to-show', () => {
+    win.focus();
+  });
+  win.on('closed', () => {
+    windows.delete(type);
+  });
 
   // Fire-and-forget the navigation; on failure tear the (already-shown) window
   // down so a blank frame doesn't linger and a retry can re-create it.

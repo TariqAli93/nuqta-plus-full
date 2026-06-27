@@ -68,6 +68,7 @@
           location="end"
           open-on-hover
           :close-on-content-click="true"
+          transition="none"
         >
           <template #activator="{ props }">
             <button
@@ -80,14 +81,16 @@
               <v-icon :size="22">{{ entry.icon }}</v-icon>
             </button>
           </template>
-          <v-list density="compact" min-width="240" class="dt-nav__flyout">
+          <v-list density="compact" min-width="240" nav class="dt-nav__flyout">
             <v-list-subheader>{{ entry.label }}</v-list-subheader>
+            <v-divider />
             <v-list-item
               v-for="child in entry.children"
               :key="child.id"
               :to="child.route || undefined"
               :prepend-icon="child.icon"
               :title="child.label"
+              prepend-gap="10"
               :active="isItemActive(child, route.path)"
               @click="!child.route && onActivate(child)"
             >

@@ -63,13 +63,13 @@ the NSIS installer.
 
 ## Who stops/starts the service — and when
 
-| Phase | Actor | Action |
-|---|---|---|
-| download | nobody | service keeps running |
-| install begins | NSIS `customUnInstall --updated` | **stop only**, registration preserved |
-| files installed | NSIS `customInstall` → `service-manager install-or-update` + `start` | reconfigure + start + wait RUNNING |
-| relaunch | Electron `runPostUpdateVerification()` | verify RUNNING; `repair` once if not |
-| success | Electron | only after strict `/health` passes |
+| Phase           | Actor                                                                | Action                                |
+| --------------- | -------------------------------------------------------------------- | ------------------------------------- |
+| download        | nobody                                                               | service keeps running                 |
+| install begins  | NSIS `customUnInstall --updated`                                     | **stop only**, registration preserved |
+| files installed | NSIS `customInstall` → `service-manager install-or-update` + `start` | reconfigure + start + wait RUNNING    |
+| relaunch        | Electron `runPostUpdateVerification()`                               | verify RUNNING; `repair` once if not  |
+| success         | Electron                                                             | only after strict `/health` passes    |
 
 We never rely on code after `quitAndInstall()` to start the service.
 
@@ -77,6 +77,7 @@ We never rely on code after `quitAndInstall()` to start the service.
 
 electron-updater decides differential-vs-full internally. The orchestrator
 bridges its logger and parses two signals:
+
 - `Download block maps …` → differential **attempt**
 - `Cannot download differentially, fallback to full download: <reason>` → fallback + reason
 

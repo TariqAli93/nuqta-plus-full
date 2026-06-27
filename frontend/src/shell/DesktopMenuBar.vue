@@ -1,18 +1,19 @@
 <template>
   <nav class="dt-menubar" aria-label="شريط القوائم">
-    <v-menu
-      v-for="menu in visibleMenus"
-      :key="menu.key"
-      location="bottom start"
-      transition="fade-transition"
-    >
+    <v-menu v-for="menu in visibleMenus" :key="menu.key" location="bottom start" transition="none">
       <template #activator="{ props }">
         <button class="dt-menubar__btn" v-bind="props">{{ menu.label }}</button>
       </template>
-      <v-list density="compact" min-width="220" class="dt-menubar__list">
+      <v-list density="compact" nav min-width="220" class="dt-menubar__list pa-2">
         <template v-for="(entry, i) in menu.visibleItems" :key="entry.key || `sep-${i}`">
           <v-divider v-if="entry.divider" class="my-1" />
-          <v-list-item v-else :prepend-icon="entry.icon" @click="run(entry)">
+          <v-list-item
+            v-else
+            :prepend-icon="entry.icon"
+            density="compact"
+            prepend-gap="10"
+            @click="run(entry)"
+          >
             <v-list-item-title>{{ entry.label }}</v-list-item-title>
             <template v-if="entry.shortcut" #append>
               <span class="dt-menubar__shortcut">{{ entry.shortcut }}</span>
@@ -33,7 +34,7 @@ import { useAppTheme } from '@/composables/useAppTheme';
 
 const router = useRouter();
 const authStore = useAuthStore();
-const { toggleNav, toggleMenuBar } = useShellLayout();
+const { toggleNav } = useShellLayout();
 const { toggleTheme } = useAppTheme();
 
 const perm = (p) => authStore.hasPermission(p);
@@ -49,8 +50,6 @@ const exitApp = () => {
 };
 
 const checkUpdates = () => window.electronAPI?.checkUpdatesManually?.();
-
-const printPage = () => window.print();
 
 const toggleFullscreen = () => {
   const el = document.documentElement;
@@ -88,10 +87,9 @@ const menus = computed(() => [
         show: can('canUsePurchases'),
         action: () => go('/purchases/new'),
       },
+
       { divider: true },
-      { key: 'print', label: 'طباعة الصفحة', icon: 'mdi-printer', action: printPage },
-      { divider: true },
-      { key: 'exit', label: 'خروج', icon: 'mdi-logout-variant', action: exitApp },
+      { key: 'exit', label: 'الخروج من البرنامج', icon: 'mdi-logout-variant', action: exitApp },
     ],
   },
   {
@@ -123,12 +121,7 @@ const menus = computed(() => [
         icon: 'mdi-dock-left',
         action: toggleNav,
       },
-      {
-        key: 'hide-menubar',
-        label: 'إخفاء شريط القوائم',
-        icon: 'mdi-menu-open',
-        action: toggleMenuBar,
-      },
+
       { divider: true },
       {
         key: 'fullscreen',

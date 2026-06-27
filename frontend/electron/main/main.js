@@ -20,20 +20,20 @@ import {
   listStagedVersions,
   pruneOldVersions,
 } from '../scripts/versionManager.js';
+import { applyBackendUpdate, rollbackBackend } from '../scripts/backendUpdater.js';
+import { ensureDownloadRoot, sanitizePath } from '../scripts/security.js';
 import {
-  applyBackendUpdate,
-  rollbackBackend,
-} from '../scripts/backendUpdater.js';
-import {
-  ensureDownloadRoot,
-  sanitizePath,
-} from '../scripts/security.js';
-import { setupAutoUpdater, checkForUpdates, startDownload, installUpdate } from '../scripts/autoUpdater.js';
+  setupAutoUpdater,
+  checkForUpdates,
+  startDownload,
+  installUpdate,
+} from '../scripts/autoUpdater.js';
 import { startUpdaterV2, isUpdaterV2Enabled } from '../updater/index.js';
 import { getServiceDiagnostics, repairService } from '../scripts/serviceController.js';
 import { createLockFile } from '../scripts/firstRun.js';
 import { generateReceiptHtml } from '../scripts/receiptBuilder.js';
 import { registerReportWindows } from './reportWindows.js';
+import { registerPrintIpc } from '../print/printIpc.js';
 
 // --- المتغيرات العامة ---
 const isDev = !app.isPackaged;
@@ -63,6 +63,13 @@ const backendManager = new BackendManager();
 // opens a standalone BrowserWindow per report (dedupe + focus). Lazily resolves
 // the main window so it can act as the parent.
 registerReportWindows(() => mainWindow);
+
+// New unified printing pipeline: registers the `print:*` IPC surface (preview,
+// print, PDF, printers, job lookup, ready signal, logo management). Preview and
+// print windows render the SAME Vue ReceiptPrint component — main never builds
+// invoice HTML. The legacy `preview-receipt` / `print-receipt` handlers below
+// stay for backward compatibility (see @deprecated notes) until fully retired.
+registerPrintIpc(() => mainWindow);
 
 // ── Backend lifecycle event wiring ──────────────────────────────────────────
 // The manager emits crash / restart / failure events. We translate them into
@@ -189,7 +196,7 @@ function createWindow() {
       devTools: true,
       contextIsolation: true,
       nodeIntegration: false,
-      preload: join(__dirname, '../preload/preload.mjs'),
+      preload: join(__dirname, '../preload/preload.cjs'),
     },
   });
 
@@ -440,6 +447,10 @@ function createWindow() {
     }
   });
 
+  // @deprecated Use the `print:invoice` channel (registerPrintIpc) instead. This
+  // builds HTML in main via generateReceiptHtml — the very thing the new pipeline
+  // removes. Kept only so any un-migrated caller keeps working; remove once all
+  // call sites use window.electronAPI.print.*.
   ipcMain.handle('print-receipt', async (_event, { printerName, receiptData, companyInfo }) => {
     try {
       if (!receiptData) throw new Error('Receipt data is required');
@@ -538,6 +549,9 @@ function createWindow() {
     }
   });
 
+  // @deprecated Use the `print:preview-invoice` channel (registerPrintIpc). This
+  // injects HTML via document.write into an about:blank window — replaced by a
+  // real Vue preview route. Kept temporarily for backward compatibility.
   ipcMain.handle('preview-receipt', async (_event, { receiptData, companyInfo }) => {
     try {
       if (!receiptData) throw new Error('Receipt data is required');
@@ -652,7 +666,7 @@ function createActivationWindow() {
       devTools: true,
       contextIsolation: true,
       nodeIntegration: false,
-      preload: join(__dirname, '../preload/preload.mjs'),
+      preload: join(__dirname, '../preload/preload.cjs'),
     },
   });
 
@@ -739,7 +753,7 @@ function createSplashWindow() {
       devTools: false,
       contextIsolation: true,
       nodeIntegration: false,
-      preload: join(__dirname, '../preload/preload.mjs'),
+      preload: join(__dirname, '../preload/preload.cjs'),
     },
   });
 
@@ -1067,7 +1081,11 @@ ipcMain.handle('license:status', () => {
   try {
     const result = checkStored();
     let machineId = null;
-    try { machineId = getMachineId(); } catch { /* fingerprint unavailable */ }
+    try {
+      machineId = getMachineId();
+    } catch {
+      /* fingerprint unavailable */
+    }
     return {
       success: true,
       valid: result.valid,
@@ -1092,17 +1110,23 @@ app.whenReady().then(async () => {
     licenseValid = result.valid;
     const d = result.diag || {};
     if (result.valid) {
-      logger.info(`License valid (matched via ${d.matchedVia}); bound=${d.boundPrefix}… storage=${d.storageDir}`);
+      logger.info(
+        `License valid (matched via ${d.matchedVia}); bound=${d.boundPrefix}… storage=${d.storageDir}`
+      );
     } else {
       // The stored lock is NEVER modified here — a mismatch/corrupt/unreadable
       // fingerprint just routes to the activation window with the existing file
       // left intact, so nothing is silently re-bound.
       logger.warn(
         `License check failed [${result.code}]: ${result.error} | ` +
-        `lockExists=${d.lockExists} bound=${d.boundPrefix ?? '—'} ` +
-        `current=${d.currentPrefix ?? '—'} source=${d.canonicalSource ?? '—'}`
+          `lockExists=${d.lockExists} bound=${d.boundPrefix ?? '—'} ` +
+          `current=${d.currentPrefix ?? '—'} source=${d.canonicalSource ?? '—'}`
       );
-      if (result.code === 'FINGERPRINT_UNAVAILABLE' || result.code === 'STORAGE_CORRUPT' || result.code === 'STORAGE_TAMPERED') {
+      if (
+        result.code === 'FINGERPRINT_UNAVAILABLE' ||
+        result.code === 'STORAGE_CORRUPT' ||
+        result.code === 'STORAGE_TAMPERED'
+      ) {
         logger.warn('License lock left untouched (recoverable error — no re-bind).');
       }
     }
@@ -1307,33 +1331,30 @@ ipcMain.handle('backend:getDownloadRoot', () => {
  * and extracted the new bundle INTO <userData>/backend-downloads/<sub>/ —
  * any other sourceDir is rejected by the updater's security checks.
  */
-ipcMain.handle(
-  'backend:applyUpdate',
-  async (_e, { sourceDir, version, expectedHash } = {}) => {
-    if (!sourceDir || !version) {
-      return { ok: false, error: 'sourceDir and version are required' };
-    }
-    logger.info(`[ipc] backend:applyUpdate v${version}`);
-    backendStatus = 'starting';
-    broadcastBackendStatus({ reason: 'update-begin', version });
-
-    const result = await applyBackendUpdate({
-      sourceDir,
-      version,
-      expectedHash,
-      backendManager,
-    });
-
-    backendStatus = result.ok ? 'ready' : result.rolledBack ? 'ready' : 'error';
-    broadcastBackendStatus({
-      reason: result.ok ? 'update-success' : 'update-failed',
-      version,
-      rolledBack: !!result.rolledBack,
-      error: result.error,
-    });
-    return result;
+ipcMain.handle('backend:applyUpdate', async (_e, { sourceDir, version, expectedHash } = {}) => {
+  if (!sourceDir || !version) {
+    return { ok: false, error: 'sourceDir and version are required' };
   }
-);
+  logger.info(`[ipc] backend:applyUpdate v${version}`);
+  backendStatus = 'starting';
+  broadcastBackendStatus({ reason: 'update-begin', version });
+
+  const result = await applyBackendUpdate({
+    sourceDir,
+    version,
+    expectedHash,
+    backendManager,
+  });
+
+  backendStatus = result.ok ? 'ready' : result.rolledBack ? 'ready' : 'error';
+  broadcastBackendStatus({
+    reason: result.ok ? 'update-success' : 'update-failed',
+    version,
+    rolledBack: !!result.rolledBack,
+    error: result.error,
+  });
+  return result;
+});
 
 /** Manual rollback trigger (admin / recovery). */
 ipcMain.handle('backend:rollback', async () => {
@@ -1372,10 +1393,7 @@ const BACKEND_URL = 'http://127.0.0.1:41732';
 async function getAuthToken() {
   if (!mainWindow || mainWindow.isDestroyed()) return null;
   try {
-    return await mainWindow.webContents.executeJavaScript(
-      `localStorage.getItem('token')`,
-      true
-    );
+    return await mainWindow.webContents.executeJavaScript(`localStorage.getItem('token')`, true);
   } catch {
     return null;
   }
@@ -1391,14 +1409,21 @@ ipcMain.handle('backup:restore', async (_e, filename) => {
     const url = `${BACKEND_URL}/api/settings/backups/${encodeURIComponent(filename)}/restore`;
 
     const result = await new Promise((resolve, reject) => {
-      const req = http.request(url, { method: 'POST', headers: { Authorization: `Bearer ${token}` } }, (res) => {
-        let data = '';
-        res.on('data', (chunk) => (data += chunk));
-        res.on('end', () => {
-          try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
-          catch { resolve({ status: res.statusCode, body: data }); }
-        });
-      });
+      const req = http.request(
+        url,
+        { method: 'POST', headers: { Authorization: `Bearer ${token}` } },
+        (res) => {
+          let data = '';
+          res.on('data', (chunk) => (data += chunk));
+          res.on('end', () => {
+            try {
+              resolve({ status: res.statusCode, body: JSON.parse(data) });
+            } catch {
+              resolve({ status: res.statusCode, body: data });
+            }
+          });
+        }
+      );
       req.on('error', reject);
       req.end();
     });
@@ -1420,7 +1445,8 @@ ipcMain.handle('backup:export', async (_e, filename) => {
       const platform = process.platform;
       const homeDir = os.homedir();
       if (platform === 'win32') return path.join(homeDir, 'AppData', 'Roaming', '@nuqtaplus');
-      if (platform === 'darwin') return path.join(homeDir, 'Library', 'Application Support', '@nuqtaplus');
+      if (platform === 'darwin')
+        return path.join(homeDir, 'Library', 'Application Support', '@nuqtaplus');
       return path.join(homeDir, '.config', '@nuqtaplus');
     };
 
@@ -1457,7 +1483,8 @@ ipcMain.handle('backup:import', async () => {
       const platform = process.platform;
       const homeDir = os.homedir();
       if (platform === 'win32') return path.join(homeDir, 'AppData', 'Roaming', '@nuqtaplus');
-      if (platform === 'darwin') return path.join(homeDir, 'Library', 'Application Support', '@nuqtaplus');
+      if (platform === 'darwin')
+        return path.join(homeDir, 'Library', 'Application Support', '@nuqtaplus');
       return path.join(homeDir, '.config', '@nuqtaplus');
     };
 
@@ -1489,14 +1516,21 @@ ipcMain.handle('backup:import', async () => {
     const url = `${BACKEND_URL}/api/settings/backups/${encodeURIComponent(importedFilename)}/restore`;
 
     const result = await new Promise((resolve, reject) => {
-      const req = http.request(url, { method: 'POST', headers: { Authorization: `Bearer ${token}` } }, (res) => {
-        let data = '';
-        res.on('data', (chunk) => (data += chunk));
-        res.on('end', () => {
-          try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
-          catch { resolve({ status: res.statusCode, body: data }); }
-        });
-      });
+      const req = http.request(
+        url,
+        { method: 'POST', headers: { Authorization: `Bearer ${token}` } },
+        (res) => {
+          let data = '';
+          res.on('data', (chunk) => (data += chunk));
+          res.on('end', () => {
+            try {
+              resolve({ status: res.statusCode, body: JSON.parse(data) });
+            } catch {
+              resolve({ status: res.statusCode, body: data });
+            }
+          });
+        }
+      );
       req.on('error', reject);
       req.end();
     });
@@ -1520,20 +1554,27 @@ ipcMain.handle('database:clear', async () => {
     const url = `${BACKEND_URL}/api/reset`;
 
     const result = await new Promise((resolve, reject) => {
-      const req = http.request(url, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
+      const req = http.request(
+        url,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
         },
-      }, (res) => {
-        let data = '';
-        res.on('data', (chunk) => (data += chunk));
-        res.on('end', () => {
-          try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
-          catch { resolve({ status: res.statusCode, body: data }); }
-        });
-      });
+        (res) => {
+          let data = '';
+          res.on('data', (chunk) => (data += chunk));
+          res.on('end', () => {
+            try {
+              resolve({ status: res.statusCode, body: JSON.parse(data) });
+            } catch {
+              resolve({ status: res.statusCode, body: data });
+            }
+          });
+        }
+      );
       req.on('error', reject);
       req.end();
     });
@@ -1587,17 +1628,24 @@ ipcMain.handle('backup:exportAndCreateNewDatabase', async (_e) => {
 
     // 1. Create a backup via backend API
     const createResult = await new Promise((resolve, reject) => {
-      const req = http.request(`${BACKEND_URL}/api/settings/backups`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      }, (res) => {
-        let data = '';
-        res.on('data', (chunk) => (data += chunk));
-        res.on('end', () => {
-          try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
-          catch { resolve({ status: res.statusCode, body: data }); }
-        });
-      });
+      const req = http.request(
+        `${BACKEND_URL}/api/settings/backups`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        },
+        (res) => {
+          let data = '';
+          res.on('data', (chunk) => (data += chunk));
+          res.on('end', () => {
+            try {
+              resolve({ status: res.statusCode, body: JSON.parse(data) });
+            } catch {
+              resolve({ status: res.statusCode, body: data });
+            }
+          });
+        }
+      );
       req.on('error', reject);
       req.end();
     });
@@ -1608,7 +1656,8 @@ ipcMain.handle('backup:exportAndCreateNewDatabase', async (_e) => {
     // 2. Let user choose where to save the export
     const saveLocation = await dialog.showSaveDialog(mainWindow, {
       title: 'حفظ النسخة الاحتياطية',
-      defaultPath: backupInfo.filename || `nuqtaplus-backup-${new Date().toISOString().slice(0, 10)}.dump`,
+      defaultPath:
+        backupInfo.filename || `nuqtaplus-backup-${new Date().toISOString().slice(0, 10)}.dump`,
       filters: [{ name: 'Database Backup', extensions: ['dump'] }],
     });
 
@@ -1623,17 +1672,24 @@ ipcMain.handle('backup:exportAndCreateNewDatabase', async (_e) => {
 
     // 3. Reset the database via backend API
     const resetResult = await new Promise((resolve, reject) => {
-      const req = http.request(`${BACKEND_URL}/api/reset`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      }, (res) => {
-        let data = '';
-        res.on('data', (chunk) => (data += chunk));
-        res.on('end', () => {
-          try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
-          catch { resolve({ status: res.statusCode, body: data }); }
-        });
-      });
+      const req = http.request(
+        `${BACKEND_URL}/api/reset`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        },
+        (res) => {
+          let data = '';
+          res.on('data', (chunk) => (data += chunk));
+          res.on('end', () => {
+            try {
+              resolve({ status: res.statusCode, body: JSON.parse(data) });
+            } catch {
+              resolve({ status: res.statusCode, body: data });
+            }
+          });
+        }
+      );
       req.on('error', reject);
       req.end();
     });

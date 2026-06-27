@@ -226,9 +226,8 @@ const goBack = () => router.back();
 }
 
 @media (max-width: 960px) {
-  .dt-cmdbar__search-label,
-  .dt-cmdbar__kbd {
-    display: none;
+  .dt-cmdbar__search {
+    min-width: auto;
   }
 }
 </style>

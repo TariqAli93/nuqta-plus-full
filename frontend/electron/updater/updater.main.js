@@ -26,11 +26,7 @@ import { UpdaterStateMachine } from './updater.state.js';
 import { resolveUpdaterConfig } from './updater.config.js';
 import { applyProvider } from './updater.providers.js';
 import { updaterLog, updaterLogPath } from './updater.logger.js';
-import {
-  serviceStatus,
-  repairService,
-  SERVICE_EXIT,
-} from '../services/windows-service-manager.js';
+import { serviceStatus, repairService, SERVICE_EXIT } from '../services/windows-service-manager.js';
 import { waitForHealthy } from '../services/backend-health-check.js';
 import { enterMaintenance, exitMaintenance } from '../services/maintenance-mode.js';
 import { createPreUpdateBackup, isBackupRequired } from '../services/pre-update-backup.js';
@@ -323,11 +319,15 @@ function bindEvents() {
     const transferred = lastTransferred || 0;
     if (downloadMode === DOWNLOAD_MODE.UNKNOWN) {
       downloadMode =
-        fullSize > 0 && transferred < fullSize * 0.9 ? DOWNLOAD_MODE.DIFFERENTIAL : DOWNLOAD_MODE.FULL;
+        fullSize > 0 && transferred < fullSize * 0.9
+          ? DOWNLOAD_MODE.DIFFERENTIAL
+          : DOWNLOAD_MODE.FULL;
     }
     const saved = fullSize > 0 ? Math.max(0, fullSize - transferred) : 0;
     const pctSaved = fullSize > 0 ? Math.round((saved / fullSize) * 100) : 0;
-    const durationS = downloadStartedAt ? ((Date.now() - downloadStartedAt) / 1000).toFixed(1) : '0';
+    const durationS = downloadStartedAt
+      ? ((Date.now() - downloadStartedAt) / 1000).toFixed(1)
+      : '0';
     updaterLog.info('update DOWNLOADED', {
       version: info?.version,
       mode: downloadMode,
@@ -421,7 +421,9 @@ function openUpdaterWindow() {
   const html = path.join(assetDir, 'updater-window.html');
   const preload = path.join(assetDir, 'updater-window.preload.cjs');
   if (!fs.existsSync(html)) {
-    updaterLog.warn(`updater-window.html missing (looked in ${assetDir}) — using notifications only`);
+    updaterLog.warn(
+      `updater-window.html missing (looked in ${assetDir}) — using notifications only`
+    );
     return;
   }
   updaterWindow = new BrowserWindow({
@@ -442,7 +444,9 @@ function openUpdaterWindow() {
     },
   });
   updaterWindow.removeMenu();
-  updaterWindow.loadFile(html).catch((err) => updaterLog.warn(`updater window load: ${err.message}`));
+  updaterWindow
+    .loadFile(html)
+    .catch((err) => updaterLog.warn(`updater window load: ${err.message}`));
   updaterWindow.once('ready-to-show', () => {
     updaterWindow.show();
     // push the current snapshot immediately so the window is never blank

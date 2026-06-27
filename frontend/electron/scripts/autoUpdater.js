@@ -256,7 +256,11 @@ function setupListeners() {
     const pctSaved = expectedFullSize > 0 ? Math.round((saved / expectedFullSize) * 100) : 0;
     // If the library never logged a fallback and we transferred clearly less
     // than the full installer, we can confidently call it differential.
-    if (downloadMode === 'unknown' && expectedFullSize > 0 && transferred < expectedFullSize * 0.9) {
+    if (
+      downloadMode === 'unknown' &&
+      expectedFullSize > 0 &&
+      transferred < expectedFullSize * 0.9
+    ) {
       downloadMode = 'differential';
     } else if (downloadMode === 'unknown') {
       downloadMode = 'full';
@@ -309,7 +313,9 @@ function checkForUpdates(manual = false) {
 function startDownload() {
   downloadStartedAt = Date.now();
   lastTransferred = 0;
-  ulog(`startDownload (user requested) — differentialEnabled=${!autoUpdater.disableDifferentialDownload}`);
+  ulog(
+    `startDownload (user requested) — differentialEnabled=${!autoUpdater.disableDifferentialDownload}`
+  );
   send('update-downloading', { mode: downloadMode });
   autoUpdater.downloadUpdate().catch((err) => {
     const msg = err?.message || String(err);

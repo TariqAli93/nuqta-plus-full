@@ -135,6 +135,10 @@ export default defineConfig({
                   outDir: 'dist-electron/preload',
                   rollupOptions: {
                     external: ['electron'],
+                    output: {
+                      format: 'cjs',
+                      entryFileNames: 'preload.cjs',
+                    },
                   },
                 },
               },
@@ -173,6 +177,13 @@ export default defineConfig({
     __NUQTA_APP_MODE__: JSON.stringify(process.env.NUQTA_APP_MODE || 'server'),
   },
 
-  // IMPORTANT: base must be '/' for web dev, './' for electron packaging
-  base: isElectronTarget ? './' : '/',
+  // IMPORTANT base handling:
+  //  - web target            → '/'
+  //  - electron PACKAGED      → './'  (loadFile uses file:// — assets must be relative)
+  //  - electron DEV (vite)    → '/'   (served over http; relative './' breaks asset
+  //                                    URLs on NESTED routes like /print/render/:id,
+  //                                    which made print preview/render/PDF blank in dev)
+  // The router is web-history in dev and hash in prod, so a root base in dev lets
+  // nested print routes load their assets correctly without a build.
+  base: isElectronTarget ? (isDev ? '/' : './') : '/',
 });
