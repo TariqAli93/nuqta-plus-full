@@ -315,7 +315,9 @@ export function useSaleForm() {
       if (newType === oldType) return;
       if (newType === 'cash') {
         resetInstallmentState();
-        sale.value.paidAmount = r2(calc.total.value);
+        // Default a cash invoice to fully paid (received = total); the cashier
+        // may lower it for a partial / deferred sale. paidAmount is derived from
+        // receivedAmount (calc.paidAmount), so we don't force it here anymore.
         sale.value.receivedAmount = r2(calc.total.value);
         receivedTouched.value = false;
       } else {
@@ -366,13 +368,19 @@ export function useSaleForm() {
     }
   );
 
-  // Cash: paid + received track the total unless the cashier overrode received.
+  // Cash: the received field follows the total until the cashier overrides it.
+  // After an override we keep their amount (don't wipe a deliberate partial when
+  // items/discount change), but still clamp it down if a now-smaller total would
+  // push received above the invoice — per the "adjust to new total" rule.
   watch(
     () => [calc.total.value, calc.totalWithInterest.value],
     () => {
-      if (sale.value.paymentType === 'cash') {
-        sale.value.paidAmount = r2(calc.total.value);
-        if (!receivedTouched.value) sale.value.receivedAmount = r2(calc.total.value);
+      if (sale.value.paymentType !== 'cash') return;
+      const t = r2(calc.total.value);
+      if (!receivedTouched.value) {
+        sale.value.receivedAmount = t;
+      } else if ((Number(sale.value.receivedAmount) || 0) > t) {
+        sale.value.receivedAmount = t;
       }
     }
   );
@@ -408,9 +416,15 @@ export function useSaleForm() {
   );
 
   // ── Input handlers exposed to forms ──────────────────────────────────────────
+  // Received is bounded to [0, total]: no negatives, and never above the invoice
+  // (the extra would be change, which this invoice page doesn't book).
   const setReceivedAmount = (amount) => {
     receivedTouched.value = true;
-    sale.value.receivedAmount = Number(amount) || 0;
+    const t = r2(calc.total.value);
+    let v = Number(amount) || 0;
+    if (v < 0) v = 0;
+    if (v > t) v = t;
+    sale.value.receivedAmount = v;
   };
   const setInterestRate = (value) => {
     if (value === null || value === undefined || isNaN(value)) {

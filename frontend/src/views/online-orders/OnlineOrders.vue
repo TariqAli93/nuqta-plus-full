@@ -16,229 +16,222 @@
       </v-btn>
     </PageHeader>
 
-    <v-card class="page-section mb-3">
-      <v-card-text>
-        <div class="d-flex flex-wrap gap-3">
-          <v-text-field
-            v-model="orderStore.filters.search"
-            label="بحث (رقم الطلب / الاسم / الهاتف)"
-            prepend-inner-icon="mdi-magnify"
-            variant="outlined"
-            density="comfortable"
-            hide-details
-            clearable
-            style="min-width: 260px"
-            class="flex-grow-1"
-            @update:model-value="debouncedFetch"
-          />
-          <v-select
-            v-model="orderStore.filters.status"
-            :items="statusFilterItems"
-            label="الحالة"
-            variant="outlined"
-            density="comfortable"
-            hide-details
-            clearable
-            style="max-width: 220px"
-            @update:model-value="applyFilters"
-          />
-          <v-select
-            v-model="orderStore.filters.channelId"
-            :items="channelItems"
-            item-title="name"
-            item-value="id"
-            label="القناة"
-            variant="outlined"
-            density="comfortable"
-            hide-details
-            clearable
-            style="max-width: 220px"
-            @update:model-value="applyFilters"
-          />
-          <v-text-field
-            v-model="orderStore.filters.dateFrom"
-            type="date"
-            label="من تاريخ"
-            variant="outlined"
-            density="comfortable"
-            hide-details
-            clearable
-            style="max-width: 180px"
-            @update:model-value="applyFilters"
-          />
-          <v-text-field
-            v-model="orderStore.filters.dateTo"
-            type="date"
-            label="إلى تاريخ"
-            variant="outlined"
-            density="comfortable"
-            hide-details
-            clearable
-            style="max-width: 180px"
-            @update:model-value="applyFilters"
-          />
-          <v-btn
-            v-if="hasActiveFilters"
-            variant="text"
-            color="secondary"
-            prepend-icon="mdi-filter-remove-outline"
-            @click="clearFilters"
-          >
-            مسح الفلاتر
-          </v-btn>
+    <!-- Unified SmartTable: built-in search + advanced-filter popover + columns +
+         export + print + footer pagination, backed by the existing onlineOrder
+         store engine. The per-row status-transition menu stays a custom
+         #item.status slot so its state-machine logic is untouched. -->
+    <SmartTable
+      table-key="online-orders-table"
+      :headers="headers"
+      :items="orderStore.orders"
+      :loading="orderStore.loading"
+      :total-items="orderStore.pagination.total"
+      server-side
+      :initial-load="false"
+      :page="orderStore.pagination.page"
+      :page-size="orderStore.pagination.limit"
+      :search="orderStore.filters.search"
+      search-placeholder="بحث (رقم الطلب / الاسم / الهاتف)"
+      :filter-chips="filterChips"
+      show-export
+      show-print
+      print-title="الطلبات الأونلاين"
+      export-file-base="online-orders"
+      empty-title="لا توجد طلبات"
+      empty-description="استقبل الطلبات من قنوات البيع لتظهر هنا"
+      empty-icon="mdi-package-variant-closed"
+      @update:search="onSearchInput"
+      @search-now="onSearchNow"
+      @clear-search="onSearchClear"
+      @update:page="changePage"
+      @update:page-size="changeItemsPerPage"
+      @clear-filters="onClearFilters"
+      @remove-filter="onRemoveFilter"
+      @refresh="refreshList"
+    >
+      <!-- Advanced filters (status / channel / date range) live in the toolbar
+           popover; the search box is owned by SmartTable. -->
+      <template #filters>
+        <v-row dense>
+          <v-col cols="12" sm="6">
+            <v-select
+              v-model="orderStore.filters.status"
+              :items="statusFilterItems"
+              label="الحالة"
+              variant="outlined"
+              density="comfortable"
+              hide-details
+              clearable
+              @update:model-value="applyFilters"
+            />
+          </v-col>
+          <v-col cols="12" sm="6">
+            <v-select
+              v-model="orderStore.filters.channelId"
+              :items="channelItems"
+              item-title="name"
+              item-value="id"
+              label="القناة"
+              variant="outlined"
+              density="comfortable"
+              hide-details
+              clearable
+              @update:model-value="applyFilters"
+            />
+          </v-col>
+          <v-col cols="12" sm="6">
+            <v-text-field
+              v-model="orderStore.filters.dateFrom"
+              type="date"
+              label="من تاريخ"
+              variant="outlined"
+              density="comfortable"
+              hide-details
+              clearable
+              @update:model-value="applyFilters"
+            />
+          </v-col>
+          <v-col cols="12" sm="6">
+            <v-text-field
+              v-model="orderStore.filters.dateTo"
+              type="date"
+              label="إلى تاريخ"
+              variant="outlined"
+              density="comfortable"
+              hide-details
+              clearable
+              @update:model-value="applyFilters"
+            />
+          </v-col>
+        </v-row>
+      </template>
+
+      <template #[`item.channelName`]="{ item }">
+        <v-chip
+          v-if="item.channelName"
+          size="small"
+          variant="tonal"
+          :color="item.channelColor || undefined"
+        >
+          <v-icon start size="14">{{
+            `mdi-${item.channelIcon}` || 'mdi-bullhorn-variant'
+          }}</v-icon>
+          {{ item.channelName }}
+        </v-chip>
+        <span v-else class="text-disabled">—</span>
+      </template>
+
+      <template #[`item.customerName`]="{ item }">
+        <div class="d-flex flex-column">
+          <span>{{ item.customerName }}</span>
+          <span v-if="item.customerPhone" class="text-caption text-medium-emphasis">{{
+            item.customerPhone
+          }}</span>
         </div>
-      </v-card-text>
-    </v-card>
+      </template>
 
-    <v-card class="page-section">
-      <v-data-table
-        :headers="headers"
-        :items="orderStore.orders"
-        :loading="orderStore.loading"
-        :items-per-page="orderStore.pagination.limit"
-        :page="orderStore.pagination.page"
-        :items-length="orderStore.pagination.total"
-        server-items-length
-        density="comfortable"
-        hide-default-footer
-      >
-        <template #[`item.channelName`]="{ item }">
-          <v-chip
-            v-if="item.channelName"
-            size="small"
-            variant="tonal"
-            :color="item.channelColor || undefined"
-          >
-            <v-icon start size="14">{{
-              `mdi-${item.channelIcon}` || 'mdi-bullhorn-variant'
-            }}</v-icon>
-            {{ item.channelName }}
-          </v-chip>
-          <span v-else class="text-disabled">—</span>
-        </template>
+      <template #[`item.totalAmount`]="{ item }">
+        {{ formatAmount(item.totalAmount) }}
+      </template>
 
-        <template #[`item.customerName`]="{ item }">
-          <div class="d-flex flex-column">
-            <span>{{ item.customerName }}</span>
-            <span v-if="item.customerPhone" class="text-caption text-medium-emphasis">{{
-              item.customerPhone
-            }}</span>
-          </div>
-        </template>
+      <!-- Status-transition menu (8-status state machine) — preserved verbatim. -->
+      <template #[`item.status`]="{ item }">
+        <v-menu v-if="allowedNext(item.status).length">
+          <template #activator="{ props }">
+            <v-chip
+              v-bind="props"
+              :color="statusMeta(item.status).color"
+              size="small"
+              variant="flat"
+              class="cursor-pointer"
+            >
+              <v-icon start size="14">{{ statusMeta(item.status).icon }}</v-icon>
+              {{ statusMeta(item.status).label }}
+              <v-icon end size="14">mdi-chevron-down</v-icon>
+            </v-chip>
+          </template>
+          <v-list density="compact">
+            <v-list-subheader>نقل الطلب إلى</v-list-subheader>
+            <v-list-item
+              v-for="s in allowedNext(item.status)"
+              :key="s"
+              @click="onStatusPick(item, s)"
+            >
+              <template #prepend>
+                <v-icon :color="statusMeta(s).color" size="18">{{ statusMeta(s).icon }}</v-icon>
+              </template>
+              <v-list-item-title>{{ statusMeta(s).label }}</v-list-item-title>
+            </v-list-item>
+          </v-list>
+        </v-menu>
+        <v-chip v-else :color="statusMeta(item.status).color" size="small" variant="flat">
+          <v-icon start size="14">{{ statusMeta(item.status).icon }}</v-icon>
+          {{ statusMeta(item.status).label }}
+        </v-chip>
+      </template>
 
-        <template #[`item.totalAmount`]="{ item }">
-          {{ formatAmount(item.totalAmount) }}
-        </template>
+      <template #[`item.paymentStatus`]="{ item }">
+        <v-chip
+          v-if="isSaleBacked(item.status) || item.status === 'RETURNED'"
+          :color="paymentMeta(item.paymentStatus).color"
+          size="small"
+          variant="tonal"
+        >
+          <v-icon start size="14">{{ paymentMeta(item.paymentStatus).icon }}</v-icon>
+          {{ paymentMeta(item.paymentStatus).label }}
+        </v-chip>
+        <span v-else class="text-disabled">—</span>
+      </template>
 
-        <template #[`item.status`]="{ item }">
-          <v-menu v-if="allowedNext(item.status).length">
-            <template #activator="{ props }">
-              <v-chip
-                v-bind="props"
-                :color="statusMeta(item.status).color"
-                size="small"
-                variant="flat"
-                class="cursor-pointer"
-              >
-                <v-icon start size="14">{{ statusMeta(item.status).icon }}</v-icon>
-                {{ statusMeta(item.status).label }}
-                <v-icon end size="14">mdi-chevron-down</v-icon>
-              </v-chip>
-            </template>
-            <v-list density="compact">
-              <v-list-subheader>نقل الطلب إلى</v-list-subheader>
-              <v-list-item
-                v-for="s in allowedNext(item.status)"
-                :key="s"
-                @click="onStatusPick(item, s)"
-              >
-                <template #prepend>
-                  <v-icon :color="statusMeta(s).color" size="18">{{ statusMeta(s).icon }}</v-icon>
-                </template>
-                <v-list-item-title>{{ statusMeta(s).label }}</v-list-item-title>
-              </v-list-item>
-            </v-list>
-          </v-menu>
-          <v-chip v-else :color="statusMeta(item.status).color" size="small" variant="flat">
-            <v-icon start size="14">{{ statusMeta(item.status).icon }}</v-icon>
-            {{ statusMeta(item.status).label }}
-          </v-chip>
-        </template>
+      <template #[`item.actions`]="{ item }">
+        <v-btn
+          v-if="canOpenInvoice(item)"
+          icon="mdi-receipt-text-arrow-right"
+          size="small"
+          variant="text"
+          color="success"
+          title="فتح الفاتورة"
+          @click="openInvoice(item)"
+        />
+        <v-btn
+          v-if="canReturn(item)"
+          icon="mdi-keyboard-return"
+          size="small"
+          variant="text"
+          color="orange-darken-3"
+          title="إرجاع الطلب"
+          @click="openReturn(item)"
+        />
+        <BoxyShipmentButton v-if="canSendToShipping(item)" :order="item" />
+        <v-btn
+          icon="mdi-history"
+          size="small"
+          variant="text"
+          title="سجل الحالات"
+          @click="openHistory(item)"
+        />
+        <v-btn
+          v-if="can('online_orders:update')"
+          icon="mdi-pencil"
+          size="small"
+          variant="text"
+          :disabled="!isEditableStatus(item.status) || !!item.convertedInvoiceNumber"
+          title="تعديل"
+          @click="openDialog(item)"
+        />
 
-        <template #[`item.paymentStatus`]="{ item }">
-          <v-chip
-            v-if="isSaleBacked(item.status) || item.status === 'RETURNED'"
-            :color="paymentMeta(item.paymentStatus).color"
-            size="small"
-            variant="tonal"
-          >
-            <v-icon start size="14">{{ paymentMeta(item.paymentStatus).icon }}</v-icon>
-            {{ paymentMeta(item.paymentStatus).label }}
-          </v-chip>
-          <span v-else class="text-disabled">—</span>
-        </template>
-
-        <template #[`item.invoiceNumber`]="{ item }">
-          <span v-if="item.convertedInvoiceNumber">{{ item.convertedInvoiceNumber }}</span>
-          <span v-else class="text-disabled">—</span>
-        </template>
-
-        <template #[`item.actions`]="{ item }">
-          <v-btn
-            v-if="canOpenInvoice(item)"
-            icon="mdi-receipt-text-arrow-right"
-            size="small"
-            variant="text"
-            color="success"
-            title="فتح الفاتورة"
-            @click="openInvoice(item)"
-          />
-          <v-btn
-            v-if="canReturn(item)"
-            icon="mdi-keyboard-return"
-            size="small"
-            variant="text"
-            color="orange-darken-3"
-            title="إرجاع الطلب"
-            @click="openReturn(item)"
-          />
-          <BoxyShipmentButton v-if="canSendToShipping(item)" :order="item" />
-          <v-btn
-            icon="mdi-history"
-            size="small"
-            variant="text"
-            title="سجل الحالات"
-            @click="openHistory(item)"
-          />
-          <v-btn
-            v-if="can('online_orders:update')"
-            icon="mdi-pencil"
-            size="small"
-            variant="text"
-            :disabled="!isEditableStatus(item.status) || !!item.convertedInvoiceNumber"
-            title="تعديل"
-            @click="openDialog(item)"
-          />
-
-          <v-btn
-            v-if="can('online_orders:delete')"
-            icon="mdi-delete"
-            size="small"
-            variant="text"
-            color="error"
-            :disabled="!!item.convertedInvoiceNumber"
-            title="حذف"
-            @click="confirmDelete(item)"
-          />
-        </template>
-      </v-data-table>
-
-      <PaginationControls
-        :pagination="orderStore.pagination"
-        @update:page="changePage"
-        @update:items-per-page="changeItemsPerPage"
-      />
-    </v-card>
+        <v-btn
+          v-if="can('online_orders:delete')"
+          icon="mdi-delete"
+          size="small"
+          variant="text"
+          color="error"
+          :disabled="!!item.convertedInvoiceNumber"
+          title="حذف"
+          @click="confirmDelete(item)"
+        />
+      </template>
+    </SmartTable>
 
     <!-- Create / Edit dialog -->
     <v-dialog v-model="dialog" max-width="820" scrollable>
@@ -754,8 +747,8 @@ import {
 } from '@/constants/orders';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import CustomerSelector from '@/components/CustomerSelector.vue';
-import PaginationControls from '@/components/PaginationControls.vue';
 import PageHeader from '@/components/PageHeader.vue';
+import SmartTable from '@/components/common/SmartTable';
 import BoxyShipmentButton from '@/components/delivery/BoxyShipmentButton.vue';
 import BoxyShipmentPanel from '@/components/delivery/BoxyShipmentPanel.vue';
 import { useRouter } from 'vue-router';
@@ -859,11 +852,6 @@ const confirmPayment = reactive({
 
 const historyItems = computed(() => historyOrder.value?.history || []);
 
-// A non-terminal order (one whose workflow still allows CANCELLED) can be
-// cancelled — and the user must hold the cancel permission.
-const canCancel = (status) =>
-  nextStatuses(status).includes(ORDER_STATUS.CANCELLED) && can('online_orders:cancel');
-
 const emptyForm = () => ({
   channelId: null,
   customerId: null,
@@ -879,15 +867,26 @@ const emptyForm = () => ({
 });
 const formData = ref(emptyForm());
 
+// Server-side: sorting stays off (the /online-orders API doesn't sort). `format`
+// drives export/print typing; `exportValue` flattens the chip/badge cells.
 const headers = [
   { title: 'رقم الطلب', key: 'orderNumber' },
-  { title: 'القناة', key: 'channelName', sortable: false },
-  { title: 'العميل', key: 'customerName' },
+  { title: 'القناة', key: 'channelName', sortable: false, exportValue: (r) => r.channelName || '—' },
+  {
+    title: 'العميل',
+    key: 'customerName',
+    exportValue: (r) => (r.customerPhone ? `${r.customerName} (${r.customerPhone})` : r.customerName),
+  },
   { title: 'المحافظة', key: 'province' },
-  { title: 'الإجمالي', key: 'totalAmount' },
-  { title: 'الحالة', key: 'status', sortable: false },
-
-  { title: 'الدفع', key: 'paymentStatus', sortable: false },
+  { title: 'الإجمالي', key: 'totalAmount', format: 'number', align: 'end' },
+  { title: 'الحالة', key: 'status', sortable: false, exportValue: (r) => statusMeta(r.status).label },
+  {
+    title: 'الدفع',
+    key: 'paymentStatus',
+    sortable: false,
+    exportValue: (r) =>
+      isSaleBacked(r.status) || r.status === 'RETURNED' ? paymentMeta(r.paymentStatus).label : '—',
+  },
   { title: 'إجراءات', key: 'actions', sortable: false },
 ];
 
@@ -1318,11 +1317,8 @@ const handleDelete = async () => {
 };
 
 // Cancelling a confirmed (sale-backed) order reverses the linked sale and
-// restores stock; a pre-confirm order is simply marked cancelled.
-const confirmCancel = (order) => {
-  selected.value = order;
-  cancelDialog.value = true;
-};
+// restores stock; a pre-confirm order is simply marked cancelled. Triggered
+// from the status-transition menu (onStatusPick → CANCELLED).
 const handleCancel = async () => {
   try {
     await orderStore.changeStatus(selected.value.id, ORDER_STATUS.CANCELLED);
@@ -1341,12 +1337,38 @@ const applyFilters = () => {
   orderStore.pagination.page = 1;
   orderStore.fetchOrders({ page: 1 });
 };
+const refreshList = () => orderStore.fetchOrders();
 
-const hasActiveFilters = computed(() => {
+// SmartTable owns the search box; mirror it into the store filter and reuse the
+// existing debounce (typing) / immediate-apply (Enter, clear).
+const onSearchInput = (val) => {
+  orderStore.filters.search = val ?? '';
+  debouncedFetch();
+};
+const onSearchNow = () => applyFilters();
+const onSearchClear = () => {
+  orderStore.filters.search = '';
+  applyFilters();
+};
+
+// Active-filter chips (status / channel / date range) rendered above the table.
+const filterChips = computed(() => {
   const f = orderStore.filters;
-  return !!(f.search || f.status || f.channelId || f.dateFrom || f.dateTo);
+  const chips = [];
+  if (f.status) chips.push({ key: 'status', label: `الحالة: ${statusMeta(f.status).label}` });
+  if (f.channelId) {
+    const ch = channelItems.value.find((c) => c.id === f.channelId);
+    chips.push({ key: 'channelId', label: `القناة: ${ch?.name ?? f.channelId}` });
+  }
+  if (f.dateFrom) chips.push({ key: 'dateFrom', label: `من تاريخ: ${f.dateFrom}` });
+  if (f.dateTo) chips.push({ key: 'dateTo', label: `إلى تاريخ: ${f.dateTo}` });
+  return chips;
 });
-const clearFilters = () => {
+const onRemoveFilter = (key) => {
+  orderStore.filters[key] = null;
+  applyFilters();
+};
+const onClearFilters = () => {
   orderStore.filters.search = '';
   orderStore.filters.status = null;
   orderStore.filters.channelId = null;

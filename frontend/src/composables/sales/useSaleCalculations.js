@@ -64,14 +64,34 @@ export function useSaleCalculations(sale) {
     return r2(remaining / count);
   });
 
-  // Remaining: 0 for cash (paid in full); (total after interest − down) otherwise.
-  const remainingAmount = computed(() => {
-    if (!isInstallment.value) return 0;
-    return Math.max(0, r2(totalWithInterest.value - (sale.value.paidAmount || 0)));
+  // Amount actually collected up-front. Installment → the down payment.
+  // Cash → the received amount, clamped to [0, total] (a debt-creating invoice
+  // never returns change, so an overpayment is never booked).
+  const paidAmount = computed(() => {
+    if (isInstallment.value) return r2(sale.value.paidAmount || 0);
+    const received = Number(sale.value.receivedAmount ?? total.value) || 0;
+    return Math.min(Math.max(0, r2(received)), total.value);
   });
 
-  // Change owed back to a cash customer (UI-only; the payload is always paid in
-  // full). `receivedAmount` defaults to the total and is overridable by the cashier.
+  // Remaining (debt). Cash partial/deferred now leaves a real balance (it used
+  // to be hard-zeroed) — the single source the UI, validation and payload share.
+  const remainingAmount = computed(() => {
+    if (isInstallment.value) {
+      return Math.max(0, r2(totalWithInterest.value - (sale.value.paidAmount || 0)));
+    }
+    return Math.max(0, r2(total.value - paidAmount.value));
+  });
+
+  // Payment status from the rounded figures (currency-safe — never a raw-float
+  // compare): paid / partially_paid / unpaid.
+  const paymentStatus = computed(() => {
+    if (remainingAmount.value <= 0) return 'paid';
+    if (paidAmount.value > 0) return 'partially_paid';
+    return 'unpaid';
+  });
+
+  // Change owed back to a cash customer. With `receivedAmount` capped at the
+  // total on this (invoice) page it is always 0; kept for API stability.
   const changeAmount = computed(() => {
     if (isInstallment.value) return 0;
     const received = Number(sale.value.receivedAmount ?? total.value) || 0;
@@ -134,7 +154,9 @@ export function useSaleCalculations(sale) {
     totalWithInterest,
     actualInterestRate,
     installmentAmount,
+    paidAmount,
     remainingAmount,
+    paymentStatus,
     changeAmount,
     installmentSchedule,
   };

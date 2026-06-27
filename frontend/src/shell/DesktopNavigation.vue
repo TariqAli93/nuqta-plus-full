@@ -73,7 +73,7 @@
             <button
               v-bind="props"
               type="button"
-              class="dt-nav__row dt-nav__row--collapsed"
+              class="dt-nav__row dt-nav__row--collapsed mt-3"
               :class="{ 'dt-nav__row--active': isGroupActive(entry, route.path) }"
               :aria-label="entry.label"
             >

@@ -241,7 +241,7 @@ Enables `accountingPeriods` for the run and restores it afterwards.
 | ID | Case | Type | Status |
 |---|---|---|---|
 | PERM-01 | Non-admin forbidden from `/users` → `/forbidden` | negative | ✅ |
-| PERM-02 | Feature-gated route (`/sales/new`, installments off) redirects | negative | ✅ |
+| PERM-02 | `/sales/new` stays open with installments off (only the installment option is gated) | negative | ✅ |
 | PERM-03 | Cashier cannot see manage-products actions | negative | ⬜ |
 | PERM-04 | 403 from backend triggers session refresh + Arabic toast | negative | ⬜ |
 

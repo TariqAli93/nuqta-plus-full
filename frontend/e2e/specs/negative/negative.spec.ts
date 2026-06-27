@@ -2,13 +2,17 @@ import { test, expect, AR, TID } from '../../fixtures/test';
 import { uniqueTag } from '../../helpers/env';
 
 test.describe('اختبارات سلبية — Negative & guard rails', () => {
-  test('feature-gated route redirects when the flag is off', async ({ page, api }) => {
-    // Force the installments module OFF, then its route (/sales/new) must
-    // redirect away instead of rendering. Restored afterwards.
+  test('/sales/new stays open when installments are off — only the installment option is gated', async ({ page, api }) => {
+    // The unified New-Sale invoice supports BOTH cash and installments. Turning
+    // the installments module OFF must NOT block the page (a cash invoice is
+    // still valid) — it only hides the installment payment option. Restored after.
     const restore = await api.withFlags({ installments: false });
     try {
       await page.goto('/sales/new');
-      await expect(page).not.toHaveURL(/\/sales\/new/);
+      await expect(page).toHaveURL(/\/sales\/new/);
+      // Cash is always available; the installment segment is hidden.
+      await expect(page.getByTestId('payment-type-cash')).toBeVisible();
+      await expect(page.getByTestId('payment-type-installment')).toHaveCount(0);
     } finally {
       await restore();
     }

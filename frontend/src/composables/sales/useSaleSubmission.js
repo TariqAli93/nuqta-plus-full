@@ -1,10 +1,6 @@
 import { ref } from 'vue';
 import { useRouter, onBeforeRouteLeave } from 'vue-router';
-import {
-  SALE_SOURCE_NEW_SALE,
-  SALE_TYPE_INSTALLMENT,
-  SALE_TYPE_CASH,
-} from '@/constants/sales';
+import { SALE_SOURCE_NEW_SALE, SALE_TYPE_INSTALLMENT, SALE_TYPE_CASH } from '@/constants/sales';
 import { toBaseQuantity } from '@/utils/productUnits';
 
 /**
@@ -100,7 +96,10 @@ export function useSaleSubmission(deps) {
       payload.firstInstallmentDate = sale.value.firstInstallmentDate;
       payload.installmentPeriod = sale.value.installmentPeriod || 'monthly';
     } else {
-      payload.paidAmount = calc.total.value;
+      // Cash: send what was actually collected (clamped to [0, total]); the
+      // backend recomputes remaining/status and books any debt. No longer forced
+      // to the full total.
+      payload.paidAmount = calc.paidAmount.value;
     }
     return payload;
   };
@@ -120,8 +119,14 @@ export function useSaleSubmission(deps) {
       }
     } else {
       const received = Number(sale.value.receivedAmount ?? calc.total.value) || 0;
-      if (received < calc.total.value) {
-        return notify.error('المبلغ المستلم أقل من إجمالي الفاتورة');
+      if (received < 0) {
+        return notify.error('المبلغ المستلم لا يمكن أن يكون سالباً.');
+      }
+      if (received > calc.total.value) {
+        return notify.error('المبلغ المستلم لا يمكن أن يتجاوز إجمالي الفاتورة.');
+      }
+      if (calc.remainingAmount.value > 0 && !sale.value.customerId) {
+        return notify.error('يجب تحديد العميل عند البيع الآجل أو الدفع الجزئي.');
       }
     }
 

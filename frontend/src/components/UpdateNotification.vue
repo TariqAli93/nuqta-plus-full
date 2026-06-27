@@ -33,7 +33,12 @@
       <!-- Available: version + changelog -->
       <section v-if="stage === 'available'" class="mb-4">
         <div class="text-subtitle-2 opacity-80">
+          <span v-if="currentVersion">الإصدار الحالي: <strong>{{ currentVersion }}</strong> ← </span>
           الإصدار الجديد: <strong>{{ version }}</strong>
+        </div>
+        <div v-if="fullSize" class="text-caption opacity-70">
+          حجم التحديث الكامل: {{ formatBytes(fullSize) }}
+          <span class="opacity-60">— سيُنزَّل تفاضلياً عند الإمكان (الأجزاء المتغيرة فقط)</span>
         </div>
         <div v-if="changelog" class="mt-2 text-caption changelog">
           <div class="mb-1 text-h6">ما الجديد؟</div>
@@ -49,9 +54,24 @@
 
       <!-- Download progress -->
       <section v-if="stage === 'downloading'" class="mb-4">
+        <div v-if="modeLabel" class="mb-1 d-flex align-center ga-2">
+          <v-chip
+            size="x-small"
+            :color="downloadMode === 'differential' ? 'success' : 'warning'"
+            variant="flat"
+          >
+            {{ modeLabel }}
+          </v-chip>
+          <span v-if="downloadMode === 'full' && fallbackReason" class="text-caption opacity-70">
+            (سبب التحميل الكامل: {{ fallbackReason }})
+          </span>
+        </div>
         <v-progress-linear :model-value="progress" height="10" color="primary" rounded />
-        <div class="mt-1 text-caption">
-          {{ formatBytes(transferred) }} / {{ formatBytes(total) }} ({{ progress }}%)
+        <div class="mt-1 text-caption d-flex justify-space-between flex-wrap ga-2">
+          <span>{{ formatBytes(transferred) }} / {{ formatBytes(total) }} ({{ progress }}%)</span>
+          <span class="opacity-80">
+            السرعة: {{ formatSpeed(bytesPerSecond) }} — المتبقّي: {{ formatEta(etaSeconds) }}
+          </span>
         </div>
       </section>
 
@@ -69,8 +89,18 @@
       </section>
 
       <!-- Ready -->
-      <section v-if="stage === 'ready'" class="mb-4 text-green">
-        تم تنزيل التحديث (الإصدار {{ version }}) — جاهز للتثبيت.
+      <section v-if="stage === 'ready'" class="mb-4">
+        <div class="text-green">تم تنزيل التحديث (الإصدار {{ version }}) — جاهز للتثبيت.</div>
+        <div v-if="downloadMode === 'differential' && savedBytes" class="text-caption opacity-80 mt-1">
+          تحميل تفاضلي: تم توفير ≈ {{ formatBytes(savedBytes) }} ({{ pctSaved }}%) مقارنةً بالتحميل الكامل.
+        </div>
+        <div v-else-if="downloadMode === 'full'" class="text-caption opacity-80 mt-1">
+          تم إجراء تحميل كامل لهذا الإصدار.
+        </div>
+        <div class="text-caption opacity-70 mt-2">
+          عند الضغط على «إعادة التشغيل والتثبيت»: تؤخذ نسخة احتياطية، تُوقَف الخدمة، تُثبَّت
+          الملفات، ثم تُشغَّل الخدمة ويُتحقَّق من سلامتها — لن تُحذف بياناتك أو قاعدة البيانات.
+        </div>
       </section>
 
       <footer class="justify-end d-flex ga-2">
@@ -124,11 +154,27 @@ const alertOpen = ref(false);
 const stage = ref('idle');
 
 const version = ref('');
+const currentVersion = ref('');
 const changelog = ref('');
 const progress = ref(0);
 const transferred = ref(0);
 const total = ref(0);
+const fullSize = ref(0);
 const errorMessage = ref('');
+
+// Differential-download telemetry (reqs #10/#11).
+const downloadMode = ref('unknown'); // 'unknown' | 'differential' | 'full'
+const fallbackReason = ref('');
+const bytesPerSecond = ref(0);
+const etaSeconds = ref(null);
+const savedBytes = ref(0);
+const pctSaved = ref(0);
+
+const modeLabel = computed(() => {
+  if (downloadMode.value === 'differential') return 'تحميل تفاضلي (الأجزاء المتغيرة فقط)';
+  if (downloadMode.value === 'full') return 'تحميل كامل';
+  return '';
+});
 
 let remindTimer = null;
 const offFns = [];
@@ -186,6 +232,14 @@ const installUpdate = () => {
 };
 
 const formatBytes = (x) => (!x ? '0 B' : `${(x / 1024 / 1024).toFixed(2)} MB`);
+const formatSpeed = (x) => (!x ? '—' : `${(x / 1024 / 1024).toFixed(2)} MB/s`);
+const formatEta = (s) => {
+  if (s == null) return '—';
+  if (s < 60) return `${s} ثانية`;
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m} د ${r} ث`;
+};
 
 // Parse changelog into lines / segments for safe rendering without v-html
 function parseChangelog(text = '') {
@@ -222,6 +276,16 @@ function on(channel, handler) {
 }
 
 onMounted(() => {
+  // Resolve the current app version up front so the dialog can show
+  // "current → new" even when the version is missing from a payload.
+  try {
+    window?.electronAPI?.getVersion?.()?.then?.((v) => {
+      if (v) currentVersion.value = v;
+    });
+  } catch {
+    /* non-Electron / web build — ignore */
+  }
+
   // 1. Checking — manual checks only (don't nag on the silent startup check).
   on('update-checking', (data) => {
     if (!data?.manual) return;
@@ -244,6 +308,8 @@ onMounted(() => {
   on('update-available', (data) => {
     const p = data?.payload || {};
     version.value = p.version || '';
+    currentVersion.value = p.currentVersion || currentVersion.value;
+    fullSize.value = p.fullSize || 0;
     changelog.value = p.releaseNotes || '';
     stage.value = 'available';
     clearRemindTimer();
@@ -251,10 +317,22 @@ onMounted(() => {
     dialogOpen.value = true;
   });
 
+  // 3b. Differential-vs-full decision (reqs #10/#11): emitted as soon as
+  //     electron-updater attempts a delta or falls back to a full download.
+  on('update-download-mode', (data) => {
+    const p = data?.payload || {};
+    downloadMode.value = p.mode || 'unknown';
+    fallbackReason.value = p.reason || '';
+  });
+
   // 4. Download started.
-  on('update-downloading', () => {
+  on('update-downloading', (data) => {
+    const p = data?.payload || {};
+    if (p.mode) downloadMode.value = p.mode;
     stage.value = 'downloading';
     progress.value = 0;
+    bytesPerSecond.value = 0;
+    etaSeconds.value = null;
     dialogOpen.value = true;
   });
 
@@ -264,6 +342,9 @@ onMounted(() => {
     progress.value = p.percent || 0;
     transferred.value = p.transferred || 0;
     total.value = p.total || 0;
+    bytesPerSecond.value = p.bytesPerSecond || 0;
+    etaSeconds.value = p.etaSeconds ?? null;
+    if (p.mode) downloadMode.value = p.mode;
     if (stage.value !== 'installing') stage.value = 'downloading';
   });
 
@@ -271,6 +352,9 @@ onMounted(() => {
   on('update-ready', (data) => {
     const p = data?.payload || {};
     if (p.version) version.value = p.version;
+    if (p.mode) downloadMode.value = p.mode;
+    savedBytes.value = p.saved || 0;
+    pctSaved.value = p.pctSaved || 0;
     stage.value = 'ready';
     dialogOpen.value = true; // ensure the "Restart and Install" button is visible
   });

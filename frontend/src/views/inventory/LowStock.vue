@@ -21,46 +21,44 @@
       لم يتم إعداد أي مخزن بعد. أنشئ فرعاً ومخزناً من "الفروع والمخازن" ثم عد إلى هذه الصفحة.
     </v-alert>
 
-    <v-card class="page-section">
-      <div class="section-title">
-        <span class="section-title__label">
-          <v-icon size="20" color="error">mdi-alert-octagon-outline</v-icon>
-          <span>قائمة المنتجات</span>
-        </span>
-      </div>
-      <v-data-table
-        :headers="headers"
-        :items="inventoryStore.lowStock"
-        :loading="loading"
-        density="comfortable"
-        hide-default-footer
-        items-per-page="50"
-      >
-        <template #loading>
-          <TableSkeleton :rows="5" :columns="headers.length" />
-        </template>
-        <template #[`item.quantity`]="{ item }">
-          <v-chip color="error" size="small">{{ item.quantity }}</v-chip>
-        </template>
-        <template #no-data>
-          <EmptyState
-            v-if="inventoryStore.selectedWarehouseId"
-            title="لا توجد منتجات منخفضة المخزون"
-            description="جميع منتجاتك ضمن الحد الآمن للمخزون."
-            icon="mdi-check-circle"
-            icon-color="success"
-            compact
-          />
-          <EmptyState
-            v-else
-            title="لم يتم اختيار مخزن"
-            description="اختر مخزناً من شريط الأدوات لعرض قائمة المنخفض."
-            icon="mdi-warehouse"
-            compact
-          />
-        </template>
-      </v-data-table>
-    </v-card>
+    <!-- Unified SmartTable (client-side): search + columns + density + export
+         over the existing per-warehouse low-stock list. -->
+    <SmartTable
+      table-key="low-stock-table"
+      :headers="headers"
+      :items="inventoryStore.lowStock"
+      :loading="loading"
+      :page-size="50"
+      search-placeholder="ابحث بالاسم، الرمز، الباركود..."
+      show-export
+      export-file-base="low-stock"
+      @refresh="reload"
+    >
+      <!-- Red stock chip stays a custom cell. -->
+      <template #[`item.quantity`]="{ item }">
+        <v-chip color="error" size="small">{{ item.quantity }}</v-chip>
+      </template>
+
+      <!-- Empty state depends on warehouse selection, not on search — so it lives
+           in #empty (search-no-match falls back to SmartTable's default). -->
+      <template #empty>
+        <EmptyState
+          v-if="inventoryStore.selectedWarehouseId"
+          title="لا توجد منتجات منخفضة المخزون"
+          description="جميع منتجاتك ضمن الحد الآمن للمخزون."
+          icon="mdi-check-circle"
+          icon-color="success"
+          compact
+        />
+        <EmptyState
+          v-else
+          title="لم يتم اختيار مخزن"
+          description="اختر مخزناً من شريط الأدوات لعرض قائمة المنخفض."
+          icon="mdi-warehouse"
+          compact
+        />
+      </template>
+    </SmartTable>
   </div>
 </template>
 
@@ -70,7 +68,7 @@ import { useInventoryStore } from '@/stores/inventory';
 import { useAuthStore } from '@/stores/auth';
 import PageHeader from '@/components/PageHeader.vue';
 import EmptyState from '@/components/EmptyState.vue';
-import TableSkeleton from '@/components/TableSkeleton.vue';
+import SmartTable from '@/components/common/SmartTable';
 
 const inventoryStore = useInventoryStore();
 const authStore = useAuthStore();
@@ -78,10 +76,11 @@ const loading = ref(false);
 
 const headers = [
   { title: 'المنتج', key: 'name' },
-  { title: 'الرمز', key: 'sku' },
-  { title: 'الباركود', key: 'barcode' },
-  { title: 'الكمية', key: 'quantity' },
-  { title: 'الحد الأدنى', key: 'lowStockThreshold' },
+  { title: 'الرمز', key: 'sku', format: 'sku', ltr: true },
+  { title: 'الباركود', key: 'barcode', format: 'barcode', ltr: true },
+  // Chip cell stays start-aligned (RTL) via explicit align; `format` only types the export.
+  { title: 'الكمية', key: 'quantity', format: 'number', align: 'start' },
+  { title: 'الحد الأدنى', key: 'lowStockThreshold', format: 'number', align: 'end' },
 ];
 
 /**
@@ -105,9 +104,7 @@ const ensureWarehouse = () => {
     // Global admin / fresh install: fall back to any active warehouse,
     // preferring one in the currently-selected branch if set.
     const pool = inventoryStore.warehouses.filter((w) => w.isActive);
-    const inBranch = assigned
-      ? pool.find((w) => w.branchId === assigned)
-      : null;
+    const inBranch = assigned ? pool.find((w) => w.branchId === assigned) : null;
     candidate = inBranch?.id || pool[0]?.id || null;
   }
 

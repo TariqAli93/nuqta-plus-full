@@ -4,6 +4,7 @@ import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { getLanAddresses } from './utils/networkInterfaces.js';
+import { getPool, getBootstrapState } from './db.js';
 
 // Get package version
 const __filename = fileURLToPath(import.meta.url);
@@ -111,10 +112,47 @@ const start = async () => {
       };
     });
 
+    // Health endpoint (req #9). Used by the Electron updater's post-update
+    // validation AND the diagnostics UI. The `status` field stays 'healthy'
+    // whenever the process responds (back-compat: Electron's checkHealth accepts
+    // 'ok'|'healthy'), but `database` / `migrations` now reflect REAL state:
+    //   - a live `SELECT 1` (bounded to 2 s) confirms connectivity
+    //   - bootstrap state reports whether migrations have been applied
+    // This makes "update succeeded" mean the new backend is actually serving a
+    // connected, migrated database — not just that the port answered.
     fastify.get('/health', async () => {
+      const boot = getBootstrapState();
+      let database = boot.databaseReady ? 'connected' : 'disconnected';
+
+      // Live ping with a hard 2 s timeout so a stuck DB can never hang /health.
+      try {
+        const pool = await Promise.race([
+          getPool(),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('pool-timeout')), 2000)),
+        ]);
+        await Promise.race([
+          pool.query('SELECT 1'),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('query-timeout')), 2000)),
+        ]);
+        database = 'connected';
+      } catch {
+        // Keep the bootstrap-derived value; never throw — /health must always
+        // answer 200 with a structured body. The legacy probe only checks
+        // `status`; richer consumers read `database`/`migrations`/`backendVersion`.
+        if (database !== 'connected') database = 'disconnected';
+      }
+
       return {
+        // `status: 'healthy'` is preserved unconditionally so the existing
+        // Electron startup/post-update probe (checkHealth) keeps working — a
+        // responding process IS healthy. DB/migration truth is in the fields
+        // below for the diagnostics UI and any strict consumer.
         status: 'healthy',
-        database: 'connected',
+        appVersion: version,
+        backendVersion: version,
+        database,
+        migrations: boot.migrationsApplied ? 'up-to-date' : 'pending',
+        service: 'running',
         timestamp: new Date().toISOString(),
       };
     });

@@ -10,53 +10,40 @@
       </v-btn>
     </PageHeader>
 
-    <v-card class="page-section">
-      <v-data-table
-        :headers="headers"
-        :items="transfers"
-        :loading="loading"
-        density="comfortable"
-        items-per-page="25"
-      >
-        <template #loading>
-          <TableSkeleton :rows="5" :columns="headers.length" />
-        </template>
-        <template #[`item.amount`]="{ item }">
-          <span class="font-weight-bold">{{ formatCurrency(item.amount, item.currency) }}</span>
-          <span v-if="item.toAmount" class="text-medium-emphasis text-caption">
-            ← {{ formatCurrency(item.toAmount, item.toCurrency) }}
-          </span>
-        </template>
-        <template #[`item.status`]="{ item }">
-          <v-chip
-            size="x-small"
-            :color="item.status === 'active' ? 'success' : 'grey'"
-            variant="tonal"
-          >
-            {{ item.status === 'active' ? 'نافذ' : 'ملغى' }}
-          </v-chip>
-        </template>
-        <template #[`item.actions`]="{ item }">
-          <v-btn
-            v-if="canTransfer && item.status === 'active'"
-            icon="mdi-cancel"
-            size="small"
-            variant="text"
-            color="error"
-            title="إلغاء التحويل"
-            @click="confirmCancel(item)"
-          />
-        </template>
-        <template #no-data>
-          <EmptyState
-            title="لا توجد تحويلات"
-            description="انقل النقد بين الصناديق أو إلى الحسابات المصرفية."
-            icon="mdi-bank-transfer"
-            compact
-          />
-        </template>
-      </v-data-table>
-    </v-card>
+    <!-- Unified SmartTable (client-side): search + columns + export + print over
+         the loaded transfers. Cancel is a gated row action; custom cells (amount,
+         status) pass straight through. -->
+    <SmartTable
+      data-testid="treasury-transfers-table"
+      table-key="treasury-transfers-table"
+      :headers="headers"
+      :items="transfers"
+      :loading="loading"
+      :row-actions="rowActions"
+      show-export
+      show-print
+      print-title="التحويلات بين الصناديق"
+      export-file-base="treasury-transfers"
+      empty-title="لا توجد تحويلات"
+      empty-description="انقل النقد بين الصناديق أو إلى الحسابات المصرفية."
+      empty-icon="mdi-bank-transfer"
+    >
+      <template #[`item.amount`]="{ item }">
+        <span class="font-weight-bold">{{ formatCurrency(item.amount, item.currency) }}</span>
+        <span v-if="item.toAmount" class="text-medium-emphasis text-caption">
+          ← {{ formatCurrency(item.toAmount, item.toCurrency) }}
+        </span>
+      </template>
+      <template #[`item.status`]="{ item }">
+        <v-chip
+          size="x-small"
+          :color="item.status === 'active' ? 'success' : 'grey'"
+          variant="tonal"
+        >
+          {{ item.status === 'active' ? 'نافذ' : 'ملغى' }}
+        </v-chip>
+      </template>
+    </SmartTable>
 
     <!-- Create dialog -->
     <v-dialog v-model="dialog" max-width="560">
@@ -187,8 +174,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { useTreasuryStore } from '@/stores/treasury';
 import { useAuthStore } from '@/stores/auth';
 import PageHeader from '@/components/PageHeader.vue';
-import EmptyState from '@/components/EmptyState.vue';
-import TableSkeleton from '@/components/TableSkeleton.vue';
+import SmartTable from '@/components/common/SmartTable';
 import { formatCurrency } from '@/utils/formatters';
 
 const treasuryStore = useTreasuryStore();
@@ -205,13 +191,29 @@ const targetOptions = computed(() => [
 
 const headers = [
   { title: 'الرقم', key: 'transferNumber' },
-  { title: 'التاريخ', key: 'transferDate' },
+  { title: 'التاريخ', key: 'transferDate', format: 'date' },
   { title: 'من', key: 'fromName' },
   { title: 'إلى', key: 'toName' },
-  { title: 'المبلغ', key: 'amount' },
-  { title: 'الحالة', key: 'status' },
+  { title: 'المبلغ', key: 'amount', format: 'currency', align: 'end' },
+  { title: 'الحالة', key: 'status', exportValue: (r) => (r.status === 'active' ? 'نافذ' : 'ملغى') },
   { title: 'بواسطة', key: 'createdByName' },
-  { title: '', key: 'actions', sortable: false, align: 'end' },
+];
+
+// Cancel as a gated row action: hidden unless the transfer is still active and
+// the user holds treasury:transfer (mirrors the previous v-if). The page keeps
+// its own prompt because cancelling captures a free-text reason the generic
+// confirm dialog can't collect.
+const rowActions = [
+  {
+    key: 'cancel',
+    icon: 'mdi-cancel',
+    title: 'إلغاء التحويل',
+    color: 'error',
+    danger: true,
+    permission: 'treasury:transfer',
+    hidden: (item) => item.status !== 'active',
+    handler: (item) => confirmCancel(item),
+  },
 ];
 
 const dialog = ref(false);

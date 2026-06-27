@@ -57,16 +57,19 @@
 
     <div class="totals totals--foot">
       <div class="totals__row totals__row--soft">
-        <span>{{ paymentType === 'installment' ? 'الدفعة المقدمة' : 'المبلغ المدفوع' }}</span>
+        <span>{{ paymentType === 'installment' ? 'الدفعة المقدمة' : 'المبلغ المستلم' }}</span>
         <span>{{ formatCurrency(paidAmount, currency) }}</span>
       </div>
-      <div v-if="paymentType === 'installment'" class="totals__row totals__row--rem">
+      <div
+        v-if="paymentType === 'installment' || remainingAmount > 0"
+        class="totals__row totals__row--rem"
+      >
         <span>المبلغ المتبقي</span>
         <span>{{ formatCurrency(remainingAmount, currency) }}</span>
       </div>
-      <div v-else-if="changeAmount > 0" class="totals__row totals__row--change">
-        <span>الباقي للعميل</span>
-        <span>{{ formatCurrency(changeAmount, currency) }}</span>
+      <div v-if="paymentType !== 'installment'" class="totals__row totals__row--status">
+        <span>حالة الدفع</span>
+        <v-chip :color="statusMeta.color" size="x-small" variant="flat">{{ statusMeta.label }}</v-chip>
       </div>
     </div>
   </div>
@@ -88,6 +91,7 @@ const props = defineProps({
   paidAmount: { type: Number, default: 0 },
   remainingAmount: { type: Number, default: 0 },
   changeAmount: { type: Number, default: 0 },
+  paymentStatus: { type: String, default: 'paid' }, // paid | partially_paid | unpaid
   paymentType: { type: String, default: 'cash' },
   discountType: { type: String, default: 'amount' },
   discountValue: { type: Number, default: 0 },
@@ -98,6 +102,13 @@ defineEmits(['update:discountType', 'update:discountValue']);
 const grandTotal = computed(() =>
   props.paymentType === 'installment' ? props.totalWithInterest : props.total
 );
+
+const STATUS_META = {
+  paid: { label: 'مدفوعة بالكامل', color: 'success' },
+  partially_paid: { label: 'مدفوعة جزئياً', color: 'warning' },
+  unpaid: { label: 'غير مدفوعة', color: 'error' },
+};
+const statusMeta = computed(() => STATUS_META[props.paymentStatus] || STATUS_META.paid);
 </script>
 
 <style scoped lang="scss">

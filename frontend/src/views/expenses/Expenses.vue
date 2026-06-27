@@ -41,130 +41,98 @@
       />
     </div>
 
-    <!-- Filters -->
-    <v-card class="page-section filter-toolbar pa-3">
-      <v-row dense>
-        <v-col cols="12" sm="6" md="6">
-          <v-text-field
-            v-model="filters.dateFrom"
-            type="date"
-            label="من تاريخ"
-            density="comfortable"
-            variant="outlined"
-            prepend-inner-icon="mdi-calendar-start"
-            hide-details
-          />
-        </v-col>
-        <v-col cols="12" sm="6" md="6">
-          <v-text-field
-            v-model="filters.dateTo"
-            type="date"
-            label="إلى تاريخ"
-            density="comfortable"
-            variant="outlined"
-            prepend-inner-icon="mdi-calendar-end"
-            hide-details
-          />
-        </v-col>
-        <v-col cols="12" sm="6" md="6">
-          <v-select
-            v-model="filters.category"
-            :items="categoryOptions"
-            label="الفئة"
-            density="comfortable"
-            variant="outlined"
-            prepend-inner-icon="mdi-tag-outline"
-            hide-details
-            clearable
-          />
-        </v-col>
-        <v-col v-if="isGlobalAdmin" cols="12" sm="6" md="6">
-          <v-select
-            v-model="filters.branchId"
-            :items="branchOptions"
-            item-title="name"
-            item-value="id"
-            label="الفرع"
-            density="comfortable"
-            variant="outlined"
-            prepend-inner-icon="mdi-source-branch"
-            hide-details
-            clearable
-          />
-        </v-col>
+    <!-- Unified SmartTable (client-side): search + advanced filters + columns
+         + export, driven by the data already in the expenses store. The page
+         keeps owning the date/category/branch filters so the summary cards
+         above stay in sync via reload(). -->
+    <SmartTable
+      class="page-section"
+      table-key="expenses-table"
+      :headers="headers"
+      :items="items"
+      :loading="loading"
+      :row-actions="rowActions"
+      :filter-chips="filterChips"
+      show-export
+      export-file-base="expenses"
+      print-title="قائمة المصاريف"
+      search-placeholder="ابحث في المصاريف بالملاحظات أو الفئة أو الفرع..."
+      empty-title="لا توجد مصاريف"
+      empty-description="ابدأ بتسجيل مصروف جديد لمتابعة المصاريف التشغيلية."
+      empty-icon="mdi-cash-minus"
+      @clear-filters="clearFilters"
+      @remove-filter="onRemoveFilter"
+      @refresh="reload"
+    >
+      <!-- Page-owned filters: each change re-fetches the list AND the summary
+           cards (server-side aggregation), so totals always match the table. -->
+      <template #filters>
+        <v-row dense>
+          <v-col cols="12" sm="6">
+            <v-text-field
+              v-model="filters.dateFrom"
+              type="date"
+              label="من تاريخ"
+              density="comfortable"
+              variant="outlined"
+              prepend-inner-icon="mdi-calendar-start"
+              hide-details
+              clearable
+              @update:model-value="reload"
+            />
+          </v-col>
+          <v-col cols="12" sm="6">
+            <v-text-field
+              v-model="filters.dateTo"
+              type="date"
+              label="إلى تاريخ"
+              density="comfortable"
+              variant="outlined"
+              prepend-inner-icon="mdi-calendar-end"
+              hide-details
+              clearable
+              @update:model-value="reload"
+            />
+          </v-col>
+          <v-col cols="12" sm="6">
+            <v-select
+              v-model="filters.category"
+              :items="categoryOptions"
+              label="الفئة"
+              density="comfortable"
+              variant="outlined"
+              prepend-inner-icon="mdi-tag-outline"
+              hide-details
+              clearable
+              @update:model-value="reload"
+            />
+          </v-col>
+          <v-col v-if="isGlobalAdmin" cols="12" sm="6">
+            <v-select
+              v-model="filters.branchId"
+              :items="branchOptions"
+              item-title="name"
+              item-value="id"
+              label="الفرع"
+              density="comfortable"
+              variant="outlined"
+              prepend-inner-icon="mdi-source-branch"
+              hide-details
+              clearable
+              @update:model-value="reload"
+            />
+          </v-col>
+        </v-row>
+      </template>
 
-        <v-col cols="12">
-          <v-btn variant="text" class="ml-2" @click="clearFilters">مسح</v-btn>
-          <v-btn color="primary" prepend-icon="mdi-check" @click="reload">تطبيق</v-btn>
-        </v-col>
-      </v-row>
-    </v-card>
-
-    <!-- Table -->
-    <v-card class="page-section">
-      <div class="section-title">
-        <span class="section-title__label">
-          <v-icon size="20" color="primary">mdi-format-list-bulleted</v-icon>
-          قائمة المصاريف
-        </span>
-      </div>
-      <v-data-table
-        :headers="headers"
-        :items="items"
-        :loading="loading"
-        density="comfortable"
-        items-per-page="25"
-        class="expenses-table"
-      >
-        <template #loading>
-          <TableSkeleton :rows="5" :columns="headers.length" />
-        </template>
-        <template #[`item.amount`]="{ item }">
-          <span class="font-weight-bold">{{ formatCurrency(item.amount, item.currency) }}</span>
-        </template>
-        <template #[`item.category`]="{ item }">
-          <v-chip size="small" variant="tonal">{{ categoryLabel(item.category) }}</v-chip>
-        </template>
-        <template #[`item.expenseDate`]="{ item }">
-          {{ item.expenseDate || '-' }}
-        </template>
-        <template #[`item.actions`]="{ item }">
-          <v-btn
-            v-if="canCreateRecurring"
-            icon="mdi-calendar-sync"
-            size="small"
-            variant="text"
-            title="إنشاء مصروف ثابت من هذا المصروف"
-            @click="makeRecurring(item)"
-          />
-          <v-btn
-            v-if="canManage"
-            icon="mdi-pencil"
-            size="small"
-            variant="text"
-            title="تعديل"
-            @click="openEdit(item)"
-          />
-          <v-btn
-            v-if="canDelete"
-            icon="mdi-delete"
-            size="small"
-            variant="text"
-            color="error"
-            title="حذف"
-            @click="confirmDelete(item)"
-          />
-        </template>
-        <template #no-data>
-          <EmptyState
-            title="لا توجد مصاريف"
-            description="ابدأ بتسجيل مصروف جديد لمتابعة المصاريف التشغيلية."
-            icon="mdi-cash-minus"
-            compact
-          />
-        </template>
-      </v-data-table>
-    </v-card>
+      <!-- Custom cells pass straight through. -->
+      <template #[`item.amount`]="{ item }">
+        <span class="font-weight-bold">{{ formatCurrency(item.amount, item.currency) }}</span>
+      </template>
+      <template #[`item.category`]="{ item }">
+        <v-chip size="small" variant="tonal">{{ categoryLabel(item.category) }}</v-chip>
+      </template>
+    </SmartTable>
 
     <!-- Create/Edit dialog -->
     <v-dialog v-model="dialog" max-width="520">
@@ -282,9 +250,8 @@ import { useTreasuryStore } from '@/stores/treasury';
 import { useNotificationStore } from '@/stores/notification';
 import PageHeader from '@/components/PageHeader.vue';
 import OnboardingTip from '@/components/OnboardingTip.vue';
-import EmptyState from '@/components/EmptyState.vue';
 import StatCard from '@/components/StatCard.vue';
-import TableSkeleton from '@/components/TableSkeleton.vue';
+import SmartTable from '@/components/common/SmartTable';
 import { formatCurrency, getCurrencySymbol } from '@/utils/formatters';
 
 const route = useRoute();
@@ -347,14 +314,78 @@ const filters = reactive({
 });
 
 const headers = [
-  { title: 'التاريخ', key: 'expenseDate', sortable: true },
-  { title: 'الفئة', key: 'category' },
-  { title: 'المبلغ', key: 'amount' },
+  { title: 'التاريخ', key: 'expenseDate', format: 'date' },
+  { title: 'الفئة', key: 'category', exportValue: (r) => categoryLabel(r.category) },
+  { title: 'المبلغ', key: 'amount', format: 'currency', align: 'end' },
   { title: 'الفرع', key: 'branchName' },
   { title: 'ملاحظات', key: 'note' },
   { title: 'بواسطة', key: 'createdByName' },
-  { title: '', key: 'actions', sortable: false, align: 'end' },
 ];
+
+// Active filter chips (page-owned filters) shown under the toolbar.
+const filterChips = computed(() => {
+  const chips = [];
+  if (filters.dateFrom) chips.push({ key: 'dateFrom', label: `من تاريخ: ${filters.dateFrom}` });
+  if (filters.dateTo) chips.push({ key: 'dateTo', label: `إلى تاريخ: ${filters.dateTo}` });
+  if (filters.category)
+    chips.push({ key: 'category', label: `الفئة: ${categoryLabel(filters.category)}` });
+  if (filters.branchId) {
+    const b = branchOptions.value.find((x) => x.id === filters.branchId);
+    chips.push({ key: 'branchId', label: `الفرع: ${b?.name ?? filters.branchId}` });
+  }
+  return chips;
+});
+
+function onRemoveFilter(key) {
+  if (key === 'dateFrom') filters.dateFrom = '';
+  else if (key === 'dateTo') filters.dateTo = '';
+  else if (key === 'category') filters.category = null;
+  else if (key === 'branchId') filters.branchId = null;
+  reload();
+}
+
+// Row actions: make-recurring + edit are primary (inline icons); delete
+// collapses into the “…” menu with a built-in confirm. Each is gated on the
+// same permission the original per-row buttons used.
+const rowActions = computed(() => {
+  const list = [];
+  if (canCreateRecurring.value) {
+    list.push({
+      key: 'make-recurring',
+      icon: 'mdi-calendar-sync',
+      title: 'إنشاء مصروف ثابت من هذا المصروف',
+      primary: true,
+      handler: (item) => makeRecurring(item),
+    });
+  }
+  if (canManage.value) {
+    list.push({
+      key: 'edit',
+      icon: 'mdi-pencil',
+      title: 'تعديل',
+      primary: true,
+      handler: (item) => openEdit(item),
+    });
+  }
+  if (canDelete.value) {
+    list.push({
+      key: 'delete',
+      icon: 'mdi-delete',
+      title: 'حذف',
+      color: 'error',
+      danger: true,
+      handler: (item) => removeExpense(item),
+      confirm: (item) => ({
+        title: 'حذف مصروف',
+        message: 'سيتم حذف هذا المصروف نهائياً.',
+        details: `القيمة: ${formatCurrency(item.amount, item.currency)}`,
+        type: 'error',
+        confirmText: 'حذف',
+      }),
+    });
+  }
+  return list;
+});
 
 const dialog = ref(false);
 const saving = ref(false);
@@ -456,8 +487,7 @@ function makeRecurring(row) {
   });
 }
 
-async function confirmDelete(row) {
-  if (!window.confirm(`حذف المصروف بقيمة ${formatCurrency(row.amount, row.currency)}؟`)) return;
+async function removeExpense(row) {
   try {
     await expensesStore.remove(row.id);
     await reload();

@@ -156,8 +156,8 @@ in mind when extending it:
   period → open shift. Specs that need it enable it via `api.withFlags(...)` and
   restore it; the rest run with it OFF (default).
 - **Feature-flag defaults drift from older notes** — assert against live flags or
-  set them explicitly (e.g. the feature-gate negative test forces `installments`
-  OFF rather than assuming it).
+  set them explicitly (e.g. the New-Sale negative test forces `installments`
+  OFF to assert `/sales/new` still opens but hides the installment option).
 
 ## 6. Adding a new screen
 

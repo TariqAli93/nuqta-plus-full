@@ -7,136 +7,54 @@
     >
       <v-btn
         v-if="can('users:create')"
+        data-testid="user-new-btn"
         color="primary"
         prepend-icon="mdi-plus"
         size="default"
+        aria-label="مستخدم جديد"
         @click="openForm()"
       >
         مستخدم جديد
       </v-btn>
     </PageHeader>
 
-    <v-card class="page-section filter-toolbar pa-3">
-      <v-row dense>
-        <v-col cols="12" md="3">
-          <v-text-field
-            v-model="store.filters.search"
-            label="بحث بالاسم"
-            prepend-inner-icon="mdi-magnify"
-            variant="outlined"
-            density="comfortable"
-            hide-details
-            clearable
-            @keyup.enter="store.fetch()"
-          />
-        </v-col>
-        <v-col cols="12" md="3">
-          <v-select
-            v-model="store.filters.role"
-            :items="roleOptions"
-            :loading="rbacStore.loading"
-            label="الدور"
-            item-title="title"
-            item-value="value"
-            variant="outlined"
-            density="comfortable"
-            hide-details
-            clearable
-            no-data-text="لا توجد أدوار"
-          />
-        </v-col>
-        <v-col cols="12" md="3">
-          <v-select
-            v-model="store.filters.isActive"
-            :items="statusOptions"
-            label="الحالة"
-            variant="outlined"
-            density="comfortable"
-            hide-details
-            clearable
-          />
-        </v-col>
-
-        <v-col cols="12" md="3" class="d-flex align-center justify-end">
-          <v-btn color="primary" variant="flat" prepend-icon="mdi-refresh" @click="store.fetch()">
-            تحديث
-          </v-btn>
-        </v-col>
-      </v-row>
-    </v-card>
-
-    <v-card class="page-section">
-      <div class="section-title">
-        <span class="section-title__label">
-          <v-icon size="20" color="primary">mdi-format-list-bulleted</v-icon>
-          قائمة المستخدمين
-        </span>
-      </div>
-      <v-data-table
-        :items="store.list"
-        :loading="store.loading"
-        :headers="headers"
-        :items-per-page="store.limit"
-        density="comfortable"
-      >
-        <template #loading>
-          <TableSkeleton :rows="5" :columns="headers.length" />
-        </template>
-        <template #no-data>
-          <EmptyState
-            title="لا يوجد مستخدمون"
-            description="ابدأ بإضافة مستخدم جديد"
-            icon="mdi-account-multiple-outline"
-            compact
-          />
-        </template>
-        <template #[`item.role`]="{ item }">
-          <v-chip color="primary" variant="tonal" size="small">
-            {{ getRoleName(item.role) }}
-          </v-chip>
-        </template>
-        <template #[`item.isActive`]="{ item }">
-          <v-chip :color="item.isActive ? 'success' : 'grey'" variant="tonal" size="small">
-            {{ item.isActive ? 'نشط' : 'معطل' }}
-          </v-chip>
-        </template>
-        <template #[`item.actions`]="{ item }">
-          <v-btn
-            v-if="can('users:update')"
-            icon="mdi-pencil"
-            size="small"
-            variant="text"
-            color="primary"
-            title="تعديل"
-            @click="openForm(item)"
-          >
-            <v-icon size="20">mdi-pencil</v-icon>
-          </v-btn>
-          <v-btn
-            v-if="can('users:update')"
-            icon="mdi-lock-reset"
-            size="small"
-            variant="text"
-            color="warning"
-            title="تغيير كلمة المرور"
-            @click="openResetPwDialog(item)"
-          >
-            <v-icon size="20">mdi-lock-reset</v-icon>
-          </v-btn>
-          <v-btn
-            v-if="can('users:delete')"
-            icon="mdi-delete"
-            size="small"
-            variant="text"
-            color="error"
-            title="حذف"
-            @click="remove(item)"
-          >
-            <v-icon size="20">mdi-delete</v-icon>
-          </v-btn>
-        </template>
-      </v-data-table>
-    </v-card>
+    <!-- Unified SmartTable (client-side): built-in search + role/status filters +
+         columns + export/print + saved views over the full user list. The page
+         keeps its own create/edit + reset-password dialogs; delete is handled by
+         the row action's confirm. -->
+    <SmartTable
+      v-model:filter-values="filterValues"
+      data-testid="users-table"
+      table-key="users-table"
+      :headers="headers"
+      :items="store.list"
+      :loading="store.loading"
+      :filters="filterDefs"
+      :row-actions="rowActions"
+      :search-placeholder="'ابحث بالمعرف، اسم المستخدم، الاسم الكامل، الهاتف...'"
+      show-export
+      show-print
+      show-saved-views
+      print-title="قائمة المستخدمين"
+      export-file-base="users"
+      :empty-title="'لا يوجد مستخدمون'"
+      :empty-description="'ابدأ بإضافة مستخدم جديد'"
+      empty-icon="mdi-account-multiple-outline"
+      :empty-actions="emptyActions"
+      @refresh="loadUsers"
+    >
+      <!-- Custom cells (role + status chips) pass straight through. -->
+      <template #[`item.role`]="{ item }">
+        <v-chip color="primary" variant="tonal" size="small">
+          {{ getRoleName(item.role) }}
+        </v-chip>
+      </template>
+      <template #[`item.isActive`]="{ item }">
+        <v-chip :color="item.isActive ? 'success' : 'grey'" variant="tonal" size="small">
+          {{ item.isActive ? 'نشط' : 'معطل' }}
+        </v-chip>
+      </template>
+    </SmartTable>
 
     <!-- Create/edit user dialog -->
     <v-dialog v-model="showForm" max-width="600">
@@ -152,6 +70,7 @@
               <v-col cols="12" md="6">
                 <v-text-field
                   v-model="form.username"
+                  data-testid="user-username"
                   label="اسم المستخدم"
                   variant="outlined"
                   density="comfortable"
@@ -182,6 +101,7 @@
               <v-col cols="12" md="6">
                 <v-select
                   v-model="form.role"
+                  data-testid="user-role"
                   :items="roleOptions"
                   :loading="rbacStore.loading"
                   item-title="title"
@@ -245,6 +165,7 @@
               <v-col v-if="!form.id" cols="12" md="6">
                 <v-text-field
                   v-model="form.password"
+                  data-testid="user-password"
                   label="كلمة المرور"
                   type="password"
                   variant="outlined"
@@ -270,7 +191,9 @@
         <v-card-actions>
           <v-spacer />
           <v-btn variant="text" @click="showForm = false">إلغاء</v-btn>
-          <v-btn color="primary" prepend-icon="mdi-content-save" @click="save"> حفظ </v-btn>
+          <v-btn data-testid="user-save" color="primary" prepend-icon="mdi-content-save" @click="save">
+            حفظ
+          </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -314,23 +237,17 @@
         <v-card-actions>
           <v-spacer />
           <v-btn variant="text" @click="closeResetPwDialog">إلغاء</v-btn>
-          <v-btn color="primary" prepend-icon="mdi-check" @click="resetPw">
+          <v-btn
+            data-testid="user-reset-password"
+            color="primary"
+            prepend-icon="mdi-check"
+            @click="resetPw"
+          >
             تغيير كلمة المرور
           </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
-
-    <!-- Delete Confirmation Dialog -->
-    <ConfirmDialog
-      v-model="deleteDialog"
-      title="حذف المستخدم"
-      :message="`هل أنت متأكد من حذف ${selectedItem?.username}؟`"
-      type="error"
-      confirm-text="حذف"
-      cancel-text="إلغاء"
-      @confirm="confirmDelete"
-    />
   </div>
 </template>
 
@@ -341,10 +258,8 @@ import { useInventoryStore } from '@/stores/inventory';
 import { useNotificationStore } from '@/stores/notification';
 import { useRbacStore } from '@/stores/rbac';
 import { usePermissions } from '@/composables/usePermissions';
-import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import PageHeader from '@/components/PageHeader.vue';
-import EmptyState from '@/components/EmptyState.vue';
-import TableSkeleton from '@/components/TableSkeleton.vue';
+import SmartTable from '@/components/common/SmartTable';
 
 const store = useUsersStore();
 const inventoryStore = useInventoryStore();
@@ -396,23 +311,90 @@ const onPrimaryBranchChange = () => {
   form.assignedWarehouseId = null;
 };
 
-const deleteDialog = ref(false);
-const selectedItem = ref(null);
-
+// Client-side table columns. Role + status keep their chip slots for display;
+// `exportValue` provides the human-readable text (Arabic role name / status)
+// for Excel/CSV/PDF/print since those cells are computed.
 const headers = [
   { title: 'المعرف', key: 'id' },
   { title: 'اسم المستخدم', key: 'username' },
   { title: 'الاسم الكامل', key: 'fullName' },
   { title: 'الهاتف', key: 'phone' },
-  { title: 'الدور', key: 'role' },
-  { title: 'الحالة', key: 'isActive' },
-  { title: 'إجراءات', key: 'actions', sortable: false },
+  { title: 'الدور', key: 'role', exportValue: (r) => getRoleName(r.role) },
+  {
+    title: 'الحالة',
+    key: 'isActive',
+    searchable: false,
+    exportValue: (r) => (r.isActive ? 'نشط' : 'معطل'),
+  },
 ];
 
 const statusOptions = [
   { title: 'نشط', value: true },
   { title: 'معطل', value: false },
 ];
+
+// Advanced filters rendered by SmartTable's popover and applied in-memory:
+// role matches the user's role code, status matches the boolean isActive.
+const filterDefs = computed(() => [
+  {
+    key: 'role',
+    type: 'select',
+    label: 'الدور',
+    icon: 'mdi-shield-account',
+    options: roleOptions.value,
+  },
+  {
+    key: 'isActive',
+    type: 'select',
+    label: 'الحالة',
+    icon: 'mdi-flag-outline',
+    options: statusOptions,
+  },
+]);
+const filterValues = ref({});
+
+// Row actions: edit (primary) + reset password + delete (overflow), each gated
+// on the same permission the old per-row buttons used. Delete uses the built-in
+// confirm dialog and the store's remove() (which re-fetches + toasts).
+const rowActions = computed(() => [
+  {
+    key: 'edit',
+    icon: 'mdi-pencil',
+    title: 'تعديل',
+    permission: 'users:update',
+    primary: true,
+    handler: (item) => openForm(item),
+  },
+  {
+    key: 'reset-password',
+    icon: 'mdi-lock-reset',
+    title: 'تغيير كلمة المرور',
+    color: 'warning',
+    permission: 'users:update',
+    handler: (item) => openResetPwDialog(item),
+  },
+  {
+    key: 'delete',
+    icon: 'mdi-delete',
+    title: 'حذف',
+    color: 'error',
+    danger: true,
+    permission: 'users:delete',
+    handler: (item) => store.remove(item.id),
+    confirm: (item) => ({
+      title: 'حذف المستخدم',
+      message: `هل أنت متأكد من حذف ${item.username}؟`,
+      type: 'error',
+      confirmText: 'حذف',
+    }),
+  },
+]);
+
+const emptyActions = computed(() =>
+  can('users:create')
+    ? [{ text: 'إضافة مستخدم جديد', icon: 'mdi-plus', color: 'primary', onClick: () => openForm() }]
+    : []
+);
 
 const showForm = ref(false);
 const formRef = ref(null);
@@ -560,19 +542,7 @@ async function save() {
     }
   }
   showForm.value = false;
-  await store.fetch();
-}
-
-async function remove(item) {
-  selectedItem.value = item;
-  deleteDialog.value = true;
-}
-
-async function confirmDelete() {
-  if (selectedItem.value) {
-    await store.remove(selectedItem.value.id);
-    selectedItem.value = null;
-  }
+  await loadUsers();
 }
 
 async function resetPw() {
@@ -586,9 +556,18 @@ async function resetPw() {
   closeResetPwDialog();
 }
 
+// The list is a CLIENT-side SmartTable, so it needs the full user set to search,
+// filter and sort across everyone (not just the server's first page). The store
+// is otherwise paginated at limit 10; widen it here so a single fetch returns all
+// users for in-memory handling.
+async function loadUsers() {
+  store.limit = 1000;
+  await store.fetch();
+}
+
 onMounted(async () => {
   await Promise.all([
-    store.fetch(),
+    loadUsers(),
     inventoryStore.fetchBranches(),
     inventoryStore.fetchWarehouses(),
     // Dynamic role list for the filter + create/edit form is an OPTIONAL secondary

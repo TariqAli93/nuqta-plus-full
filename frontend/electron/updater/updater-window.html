@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+    <title>تحديث NuqtaPlus</title>
+    <style>
+      /* Native Windows-dialog look: system font, fixed compact size, no web
+         layout, no sidebar. Light surface with a single accent. */
+      :root {
+        --accent: #7b5cff;
+        --ok: #2e9e5b;
+        --warn: #c8821a;
+        --err: #d23b3b;
+        --ink: #1f2330;
+        --muted: #6b7280;
+        --line: #e6e8ee;
+        --bg: #f6f7fb;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; }
+      body {
+        font-family: "Segoe UI", Tahoma, system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--ink);
+        display: flex;
+        flex-direction: column;
+        user-select: none;
+      }
+      header {
+        padding: 14px 18px;
+        font-size: 15px;
+        font-weight: 600;
+        border-bottom: 1px solid var(--line);
+        background: #fff;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      header .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
+      main { flex: 1; padding: 16px 18px; overflow: auto; }
+      .ver { font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+      .ver strong { color: var(--ink); }
+      .badge {
+        display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px;
+        background: #efeaff; color: var(--accent); margin-inline-start: 6px;
+      }
+      .badge.full { background: #fdf2e3; color: var(--warn); }
+      .badge.ok { background: #e7f6ec; color: var(--ok); }
+      .bar { height: 8px; border-radius: 6px; background: #e9ecf4; overflow: hidden; margin: 8px 0; }
+      .bar > i { display: block; height: 100%; width: 0%; background: var(--accent); transition: width .2s; }
+      .row { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+      .notes {
+        margin-top: 10px; font-size: 12px; line-height: 1.6; color: #333;
+        background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 10px;
+        max-height: 110px; overflow: auto; white-space: pre-wrap;
+      }
+      .err { color: var(--err); font-size: 13px; }
+      .saved { color: var(--ok); font-size: 12px; margin-top: 6px; }
+      footer {
+        padding: 12px 18px; border-top: 1px solid var(--line); background: #fff;
+        display: flex; gap: 8px; justify-content: flex-start;
+      }
+      button {
+        font-family: inherit; font-size: 13px; padding: 7px 14px; border-radius: 7px;
+        border: 1px solid var(--line); background: #fff; color: var(--ink); cursor: pointer;
+      }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      button.link { border: none; background: transparent; color: var(--muted); }
+      button:disabled { opacity: .5; cursor: default; }
+      .hidden { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <header><span class="dot"></span><span id="title">التحقق من التحديثات…</span></header>
+    <main>
+      <div class="ver">
+        الإصدار الحالي: <strong id="cur">—</strong>
+        <span id="arrow" class="hidden">←</span>
+        <strong id="next" class="hidden"></strong>
+        <span id="modeBadge" class="badge hidden"></span>
+      </div>
+
+      <div id="progressWrap" class="hidden">
+        <div class="bar"><i id="barFill"></i></div>
+        <div class="row">
+          <span id="bytes">0 / 0</span>
+          <span id="speed">—</span>
+        </div>
+      </div>
+
+      <div id="savedLine" class="saved hidden"></div>
+      <div id="errLine" class="err hidden"></div>
+      <div id="notes" class="notes hidden"></div>
+    </main>
+    <footer>
+      <button id="btnDownload" class="primary hidden">تنزيل التحديث</button>
+      <button id="btnInstall" class="primary hidden">تثبيت الآن</button>
+      <button id="btnRetry" class="primary hidden">إعادة المحاولة</button>
+      <button id="btnLater" class="link hidden">لاحقاً</button>
+      <button id="btnNotes" class="link hidden">سجل التغييرات</button>
+      <button id="btnLog" class="link">عرض السجل</button>
+    </footer>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const api = window.updaterAPI || {};
+      const fmt = (b) => {
+        b = Number(b) || 0;
+        if (b < 1024) return b + ' B';
+        if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+        if (b < 1073741824) return (b / 1048576).toFixed(2) + ' MB';
+        return (b / 1073741824).toFixed(2) + ' GB';
+      };
+      const eta = (s) => (s == null ? '—' : s < 60 ? s + ' ث' : Math.floor(s / 60) + ' د ' + (s % 60) + ' ث');
+      const TITLES = {
+        idle: 'لا يوجد تحديث',
+        checking: 'جارٍ التحقق من التحديثات…',
+        'update-available': 'يتوفر تحديث جديد',
+        'update-not-available': 'لا يوجد تحديث',
+        downloading: 'جارٍ التنزيل…',
+        downloaded: 'اكتمل التنزيل',
+        'ready-to-install': 'جاهز للتثبيت',
+        installing: 'جارٍ التثبيت…',
+        'service-starting': 'جارٍ تشغيل الخدمة…',
+        'health-checking': 'جارٍ فحص النظام…',
+        completed: 'تم التحديث بنجاح',
+        failed: 'فشل التحديث',
+      };
+
+      function showBtn(id, on) { $(id).classList.toggle('hidden', !on); }
+
+      function render(s) {
+        if (!s) return;
+        $('title').textContent = TITLES[s.state] || s.state;
+        $('cur').textContent = s.currentVersion || '—';
+        const hasNext = !!s.nextVersion;
+        $('arrow').classList.toggle('hidden', !hasNext);
+        $('next').classList.toggle('hidden', !hasNext);
+        $('next').textContent = s.nextVersion || '';
+
+        // download mode badge
+        const mb = $('modeBadge');
+        const d = s.download || {};
+        if (s.state === 'downloading' || s.state === 'downloaded' || s.state === 'ready-to-install') {
+          if (d.mode === 'differential') { mb.textContent = 'تحميل تفاضلي'; mb.className = 'badge'; mb.classList.remove('hidden'); }
+          else if (d.mode === 'full') { mb.textContent = 'تحميل كامل'; mb.className = 'badge full'; mb.classList.remove('hidden'); }
+          else mb.classList.add('hidden');
+        } else mb.classList.add('hidden');
+
+        // progress
+        const showProg = s.state === 'downloading';
+        $('progressWrap').classList.toggle('hidden', !showProg);
+        if (showProg) {
+          $('barFill').style.width = (s.progressPercent || 0) + '%';
+          $('bytes').textContent = fmt(d.transferredBytes) + ' / ' + fmt(d.fullSizeBytes) + ' (' + (s.progressPercent || 0) + '%)';
+          $('speed').textContent = (d.bytesPerSecond ? fmt(d.bytesPerSecond) + '/s' : '—') + ' · المتبقّي ' + eta(d.etaSeconds);
+        }
+
+        // saved line
+        const savedEl = $('savedLine');
+        if ((s.state === 'ready-to-install' || s.state === 'downloaded') && d.mode === 'differential' && d.savedBytes) {
+          savedEl.textContent = 'تحميل تفاضلي — تم توفير ≈ ' + fmt(d.savedBytes) + ' (' + (d.pctSaved || 0) + '%).';
+          savedEl.classList.remove('hidden');
+        } else if (s.state === 'downloading' && d.mode === 'full' && d.fallbackReason) {
+          savedEl.textContent = 'رجع إلى تحميل كامل — السبب: ' + d.fallbackReason;
+          savedEl.classList.remove('hidden');
+        } else savedEl.classList.add('hidden');
+
+        // error
+        $('errLine').classList.toggle('hidden', s.state !== 'failed');
+        $('errLine').textContent = s.error || '';
+
+        // notes
+        $('notes').textContent = s.releaseNotes || '';
+
+        // buttons by state
+        showBtn('btnDownload', s.state === 'update-available');
+        showBtn('btnInstall', s.state === 'ready-to-install' || s.state === 'downloaded');
+        showBtn('btnRetry', s.state === 'failed');
+        showBtn('btnLater', s.state === 'update-available' || s.state === 'ready-to-install');
+        showBtn('btnNotes', !!s.releaseNotes && s.state === 'update-available');
+      }
+
+      $('btnDownload').onclick = () => api.download && api.download();
+      $('btnInstall').onclick = () => api.install && api.install();
+      $('btnRetry').onclick = () => api.retry && api.retry();
+      $('btnLater').onclick = () => { api.remindLater && api.remindLater(); window.close(); };
+      $('btnNotes').onclick = () => api.openReleaseNotes && api.openReleaseNotes();
+      $('btnLog').onclick = () => api.openLog && api.openLog();
+
+      if (api.onState) api.onState(render);
+      if (api.getState) api.getState().then(render).catch(() => {});
+    </script>
+  </body>
+</html>

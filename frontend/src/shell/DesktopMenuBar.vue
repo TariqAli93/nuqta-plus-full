@@ -76,7 +76,9 @@ const menus = computed(() => [
         key: 'new-sale-invoice',
         label: 'فاتورة بيع جديدة',
         icon: 'mdi-cart-plus',
-        show: can('canUseInstallments'),
+        // Cash OR installment invoice — gated by the sales-create permission,
+        // not the installments capability (the page works for cash invoices).
+        show: perm('sales:create'),
         action: () => go('/sales/new'),
       },
       {

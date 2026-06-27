@@ -3,7 +3,6 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import {
   SALE_TYPE_INSTALLMENT,
   SALE_SOURCE_POS,
-  SALE_SOURCE_NEW_SALE,
   saleTypeToPaymentType,
 } from '../constants/sales.js';
 import {
@@ -641,12 +640,22 @@ export class SaleService {
     const threshold = currency === 'IQD' ? 250 : 0.01;
     remainingAmount = remainingAmount < threshold ? 0 : roundByCurrency(remainingAmount, currency);
 
-    // فاتورة بيع جديدة نقدية: كامل مبلغ الفاتورة مدفوع والمتبقي صفر — لا تنشئ
-    // أقساطاً ولا تضف ديناً على العميل. (A cash New-Sale invoice is always paid in
-    // full, so it never leaves a balance regardless of the paidAmount sent.)
-    if (saleSource === SALE_SOURCE_NEW_SALE && !isInstallmentSale) {
+    // Never book an overpayment: cap the collected amount at the invoice total.
+    // (Any cash "change" is a POS/UI concern, not a recorded payment.)
+    if (paidAmount > finalTotal) {
       paidAmount = finalTotal;
       remainingAmount = 0;
+    }
+
+    // POS sales are always settled in full — a POS request that leaves a balance
+    // is a bug (the POS screen pays in full and never books a debt), so reject it
+    // instead of silently creating a customer debt. A NEW_SALE invoice, by
+    // contrast, may be paid in full, partially paid, or fully deferred: any
+    // remainder becomes a customer debt (booked below) and is collected later
+    // through addPayment(). (The IQD/USD rounding threshold above already zeroes
+    // a sub-currency-unit remainder, so this never false-positives on rounding.)
+    if (saleSource === SALE_SOURCE_POS && remainingAmount > 0) {
+      throw new ValidationError('بيع نقطة البيع يجب أن يكون مدفوعاً بالكامل.');
     }
 
     const exchangeRate =
@@ -664,6 +673,13 @@ export class SaleService {
 
     if (isInstallmentSale && !customerId) {
       throw new ValidationError('يرجى اختيار العميل لإكمال البيع بالأقساط');
+    }
+
+    // A partially paid or fully deferred invoice leaves a balance that must be
+    // owed by a real customer so it can be collected later. A fully-paid sale
+    // (remainingAmount === 0, e.g. a walk-in cash invoice) needs no customer.
+    if (remainingAmount > 0 && !customerId) {
+      throw new ValidationError('يجب تحديد العميل عند البيع الآجل أو الدفع الجزئي.');
     }
 
     // Enforce credit-limit policy before any DB writes.
@@ -1249,6 +1265,14 @@ export class SaleService {
     const currency = sale.currency || 'USD';
     const roundedPaymentDataAmount = roundByCurrency(paymentData.amount, currency);
     const roundedRemainingAmount = roundByCurrency(sale.remainingAmount, currency);
+
+    // Reject a genuine overpayment with a clear message (a sub-currency-unit
+    // rounding overshoot is still capped silently by the Math.min below).
+    const overThreshold = currency === 'IQD' ? 250 : 0.01;
+    if (roundedPaymentDataAmount - roundedRemainingAmount > overThreshold) {
+      throw new ValidationError('مبلغ الدفعة يتجاوز المبلغ المتبقي على الفاتورة.');
+    }
+
     const paymentAmount = Math.min(roundedPaymentDataAmount, roundedRemainingAmount);
 
     let insertedPaymentId = null;
@@ -2564,8 +2588,10 @@ export class SaleService {
     const threshold = currency === 'IQD' ? 250 : 0.01;
     remainingAmount = remainingAmount < threshold ? 0 : roundByCurrency(remainingAmount, currency);
 
-    // فاتورة بيع جديدة نقدية مكتملة من مسودة: كامل المبلغ مدفوع والمتبقي صفر.
-    if (saleData.saleSource === SALE_SOURCE_NEW_SALE && !completingInstallment) {
+    // Never book an overpayment: cap the collected amount at the invoice total.
+    // A completed draft (always a NEW_SALE invoice) may be paid in full,
+    // partially paid, or fully deferred — the remainder becomes a customer debt.
+    if (paidAmount > finalTotal) {
       paidAmount = finalTotal;
       remainingAmount = 0;
     }
@@ -2574,6 +2600,12 @@ export class SaleService {
       saleData.exchangeRate !== undefined ? saleData.exchangeRate : draft.exchangeRate;
 
     const draftCustomerId = saleData.customerId || draft.customerId || null;
+
+    // A partial / deferred completed draft books a debt → it must have a customer.
+    if (remainingAmount > 0 && !draftCustomerId) {
+      throw new ValidationError('يجب تحديد العميل عند البيع الآجل أو الدفع الجزئي.');
+    }
+
     await enforceCreditLimit({
       customerId: draftCustomerId,
       total: finalTotal,
@@ -2774,14 +2806,20 @@ export class SaleService {
             createdBy: userId,
           });
         }
+      }
 
+      // Book the outstanding balance as customer debt — for a cash partial /
+      // fully-deferred invoice as well as an installment one (mirrors create();
+      // previously this lived INSIDE the installment block, so a partial cash
+      // draft completion booked no debt).
+      if (draftCustomerId && remainingAmount > 0) {
         await tx
           .update(customers)
           .set({
             totalDebt: sql`${customers.totalDebt}::numeric + ${remainingAmount}`,
             totalPurchases: sql`${customers.totalPurchases}::numeric + ${finalTotal}`,
           })
-          .where(eq(customers.id, customerId));
+          .where(eq(customers.id, draftCustomerId));
       }
 
       // GL: post the completed draft's sale entry in the same tx.

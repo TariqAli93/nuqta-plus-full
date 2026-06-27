@@ -19,18 +19,20 @@
       </span>
     </div>
 
-    <v-data-table
+    <!-- Embedded SmartTable: kept lean — no toolbar/footer (this card supplies its
+         own header + refresh). Retry is a row action; attempts/error stay custom. -->
+    <SmartTable
+      table-key="notification-failures-table"
       :headers="headers"
       :items="rows"
       :loading="loading"
-      density="comfortable"
-      hide-default-footer
-      items-per-page="50"
+      :row-actions="rowActions"
+      :show-toolbar="false"
+      :show-footer="false"
+      :page-size="100"
+      default-density="comfortable"
     >
-      <template #loading>
-        <TableSkeleton :rows="3" :columns="headers.length" />
-      </template>
-      <template #no-data>
+      <template #empty>
         <EmptyState
           title="لا توجد رسائل فشلت أو معلقة"
           description="ستظهر هنا الرسائل التي فشلت بالإرسال أو علقت في قائمة الانتظار."
@@ -59,20 +61,7 @@
       <template #[`item.error`]="{ item }">
         <span class="text-caption text-error">{{ item.error || '—' }}</span>
       </template>
-      <template #[`item.actions`]="{ item }">
-        <v-btn
-          size="small"
-          variant="text"
-          color="primary"
-          prepend-icon="mdi-replay"
-          :loading="retryingId === item.id"
-          :disabled="item.status === 'sent'"
-          @click="retry(item)"
-        >
-          إعادة المحاولة
-        </v-btn>
-      </template>
-    </v-data-table>
+    </SmartTable>
   </v-card>
 </template>
 
@@ -81,16 +70,15 @@ import { computed, ref, onMounted } from 'vue';
 import api from '@/plugins/axios';
 import { useNotificationStore } from '@/stores/notification';
 import EmptyState from '@/components/EmptyState.vue';
-import TableSkeleton from '@/components/TableSkeleton.vue';
+import SmartTable from '@/components/common/SmartTable';
 
 const headers = [
   { title: 'التاريخ', key: 'createdAt' },
   { title: 'النوع', key: 'type' },
-  { title: 'المستلم', key: 'recipientPhone' },
+  { title: 'المستلم', key: 'recipientPhone', ltr: true },
   { title: 'الحالة', key: 'status' },
   { title: 'المحاولات', key: 'attempts' },
   { title: 'الخطأ', key: 'error' },
-  { title: 'إجراء', key: 'actions', sortable: false },
 ];
 
 // "Stuck" = stayed in `processing` status for longer than this. Matches the
@@ -110,10 +98,22 @@ const rows = computed(() => {
     const t = new Date(r.updatedAt || r.createdAt).getTime();
     return Number.isFinite(t) && t < cutoff;
   });
-  return [...failed.value, ...stuck].sort(
-    (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
-  );
+  return [...failed.value, ...stuck].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 });
+
+// Retry as a row action: disabled for already-sent rows and while its own retry
+// is in flight (preserves the re-entrancy guard the per-row spinner used to give).
+const rowActions = computed(() => [
+  {
+    key: 'retry',
+    icon: 'mdi-replay',
+    title: 'إعادة المحاولة',
+    color: 'primary',
+    primary: true,
+    disabled: (item) => item.status === 'sent' || retryingId.value === item.id,
+    handler: (item) => retry(item),
+  },
+]);
 
 async function fetchByStatus(status) {
   const res = await api.get('/notifications', { params: { status, limit: 50 } });
@@ -123,10 +123,7 @@ async function fetchByStatus(status) {
 async function refresh() {
   loading.value = true;
   try {
-    const [f, p] = await Promise.all([
-      fetchByStatus('failed'),
-      fetchByStatus('processing'),
-    ]);
+    const [f, p] = await Promise.all([fetchByStatus('failed'), fetchByStatus('processing')]);
     failed.value = f;
     processing.value = p;
   } catch (err) {

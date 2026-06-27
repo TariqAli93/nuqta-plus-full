@@ -13,7 +13,11 @@
     <v-icon class="dt-nav__icon" :size="collapsed ? 22 : 20">{{ item.icon }}</v-icon>
     <span v-if="!collapsed" class="dt-nav__label text-truncate">{{ item.label }}</span>
     <span v-if="!collapsed && badge != null" class="dt-nav__badge">{{ badge }}</span>
-    <span v-else-if="collapsed && badge != null" class="dt-nav__badge-dot" aria-hidden="true"></span>
+    <span
+      v-else-if="collapsed && badge != null"
+      class="dt-nav__badge-dot"
+      aria-hidden="true"
+    ></span>
     <button
       v-if="!collapsed && canPin"
       type="button"
@@ -28,13 +32,7 @@
     <v-tooltip v-if="collapsed" activator="parent" location="end" :text="tooltipText" />
   </router-link>
 
-  <button
-    v-else
-    type="button"
-    class="dt-nav__row"
-    :class="rowClass"
-    @click="$emit('activate')"
-  >
+  <button v-else type="button" class="dt-nav__row" :class="rowClass" @click="$emit('activate')">
     <v-icon class="dt-nav__icon" :size="collapsed ? 22 : 20">{{ item.icon }}</v-icon>
     <span v-if="!collapsed" class="dt-nav__label text-truncate">{{ item.label }}</span>
     <v-tooltip v-if="collapsed" activator="parent" location="end" :text="tooltipText" />
@@ -90,7 +88,9 @@ const onContextMenu = (e) => {
   border-radius: 8px;
   cursor: pointer;
   position: relative;
-  transition: background-color 0.12s ease, color 0.12s ease;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
 
   &:hover {
     background: rgba(var(--v-theme-on-surface), 0.06);
@@ -167,7 +167,9 @@ const onContextMenu = (e) => {
   color: rgba(var(--v-theme-on-surface), 0.5);
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.12s ease, color 0.12s ease;
+  transition:
+    opacity 0.12s ease,
+    color 0.12s ease;
 
   &.is-pinned {
     opacity: 1;

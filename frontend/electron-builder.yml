@@ -20,6 +20,22 @@ extraResources:
   - from: ./electron/scripts
     to: dist-electron/scripts
 
+  # UpdaterV2 native window assets (HTML + CJS preload). The JS modules are
+  # bundled into the main process; only these static files need shipping.
+  - from: ./electron/updater
+    to: updater
+    filter:
+      - '*.html'
+      - '*.cjs'
+
+  # UpdaterV2 Windows Service helper — one native script used by both the NSIS
+  # installer and the Electron app (windows-service-manager.js resolves it at
+  # resources/service-manager/service-manager.ps1).
+  - from: ../build/service-manager
+    to: service-manager
+    filter:
+      - '**/*'
+
   # Credit-risk model artifacts — the production runtime resolves these via
   # process.resourcesPath (see backend/src/utils/modelPathResolver.js). They
   # are also placed under resources/backend/models by afterPack via dist-backend,

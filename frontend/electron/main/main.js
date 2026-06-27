@@ -29,6 +29,7 @@ import {
   sanitizePath,
 } from '../scripts/security.js';
 import { setupAutoUpdater, checkForUpdates, startDownload, installUpdate } from '../scripts/autoUpdater.js';
+import { startUpdaterV2, isUpdaterV2Enabled } from '../updater/index.js';
 import { getServiceDiagnostics, repairService } from '../scripts/serviceController.js';
 import { createLockFile } from '../scripts/firstRun.js';
 import { generateReceiptHtml } from '../scripts/receiptBuilder.js';
@@ -206,7 +207,19 @@ function createWindow() {
 
   // Do not automatically show the main window here; we'll control showing it
   mainWindow.once('ready-to-show', () => {
-    setupAutoUpdater(mainWindow);
+    // Exactly ONE update path is ever active. UpdaterV2 (the new isolated
+    // subsystem) only takes over when UPDATER_V2=1; otherwise the legacy
+    // updater runs unchanged. This is the gradual-migration switch.
+    if (isUpdaterV2Enabled()) {
+      logger.info('[updater] UpdaterV2 ENABLED (UPDATER_V2=1)');
+      startUpdaterV2({
+        mainWindow,
+        appMode: APP_MODE,
+        getAppVersion: () => app.getVersion(),
+      });
+    } else {
+      setupAutoUpdater(mainWindow);
+    }
     // mark as ready — actual show will be handled by the startup flow when backend is ready and after the splash delay
     mainWindow.__readyToShow = true;
     tryToShowMainWindowAfterSplash();

@@ -8,6 +8,10 @@ const UPDATE_CHANNELS = [
   'update-progress',
   'update-ready',
   'update-error',
+  // Differential-vs-full download signal (reqs #10/#11): emitted when
+  // electron-updater decides to attempt a delta or falls back to a full
+  // download, carrying { mode: 'differential'|'full', reason }.
+  'update-download-mode',
 ];
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -122,6 +126,34 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
 contextBridge.exposeInMainWorld('splashAPI', {
   getAppVersion: () => ipcRenderer.invoke('app:getVersion'),
+});
+
+/**
+ * UpdaterV2 bridge (active only when UPDATER_V2=1; harmless otherwise). The new
+ * subsystem pushes a single full-snapshot event and accepts a small command
+ * surface. The native updater window has its own preload; this lets the main
+ * Vue app optionally subscribe (e.g. a floating "update ready" chip) without
+ * the old multi-channel wiring.
+ */
+contextBridge.exposeInMainWorld('updaterV2', {
+  onState: (cb) => {
+    const handler = (_e, snapshot) => {
+      try {
+        cb(snapshot);
+      } catch {
+        /* swallow renderer-side errors */
+      }
+    };
+    ipcRenderer.on('updater:event', handler);
+    return () => ipcRenderer.removeListener('updater:event', handler);
+  },
+  getState: () => ipcRenderer.invoke('updater:get-state'),
+  check: () => ipcRenderer.invoke('updater:check'),
+  download: () => ipcRenderer.invoke('updater:download'),
+  install: () => ipcRenderer.invoke('updater:install'),
+  remindLater: () => ipcRenderer.invoke('updater:remind-later'),
+  openLog: () => ipcRenderer.invoke('updater:open-log'),
+  openReleaseNotes: () => ipcRenderer.invoke('updater:open-release-notes'),
 });
 
 /**

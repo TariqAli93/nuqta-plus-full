@@ -70,17 +70,16 @@ export const navigationRegistry = [
       },
       {
         // Unified "فاتورة بيع جديدة": a full sale invoice supporting cash OR
-        // installment (cash default). Still gated by the installments feature —
-        // the fast cash-only path is the POS screen above. `id` is kept stable
-        // so existing pins/recents and the derived `nav.sell-installment`
-        // command id don't break.
+        // installment (cash default). Gated ONLY by `sales:create` — NOT by the
+        // installments feature — so the cash invoice (and the page itself) stay
+        // reachable when installments are off; only the installment OPTION inside
+        // the page is feature-gated. `id` is kept stable so existing pins/recents
+        // and the derived `nav.sell-installment` command id don't break.
         id: 'sell-installment',
         label: 'فاتورة بيع جديدة',
         icon: 'mdi-cart-plus',
         route: '/sales/new',
         permission: 'sales:create',
-        feature: 'installments',
-        capability: 'canUseInstallments',
         keywords: [
           'new sale',
           'invoice',

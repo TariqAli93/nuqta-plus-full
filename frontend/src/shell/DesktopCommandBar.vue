@@ -211,6 +211,9 @@ const goBack = () => router.back();
 
 .dt-cmdbar__search {
   text-transform: none;
+  min-width: 250px;
+  display: flex;
+  justify-content: space-between;
 }
 
 .dt-cmdbar__kbd {

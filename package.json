@@ -1,6 +1,6 @@
 {
   "name": "nuqtaplus",
-  "version": "1.0.22",
+  "version": "1.0.26",
   "description": "نقطة بلس - نظام إدارة نقاط البيع والمخازن",
   "private": true,
   "type": "module",
@@ -34,6 +34,10 @@
     "verify:all": "pnpm run verify:versions && pnpm run verify:packaged && pnpm run verify:credit-model",
     "lint": "cd backend && pnpm lint && cd ../frontend && pnpm lint",
     "format": "cd backend && pnpm format && cd ../frontend && pnpm format",
+    "update:server": "node scripts/update/run-local-update-server.js",
+    "update:validate": "node scripts/update/validate-release-assets.js",
+    "update:validate:github": "node scripts/update/validate-release-assets.js --github",
+    "update:test": "node --test \"frontend/electron/updater/__tests__/**/*.test.mjs\"",
     "db:migrate": "cd backend && pnpm db:migrate",
     "db:generate": "cd backend && pnpm db:generate",
     "seed": "cd backend && node src/seed.js --demo"

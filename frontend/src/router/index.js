@@ -222,12 +222,12 @@ const routes = [
         path: 'sales/new',
         name: 'NewSale',
         component: NewSale,
-        // /sales/new is the installment-sale entry point; gate it by the
-        // installments feature flag + capability.
+        // The unified «فاتورة بيع جديدة» supports BOTH cash and installments
+        // (cash is the default). It is a general sales-invoice page, so it is
+        // gated ONLY by `sales:create` — NOT by the installments feature. The
+        // installment OPTION inside the page is what the installments flag gates.
         meta: {
           permission: 'sales:create',
-          feature: 'installments',
-          capability: 'canUseInstallments',
         },
       },
       {

@@ -10,8 +10,31 @@
       </v-btn>
     </PageHeader>
 
-    <v-card class="page-section filter-toolbar pa-3">
-      <div class="d-flex align-center gap-3 flex-wrap">
+    <!-- Unified SmartTable (client-side display). The status filter stays
+         server-side (the list is paginated server-side, so we keep refetching by
+         status) via the page-owned #filters control + chips. Approve/reject are
+         gated row actions; reject opens the page's own reason dialog. -->
+    <SmartTable
+      data-testid="transfer-requests-table"
+      table-key="transfer-requests-table"
+      :headers="headers"
+      :items="transfers"
+      :loading="loading"
+      :page-size="50"
+      :row-actions="rowActions"
+      :filter-chips="filterChips"
+      show-export
+      show-print
+      print-title="طلبات نقل المخزون"
+      export-file-base="transfer-requests"
+      empty-title="لا توجد طلبات نقل"
+      empty-description="ابدأ بإنشاء طلب نقل جديد للمخزون."
+      empty-icon="mdi-transfer"
+      @refresh="reload"
+      @clear-filters="clearStatusFilter"
+      @remove-filter="clearStatusFilter"
+    >
+      <template #filters>
         <v-select
           v-model="statusFilter"
           :items="statusFilters"
@@ -20,75 +43,18 @@
           density="comfortable"
           prepend-inner-icon="mdi-filter-variant"
           hide-details
-          style="max-width: 240px; min-width: 200px"
           @update:model-value="reload"
         />
-        <v-spacer />
-        <v-btn variant="text" prepend-icon="mdi-refresh" @click="reload"> تحديث </v-btn>
-      </div>
-    </v-card>
-
-    <v-card class="page-section">
-      <div class="section-title">
-        <span class="section-title__label">
-          <v-icon size="20" color="primary">mdi-format-list-bulleted</v-icon>
-          <span>قائمة الطلبات</span>
-        </span>
-      </div>
-      <v-data-table
-        :headers="headers"
-        :items="transfers"
-        :loading="loading"
-        density="comfortable"
-        hide-default-footer
-        items-per-page="50"
-      >
-        <template #loading>
-          <TableSkeleton :rows="5" :columns="headers.length" />
-        </template>
-        <template #[`item.status`]="{ item }">
-          <v-chip :color="statusColor(item.status)" size="small">
-            {{ statusLabel(item.status) }}
-          </v-chip>
-        </template>
-        <template #[`item.createdAt`]="{ item }">
-          {{ formatDate(item.createdAt) }}
-        </template>
-        <template #[`item.actions`]="{ item }">
-          <template v-if="item.status === 'pending' && canApprove">
-            <v-btn
-              icon="mdi-check"
-              size="small"
-              color="success"
-              variant="text"
-              title="موافقة"
-              @click="confirmApprove(item)"
-            >
-              <v-icon size="20">mdi-check</v-icon>
-            </v-btn>
-            <v-btn
-              icon="mdi-close"
-              size="small"
-              color="error"
-              variant="text"
-              title="رفض"
-              @click="openReject(item)"
-            >
-              <v-icon size="20">mdi-close</v-icon>
-            </v-btn>
-          </template>
-          <span v-else class="text-caption text-medium-emphasis">—</span>
-        </template>
-        <template #no-data>
-          <EmptyState
-            title="لا توجد طلبات نقل"
-            description="ابدأ بإنشاء طلب نقل جديد للمخزون."
-            icon="mdi-transfer"
-            compact
-          />
-        </template>
-      </v-data-table>
-    </v-card>
+      </template>
+      <template #[`item.status`]="{ item }">
+        <v-chip :color="statusColor(item.status)" size="small">
+          {{ statusLabel(item.status) }}
+        </v-chip>
+      </template>
+      <template #[`item.createdAt`]="{ item }">
+        {{ formatDate(item.createdAt) }}
+      </template>
+    </SmartTable>
 
     <!-- Reject dialog -->
     <v-dialog v-model="rejectDialog" max-width="480">
@@ -116,13 +82,10 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
 import { useInventoryStore } from '@/stores/inventory';
-import { useAuthStore } from '@/stores/auth';
 import PageHeader from '@/components/PageHeader.vue';
-import EmptyState from '@/components/EmptyState.vue';
-import TableSkeleton from '@/components/TableSkeleton.vue';
+import SmartTable from '@/components/common/SmartTable';
 
 const inventoryStore = useInventoryStore();
-const authStore = useAuthStore();
 
 const transfers = ref([]);
 const loading = ref(false);
@@ -140,14 +103,11 @@ const headers = [
   { title: 'المنتج', key: 'productName' },
   { title: 'من', key: 'fromWarehouseName' },
   { title: 'إلى', key: 'toWarehouseName' },
-  { title: 'الكمية', key: 'quantity' },
-  { title: 'الحالة', key: 'status' },
+  { title: 'الكمية', key: 'quantity', format: 'quantity', align: 'end' },
+  { title: 'الحالة', key: 'status', exportValue: (r) => statusLabel(r.status) },
   { title: 'الطالب', key: 'requestedByName' },
-  { title: 'التاريخ', key: 'createdAt' },
-  { title: 'إجراءات', key: 'actions', sortable: false },
+  { title: 'التاريخ', key: 'createdAt', format: 'datetime' },
 ];
-
-const canApprove = computed(() => authStore.hasPermission('approve_warehouse_transfer'));
 
 const statusLabel = (s) =>
   ({ pending: 'قيد الموافقة', approved: 'معتمد', rejected: 'مرفوض' })[s] || s;
@@ -200,6 +160,46 @@ const submitReject = async () => {
   } finally {
     acting.value = false;
   }
+};
+
+// Approve / reject as gated row actions: shown only for pending requests and only
+// to users who can approve warehouse transfers (mirrors the previous v-if).
+// Reject keeps the page's own reason dialog rather than a generic confirm.
+const rowActions = [
+  {
+    key: 'approve',
+    icon: 'mdi-check',
+    title: 'موافقة',
+    color: 'success',
+    primary: true,
+    testId: 'transfer-approve',
+    permission: 'approve_warehouse_transfer',
+    hidden: (item) => item.status !== 'pending',
+    handler: (item) => confirmApprove(item),
+  },
+  {
+    key: 'reject',
+    icon: 'mdi-close',
+    title: 'رفض',
+    color: 'error',
+    danger: true,
+    primary: true,
+    testId: 'transfer-reject',
+    permission: 'approve_warehouse_transfer',
+    hidden: (item) => item.status !== 'pending',
+    handler: (item) => openReject(item),
+  },
+];
+
+const filterChips = computed(() => {
+  if (!statusFilter.value) return [];
+  const opt = statusFilters.find((s) => s.value === statusFilter.value);
+  return [{ key: 'status', label: `الحالة: ${opt?.title ?? statusFilter.value}` }];
+});
+
+const clearStatusFilter = () => {
+  statusFilter.value = null;
+  reload();
 };
 
 onMounted(reload);

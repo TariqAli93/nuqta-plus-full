@@ -10,98 +10,51 @@
       </v-btn>
     </PageHeader>
 
-    <!-- Filters -->
-    <v-card class="page-section filter-toolbar pa-3">
-      <v-row dense>
-        <v-col cols="12" sm="6">
-          <v-text-field
-            v-model="filters.search"
-            label="بحث بالاسم أو الهاتف"
-            density="comfortable"
-            variant="outlined"
-            prepend-inner-icon="mdi-magnify"
-            hide-details
-            clearable
-            @keyup.enter="reload"
-          />
-        </v-col>
-        <v-col cols="12" sm="3" class="flex items-center">
-          <v-checkbox v-model="filters.hasDebt" label="عليهم ديون فقط" hide-details density="comfortable" />
-        </v-col>
-        <v-col cols="12" sm="3" class="flex items-center">
-          <v-btn color="primary" block @click="reload">تطبيق</v-btn>
-        </v-col>
-      </v-row>
-    </v-card>
+    <!-- Unified SmartTable (client-side): the loaded suppliers array is searched,
+         filtered (hasDebt), sorted and paginated in memory. The create/edit
+         dialog stays page-owned. -->
+    <SmartTable
+      v-model:filter-values="filterValues"
+      data-testid="suppliers-table"
+      table-key="suppliers-table"
+      :headers="headers"
+      :items="items"
+      :loading="loading"
+      :filters="filterDefs"
+      :row-actions="rowActions"
+      search-placeholder="ابحث بالاسم، الهاتف، المدينة..."
+      show-export
+      show-print
+      print-title="قائمة الموردين"
+      export-file-base="suppliers"
+      empty-title="لا يوجد موردون"
+      empty-description="أضف مورديك لتسجيل فواتير الشراء ومتابعة ذممهم."
+      empty-icon="mdi-truck-delivery"
+      :empty-actions="emptyActions"
+      @refresh="reload"
+    >
+      <!-- Custom cells pass straight through (router-link, colored debt, status). -->
+      <template #[`item.name`]="{ item }">
+        <router-link :to="`/suppliers/${item.id}`" class="text-primary font-weight-bold">
+          {{ item.name }}
+        </router-link>
+      </template>
+      <template #[`item.totalDebt`]="{ item }">
+        <span class="font-weight-bold" :class="item.totalDebt > 0 ? 'text-error' : 'text-success'">
+          {{ formatCurrency(item.totalDebt) }}
+        </span>
+      </template>
+      <template #[`item.totalPurchases`]="{ item }">
+        {{ formatCurrency(item.totalPurchases) }}
+      </template>
+      <template #[`item.isActive`]="{ item }">
+        <v-chip size="x-small" :color="item.isActive ? 'success' : 'grey'" variant="tonal">
+          {{ item.isActive ? 'نشط' : 'معطل' }}
+        </v-chip>
+      </template>
+    </SmartTable>
 
-    <!-- Table -->
-    <v-card class="page-section">
-      <v-data-table
-        :headers="headers"
-        :items="items"
-        :loading="loading"
-        density="comfortable"
-        items-per-page="25"
-      >
-        <template #loading>
-          <TableSkeleton :rows="5" :columns="headers.length" />
-        </template>
-        <template #[`item.name`]="{ item }">
-          <router-link :to="`/suppliers/${item.id}`" class="text-primary font-weight-bold">
-            {{ item.name }}
-          </router-link>
-        </template>
-        <template #[`item.totalDebt`]="{ item }">
-          <span class="font-weight-bold" :class="item.totalDebt > 0 ? 'text-error' : 'text-success'">
-            {{ formatCurrency(item.totalDebt) }}
-          </span>
-        </template>
-        <template #[`item.totalPurchases`]="{ item }">
-          {{ formatCurrency(item.totalPurchases) }}
-        </template>
-        <template #[`item.isActive`]="{ item }">
-          <v-chip size="x-small" :color="item.isActive ? 'success' : 'grey'" variant="tonal">
-            {{ item.isActive ? 'نشط' : 'معطل' }}
-          </v-chip>
-        </template>
-        <template #[`item.actions`]="{ item }">
-          <v-btn
-            icon="mdi-eye"
-            size="small"
-            variant="text"
-            title="ملف المورد"
-            :to="`/suppliers/${item.id}`"
-          />
-          <v-btn
-            v-if="canUpdate"
-            icon="mdi-pencil"
-            size="small"
-            variant="text"
-            title="تعديل"
-            @click="openEdit(item)"
-          />
-          <v-btn
-            v-if="canDelete"
-            icon="mdi-delete"
-            size="small"
-            variant="text"
-            color="error"
-            title="حذف"
-            @click="confirmDelete(item)"
-          />
-        </template>
-        <template #no-data>
-          <EmptyState
-            title="لا يوجد موردون"
-            description="أضف مورديك لتسجيل فواتير الشراء ومتابعة ذممهم."
-            icon="mdi-truck-delivery"
-            compact
-          />
-        </template>
-      </v-data-table>
-    </v-card>
-
-    <!-- Create/Edit dialog -->
+    <!-- Create/Edit dialog (kept page-owned) -->
     <v-dialog v-model="dialog" max-width="520">
       <v-card>
         <v-card-title class="dialog-title">
@@ -178,8 +131,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { useSupplierStore } from '@/stores/supplier';
 import { useAuthStore } from '@/stores/auth';
 import PageHeader from '@/components/PageHeader.vue';
-import EmptyState from '@/components/EmptyState.vue';
-import TableSkeleton from '@/components/TableSkeleton.vue';
+import SmartTable from '@/components/common/SmartTable';
 import { formatCurrency } from '@/utils/formatters';
 
 const supplierStore = useSupplierStore();
@@ -191,17 +143,86 @@ const canCreate = computed(() => authStore.hasPermission?.('suppliers:create'));
 const canUpdate = computed(() => authStore.hasPermission?.('suppliers:update'));
 const canDelete = computed(() => authStore.hasPermission?.('suppliers:delete'));
 
-const filters = reactive({ search: '', hasDebt: false });
+// Client-side filters: SmartTable owns the popover control + chip; the derived
+// `hasDebt` filter runs in memory via a predicate (no `hasDebt` field exists).
+const filterValues = ref({});
+const filterDefs = [
+  {
+    key: 'hasDebt',
+    type: 'boolean',
+    label: 'الديون',
+    icon: 'mdi-cash-multiple',
+    options: [
+      { title: 'عليهم ديون فقط', value: true },
+      { title: 'بدون ديون', value: false },
+    ],
+    predicate: (row, val) => {
+      const debt = Number(row.totalDebt) || 0;
+      return val ? debt > 0 : debt <= 0;
+    },
+  },
+];
 
 const headers = [
-  { title: 'الاسم', key: 'name' },
+  { title: 'الاسم', key: 'name', minWidth: 180 },
   { title: 'الهاتف', key: 'phone' },
   { title: 'المدينة', key: 'city' },
-  { title: 'إجمالي المشتريات', key: 'totalPurchases' },
-  { title: 'الدين (لنا عليه ذمة)', key: 'totalDebt' },
-  { title: 'الحالة', key: 'isActive' },
-  { title: '', key: 'actions', sortable: false, align: 'end' },
+  { title: 'إجمالي المشتريات', key: 'totalPurchases', format: 'currency', align: 'end', searchable: false },
+  { title: 'الدين (لنا عليه ذمة)', key: 'totalDebt', format: 'currency', align: 'end', searchable: false },
+  {
+    title: 'الحالة',
+    key: 'isActive',
+    searchable: false,
+    exportValue: (r) => (r.isActive ? 'نشط' : 'معطل'),
+  },
 ];
+
+// Row actions replace the per-row icon buttons; delete uses the action's
+// built-in confirm (no window.confirm). Gated on the existing permissions.
+const rowActions = computed(() => {
+  const list = [
+    {
+      key: 'view',
+      icon: 'mdi-eye',
+      title: 'ملف المورد',
+      to: (item) => `/suppliers/${item.id}`,
+      primary: true,
+    },
+  ];
+  if (canUpdate.value) {
+    list.push({
+      key: 'edit',
+      icon: 'mdi-pencil',
+      title: 'تعديل',
+      primary: true,
+      handler: (item) => openEdit(item),
+    });
+  }
+  if (canDelete.value) {
+    list.push({
+      key: 'delete',
+      icon: 'mdi-delete',
+      title: 'حذف',
+      color: 'error',
+      danger: true,
+      primary: true,
+      handler: (item) => handleDelete(item),
+      confirm: (item) => ({
+        title: 'حذف المورد',
+        message: `حذف المورد "${item.name}"؟ (يُعطَّل تلقائياً إن كانت له فواتير)`,
+        type: 'error',
+        confirmText: 'حذف',
+      }),
+    });
+  }
+  return list;
+});
+
+const emptyActions = computed(() =>
+  canCreate.value
+    ? [{ text: 'مورد جديد', icon: 'mdi-plus', color: 'primary', onClick: openCreate }]
+    : []
+);
 
 const dialog = ref(false);
 const saving = ref(false);
@@ -217,10 +238,7 @@ const formData = reactive({
 });
 
 async function reload() {
-  const params = {};
-  if (filters.search) params.search = filters.search;
-  if (filters.hasDebt) params.hasDebt = true;
-  await supplierStore.fetch(params);
+  await supplierStore.fetch();
 }
 
 function openCreate() {
@@ -268,8 +286,7 @@ async function save() {
   }
 }
 
-async function confirmDelete(row) {
-  if (!window.confirm(`حذف المورد "${row.name}"؟ (يُعطَّل تلقائياً إن كانت له فواتير)`)) return;
+async function handleDelete(row) {
   try {
     await supplierStore.remove(row.id);
     await reload();

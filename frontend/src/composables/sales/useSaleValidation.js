@@ -20,9 +20,7 @@ export function useSaleValidation({ sale, calc, getQuantityError }) {
   const lineIssue = computed(() =>
     sale.value.items.some(
       (item) =>
-        !item.productId ||
-        Number(item.quantity || 0) <= 0 ||
-        getQuantityError(item).length > 0
+        !item.productId || Number(item.quantity || 0) <= 0 || getQuantityError(item).length > 0
     )
   );
 
@@ -44,10 +42,17 @@ export function useSaleValidation({ sale, calc, getQuantityError }) {
       if ((sale.value.paidAmount || 0) >= calc.totalWithInterest.value && calc.total.value > 0) {
         reasons.push('الدفعة المقدمة لا يمكن أن تساوي أو تتجاوز إجمالي الفاتورة');
       }
-    } else {
+    } else if (hasItems.value) {
+      // Cash invoice: received ∈ [0, total]. A partial / deferred sale (a
+      // remaining balance) must name the customer the debt is owed by.
       const received = Number(sale.value.receivedAmount ?? calc.total.value) || 0;
-      if (hasItems.value && received < calc.total.value) {
-        reasons.push('المبلغ المستلم أقل من إجمالي الفاتورة');
+      if (received < 0) {
+        reasons.push('المبلغ المستلم لا يمكن أن يكون سالباً.');
+      } else if (received > calc.total.value) {
+        reasons.push('المبلغ المستلم لا يمكن أن يتجاوز إجمالي الفاتورة.');
+      }
+      if (calc.remainingAmount.value > 0 && !sale.value.customerId) {
+        reasons.push('يجب تحديد العميل عند البيع الآجل أو الدفع الجزئي.');
       }
     }
 

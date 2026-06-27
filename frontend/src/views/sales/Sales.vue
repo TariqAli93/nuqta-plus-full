@@ -5,57 +5,66 @@
       subtitle="عرض الفواتير والمسودات وأقساط البيع"
       icon="mdi-receipt-text"
     >
-      <!-- Installment shortcut: hidden when the user lacks the capability
-           entirely; rendered disabled with a tooltip when the feature flag
-           is off so admins still see the entry point. -->
-      <v-tooltip
-        v-if="installmentsVisible"
-        location="bottom"
-        :text="installmentsReason"
-        :disabled="!installmentsDisabled"
+      <!-- General sales-invoice shortcut. Opens the unified «فاتورة بيع جديدة»
+           (cash OR installment). Gated ONLY by the sales-create permission —
+           never by the installments feature, which governs the installment
+           OPTION inside the page, not invoice creation itself. -->
+      <v-btn
+        v-if="canCreateSale"
+        color="primary"
+        prepend-icon="mdi-plus"
+        size="default"
+        to="/sales/new"
+        aria-label="إنشاء فاتورة مبيعات"
       >
-        <template #activator="{ props: tipProps }">
-          <span v-bind="tipProps">
-            <v-btn
-              color="primary"
-              prepend-icon="mdi-plus"
-              size="default"
-              :to="installmentsDisabled ? undefined : '/sales/new'"
-              :disabled="installmentsDisabled"
-              aria-label="إنشاء فاتورة مبيعات"
-            >
-              انشاء فاتورة مبيعات
-            </v-btn>
-          </span>
-        </template>
-      </v-tooltip>
+        انشاء فاتورة مبيعات
+      </v-btn>
     </PageHeader>
 
-    <v-card class="page-section filter-toolbar pa-3">
-      <div class="search-toolbar">
-        <SearchBar
-          :model-value="query"
-          :loading="isSearching"
-          placeholder="ابحث برقم الفاتورة، اسم الزبون، الهاتف، أو منتج داخل الفاتورة..."
-          aria-label="البحث عن فاتورة"
-          @update:model-value="onQueryChange"
-          @search="runNow"
-          @clear="clear"
-        />
-      </div>
-
-      <AdvancedFilters
-        class="mt-3"
-        :default-open="true"
-        :chips="filterChips"
-        @clear="onClearFilters"
-        @remove="onRemoveFilter"
-      >
+    <!-- Unified SmartTable: search + advanced filters + columns + export + print
+         + saved views, backed by the existing useServerSearch data engine. -->
+    <SmartTable
+      data-testid="sales-table"
+      table-key="sales-table"
+      :headers="headers"
+      :items="saleStore.sales"
+      :loading="tableLoading"
+      :error="error"
+      :total-items="saleStore.pagination.total"
+      server-side
+      :initial-load="false"
+      :page="saleStore.pagination.page"
+      :page-size="saleStore.pagination.limit"
+      :search="query"
+      :search-placeholder="'ابحث برقم الفاتورة، اسم الزبون، الهاتف، أو منتج داخل الفاتورة...'"
+      :filter-chips="filterChips"
+      :row-actions="rowActions"
+      show-export
+      show-print
+      show-saved-views
+      print-title="قائمة المبيعات"
+      export-file-base="sales"
+      :empty-title="'لا توجد مبيعات'"
+      :empty-description="'ابدأ بإنشاء بيع جديد'"
+      empty-icon="mdi-cash-register"
+      :empty-actions="emptyStateActions"
+      @row-click="openSale"
+      @update:search="onQueryChange"
+      @search-now="runNow"
+      @clear-search="clear"
+      @update:page="setPage"
+      @update:page-size="setPageSize"
+      @clear-filters="onClearFilters"
+      @remove-filter="onRemoveFilter"
+      @refresh="refresh"
+    >
+      <!-- Advanced filters live in the toolbar popover (page-owned controls). -->
+      <template #filters>
         <v-row dense>
           <!-- Branch filter — only for users assigned to MORE THAN ONE branch.
                Options are limited to the user's own branches (the backend also
                rejects any out-of-scope branch). -->
-          <v-col v-if="showBranchFilter" cols="12" sm="6" md="3">
+          <v-col v-if="showBranchFilter" cols="12" sm="6" md="4">
             <v-select
               v-model="filters.branchId"
               :items="allowedBranchOptions"
@@ -71,7 +80,7 @@
             ></v-select>
           </v-col>
 
-          <v-col cols="12" sm="6" md="3">
+          <v-col cols="12" sm="6" md="4">
             <v-select
               v-model="filters.status"
               :items="statusOptions"
@@ -85,7 +94,7 @@
             ></v-select>
           </v-col>
 
-          <v-col cols="12" sm="6" md="3">
+          <v-col cols="12" sm="6" md="4">
             <v-select
               v-model="filters.paymentType"
               :items="paymentTypeOptions"
@@ -99,7 +108,7 @@
             ></v-select>
           </v-col>
 
-          <v-col v-if="canReadCustomers" cols="12" sm="6" md="3">
+          <v-col v-if="canReadCustomers" cols="12" sm="6" md="4">
             <v-autocomplete
               v-model="filters.customer"
               :items="customers"
@@ -130,7 +139,7 @@
             </v-autocomplete>
           </v-col>
 
-          <v-col cols="6" md="3">
+          <v-col cols="6" sm="6" md="4">
             <v-text-field
               v-model="filters.startDate"
               label="من تاريخ"
@@ -143,7 +152,7 @@
             ></v-text-field>
           </v-col>
 
-          <v-col cols="6" md="3">
+          <v-col cols="6" sm="6" md="4">
             <v-text-field
               v-model="filters.endDate"
               label="إلى تاريخ"
@@ -156,7 +165,7 @@
             ></v-text-field>
           </v-col>
 
-          <v-col cols="6" md="3">
+          <v-col cols="6" sm="6" md="4">
             <v-text-field
               v-model.number="filters.minTotal"
               type="number"
@@ -170,7 +179,7 @@
             ></v-text-field>
           </v-col>
 
-          <v-col cols="6" md="3">
+          <v-col cols="6" sm="6" md="4">
             <v-text-field
               v-model.number="filters.maxTotal"
               type="number"
@@ -184,240 +193,100 @@
             ></v-text-field>
           </v-col>
         </v-row>
-      </AdvancedFilters>
-    </v-card>
+      </template>
 
-    <v-card class="page-section">
-      <div class="section-title">
-        <span class="section-title__label">
-          <v-icon size="20" color="primary">mdi-format-list-bulleted</v-icon>
-          قائمة المبيعات
-        </span>
-        <v-btn
-          variant="text"
+      <!-- Custom cells (search highlighting, chips, badges) pass straight through. -->
+      <template #[`item.invoiceNumber`]="{ item }">
+        <div class="d-flex flex-column py-1">
+          <span class="font-weight-medium">
+            <template v-for="(seg, i) in highlightOf(item.invoiceNumber)" :key="i">
+              <mark v-if="seg.match" class="search-hl">{{ seg.text }}</mark>
+              <template v-else>{{ seg.text }}</template>
+            </template>
+          </span>
+          <MatchBadge
+            v-if="item.matchedField"
+            :field="item.matchedField"
+            :value="item.matchedValue"
+            class="mt-1 align-self-start"
+          />
+        </div>
+      </template>
+      <template #[`item.customer`]="{ item }">
+        <template v-for="(seg, i) in highlightOf(item.customer)" :key="i">
+          <mark v-if="seg.match" class="search-hl">{{ seg.text }}</mark>
+          <template v-else>{{ seg.text }}</template>
+        </template>
+      </template>
+      <template #[`item.customerPhone`]="{ item }">
+        <template v-for="(seg, i) in highlightOf(item.customerPhone)" :key="i">
+          <mark v-if="seg.match" class="search-hl">{{ seg.text }}</mark>
+          <template v-else>{{ seg.text }}</template>
+        </template>
+      </template>
+      <template #[`item.total`]="{ item }">
+        <div>
+          <div
+            :class="
+              Number(item.returnedTotal) > 0
+                ? 'text-decoration-line-through text-grey text-caption'
+                : ''
+            "
+          >
+            {{ formatCurrency(item.total, item.currency) }}
+          </div>
+          <div v-if="Number(item.returnedTotal) > 0" class="text-success font-weight-bold">
+            {{
+              formatCurrency(
+                Math.max(0, Number(item.total) - Number(item.returnedTotal)),
+                item.currency
+              )
+            }}
+          </div>
+        </div>
+      </template>
+      <template #[`item.status`]="{ item }">
+        <v-chip
+          v-if="getReturnState(item) === 'full'"
+          color="warning"
           size="small"
-          prepend-icon="mdi-download"
-          :disabled="saleStore.sales.length === 0"
-          aria-label="تصدير البيانات"
-          @click="handleExport"
+          prepend-icon="mdi-keyboard-return"
+          :title="`قيمة الإرجاع: ${formatCurrency(item.returnedTotal, item.currency)}`"
         >
-          تصدير
-        </v-btn>
-      </div>
-      <v-alert
-        v-if="error"
-        type="error"
-        variant="tonal"
-        density="comfortable"
-        class="mx-3 mt-3"
-        closable
-        @click:close="dismissError"
-      >
-        تعذر تنفيذ البحث حالياً، حاول مرة أخرى.
-        <template #append>
-          <v-btn size="small" variant="text" @click="refresh">إعادة المحاولة</v-btn>
-        </template>
-      </v-alert>
+          مُرجع كلياً
+        </v-chip>
+        <v-chip
+          v-else-if="getReturnState(item) === 'partial'"
+          color="warning"
+          size="small"
+          variant="tonal"
+          prepend-icon="mdi-keyboard-return"
+          :title="`قيمة الإرجاع: ${formatCurrency(item.returnedTotal, item.currency)}`"
+        >
+          مُرجع جزئياً
+        </v-chip>
+        <v-chip v-else :color="getStatusColor(item.status)" size="small">
+          {{ getStatusText(item.status) }}
+        </v-chip>
+      </template>
+      <template #[`item.createdAt`]="{ item }">
+        {{ toYmd(item.createdAt) }}
+      </template>
 
-      <TableSkeleton v-if="initialLoading" :rows="8" :columns="headers.length" class="pa-3" />
-      <v-data-table
-        v-else
-        :headers="headers"
-        :items="saleStore.sales"
-        :loading="tableLoading"
-        :items-per-page="saleStore.pagination.limit"
-        :page="saleStore.pagination.page"
-        :items-length="saleStore.pagination.total"
-        server-items-length
-        hide-default-footer
-        class="cursor-pointer"
-        density="comfortable"
-        @click:row="viewSale"
-      >
-        <template #no-data>
-          <EmptyState
-            v-if="hasActiveQuery"
-            title="لا توجد نتائج مطابقة"
-            description="حاول البحث بالاسم أو الرقم أو الباركود"
-            icon="mdi-magnify-close"
-            compact
-          />
-          <EmptyState
-            v-else
-            title="لا توجد مبيعات"
-            description="ابدأ بإنشاء بيع جديد"
-            icon="mdi-cash-register"
-            :actions="emptyStateActions"
-            compact
-          />
-        </template>
-        <template #[`item.invoiceNumber`]="{ item }">
-          <div class="d-flex flex-column py-1">
-            <span class="font-weight-medium">
-              <template v-for="(seg, i) in highlightOf(item.invoiceNumber)" :key="i">
-                <mark v-if="seg.match" class="search-hl">{{ seg.text }}</mark>
-                <template v-else>{{ seg.text }}</template>
-              </template>
-            </span>
-            <MatchBadge
-              v-if="item.matchedField"
-              :field="item.matchedField"
-              :value="item.matchedValue"
-              class="mt-1 align-self-start"
-            />
-          </div>
-        </template>
-        <template #[`item.customer`]="{ item }">
-          <template v-for="(seg, i) in highlightOf(item.customer)" :key="i">
-            <mark v-if="seg.match" class="search-hl">{{ seg.text }}</mark>
-            <template v-else>{{ seg.text }}</template>
-          </template>
-        </template>
-        <template #[`item.customerPhone`]="{ item }">
-          <template v-for="(seg, i) in highlightOf(item.customerPhone)" :key="i">
-            <mark v-if="seg.match" class="search-hl">{{ seg.text }}</mark>
-            <template v-else>{{ seg.text }}</template>
-          </template>
-        </template>
-        <template #[`item.total`]="{ item }">
-          <div>
-            <div
-              :class="
-                Number(item.returnedTotal) > 0
-                  ? 'text-decoration-line-through text-grey text-caption'
-                  : ''
-              "
-            >
-              {{ formatCurrency(item.total, item.currency) }}
-            </div>
-            <div v-if="Number(item.returnedTotal) > 0" class="text-success font-weight-bold">
-              {{
-                formatCurrency(
-                  Math.max(0, Number(item.total) - Number(item.returnedTotal)),
-                  item.currency
-                )
-              }}
-            </div>
-          </div>
-        </template>
-        <template #[`item.status`]="{ item }">
-          <v-chip
-            v-if="getReturnState(item) === 'full'"
-            color="warning"
-            size="small"
-            prepend-icon="mdi-keyboard-return"
-            :title="`قيمة الإرجاع: ${formatCurrency(item.returnedTotal, item.currency)}`"
-          >
-            مُرجع كلياً
-          </v-chip>
-          <v-chip
-            v-else-if="getReturnState(item) === 'partial'"
-            color="warning"
-            size="small"
-            variant="tonal"
-            prepend-icon="mdi-keyboard-return"
-            :title="`قيمة الإرجاع: ${formatCurrency(item.returnedTotal, item.currency)}`"
-          >
-            مُرجع جزئياً
-          </v-chip>
-          <v-chip v-else :color="getStatusColor(item.status)" size="small">
-            {{ getStatusText(item.status) }}
-          </v-chip>
-        </template>
-        <template #[`item.createdAt`]="{ item }">
-          {{ toYmd(item.createdAt) }}
-        </template>
+      <template #[`item.paymentType`]="{ item }">
+        {{ getPaymentTypeText(item.paymentType) }}
+      </template>
 
-        <template #[`item.paymentType`]="{ item }">
-          {{ getPaymentTypeText(item.paymentType) }}
-        </template>
+      <template #[`item.priceType`]="{ item }">
+        <v-chip size="x-small" variant="tonal" color="indigo">
+          {{ priceTierLabel(item.priceType) }}
+        </v-chip>
+      </template>
 
-        <template #[`item.priceType`]="{ item }">
-          <v-chip size="x-small" variant="tonal" color="indigo">
-            {{ priceTierLabel(item.priceType) }}
-          </v-chip>
-        </template>
-
-        <template #[`item.branch`]="{ item }">
-          {{ item?.branchName ?? item?.branch?.name ?? 'غير محدد' }}
-        </template>
-
-        <template #[`item.actions`]="{ item }">
-          <!-- أزرار المسودات -->
-          <template v-if="item.status === 'draft'">
-            <v-tooltip
-              v-if="draftsVisible"
-              location="top"
-              :text="draftsReason || 'إكمال المسودة'"
-              :disabled="!draftsDisabled"
-            >
-              <template #activator="{ props: tipProps }">
-                <span v-bind="tipProps">
-                  <v-btn
-                    size="small"
-                    variant="text"
-                    :color="draftsDisabled ? 'grey' : 'primary'"
-                    icon
-                    :disabled="draftsDisabled"
-                    :title="draftsDisabled ? draftsReason : 'إكمال المسودة'"
-                    @click.stop="completeDraft(item.id)"
-                  >
-                    <v-icon size="20">mdi-check</v-icon>
-                  </v-btn>
-                </span>
-              </template>
-            </v-tooltip>
-            <v-btn
-              size="small"
-              variant="text"
-              color="error"
-              icon
-              :disabled="!canDelete"
-              title="حذف المسودة"
-              @click.stop="deleteSale(item.id)"
-            >
-              <v-icon size="20">mdi-delete</v-icon>
-            </v-btn>
-          </template>
-        </template>
-      </v-data-table>
-
-      <PaginationControls
-        :pagination="saleStore.pagination"
-        @update:page="setPage"
-        @update:items-per-page="setPageSize"
-      />
-    </v-card>
-
-    <!-- Delete Sale Dialog -->
-    <ConfirmDialog
-      v-model="deleteSaleDialog"
-      :title="selectedSaleForDelete?.status === 'draft' ? 'حذف المسودة' : 'إلغاء البيع'"
-      :message="
-        selectedSaleForDelete?.status === 'draft'
-          ? 'هل أنت متأكد من حذف هذه المسودة؟'
-          : 'هل أنت متأكد من رغبتك في إلغاء هذه المبيعات؟'
-      "
-      :details="selectedSaleForDelete ? `الفاتورة: ${selectedSaleForDelete.invoiceNumber}` : ''"
-      type="error"
-      confirm-text="نعم، تأكيد"
-      cancel-text="إلغاء"
-      @confirm="confirmDeleteSale"
-      @cancel="deleteSaleDialog = false"
-    />
-
-    <!-- Restore Sale Dialog -->
-    <ConfirmDialog
-      v-model="restoreSaleDialog"
-      title="استعادة البيع"
-      message="هل أنت متأكد من رغبتك في استعادة هذه المبيعات؟"
-      :details="selectedSaleForRestore ? `الفاتورة: ${selectedSaleForRestore.invoiceNumber}` : ''"
-      type="info"
-      confirm-text="نعم، استعادة"
-      cancel-text="إلغاء"
-      @confirm="confirmRestoreSale"
-      @cancel="restoreSaleDialog = false"
-    />
+      <template #[`item.branch`]="{ item }">
+        {{ item?.branchName ?? item?.branch?.name ?? 'غير محدد' }}
+      </template>
+    </SmartTable>
   </div>
 </template>
 
@@ -428,22 +297,15 @@ import { useSaleStore } from '@/stores/sale';
 import { useCustomerStore } from '@/stores/customer';
 import { useAuthStore } from '../../stores/auth';
 import { useInventoryStore } from '@/stores/inventory';
-import EmptyState from '@/components/EmptyState.vue';
-import TableSkeleton from '@/components/TableSkeleton.vue';
 import { priceTierLabel } from '@/utils/productUnits';
-import ConfirmDialog from '@/components/ConfirmDialog.vue';
-import PaginationControls from '@/components/PaginationControls.vue';
 import PageHeader from '@/components/PageHeader.vue';
-import SearchBar from '@/components/SearchBar.vue';
-import AdvancedFilters from '@/components/AdvancedFilters.vue';
 import MatchBadge from '@/components/MatchBadge.vue';
+import SmartTable from '@/components/common/SmartTable';
 import { useServerSearch } from '@/composables/useServerSearch';
 import { highlightSegments } from '@/utils/highlight';
 import { formatCurrency } from '@/utils/formatters';
-import { useExport } from '@/composables/useExport';
 import { useFeatureGate } from '@/composables/useFeatureGate';
 import { usePermissions } from '@/composables/usePermissions';
-import { useNotificationStore } from '@/stores/notification';
 
 const router = useRouter();
 const saleStore = useSaleStore();
@@ -508,7 +370,6 @@ const {
 });
 
 const tableLoading = computed(() => isSearching.value || saleStore.loading);
-const initialLoading = computed(() => tableLoading.value && saleStore.sales.length === 0);
 
 const paymentTypeOptions = [
   { title: 'نقدي', value: 'cash' },
@@ -535,9 +396,6 @@ const onClearFilters = () => {
   setFilters({});
 };
 
-const dismissError = () => {
-  error.value = null;
-};
 const isAdmin = computed(() => authStore.hasPermission(['sales:delete', 'manage:sales']));
 const canDelete = computed(() => isAdmin.value);
 // Wholesale/agent price tiers (تسعير الوكلاء) — adds a "نوع السعر" column.
@@ -552,27 +410,17 @@ const draftsVisible = draftsGate.visible;
 const draftsDisabled = draftsGate.disabled;
 const draftsReason = draftsGate.reason;
 
-// Installment-sale shortcut: same disabled-with-tooltip pattern.
-const installmentsGate = useFeatureGate('installments', 'canUseInstallments');
-const canUseInstallments = computed(() => installmentsGate.enabled.value);
-const installmentsVisible = installmentsGate.visible;
-const installmentsDisabled = installmentsGate.disabled;
-const installmentsReason = installmentsGate.reason;
+// New-sale shortcut visibility depends ONLY on the sales-create permission —
+// the unified «فاتورة بيع جديدة» works for cash invoices regardless of the
+// installments feature flag.
+const canCreateSale = computed(() => authStore.hasPermission('sales:create'));
 
-// "New sale" empty-state action is the installment-sale entry point — only
-// surface it when installments are enabled AND the user can use them.
+// "New sale" empty-state action opens the unified invoice page; surface it
+// whenever the user can create sales (not tied to installments).
 const emptyStateActions = computed(() => {
-  if (!canUseInstallments.value) return [];
+  if (!canCreateSale.value) return [];
   return [{ text: 'بيع جديد', icon: 'mdi-plus', to: '/sales/new', color: 'primary' }];
 });
-
-const deleteSaleDialog = ref(false);
-const restoreSaleDialog = ref(false);
-const selectedSaleForDelete = ref(null);
-const selectedSaleForRestore = ref(null);
-
-const { exportToCSV } = useExport();
-const notificationStore = useNotificationStore();
 
 // Drop the "draft" filter chip when draftInvoices is disabled — there are no
 // draft sales to filter for, and showing the chip is misleading.
@@ -609,22 +457,103 @@ const filterChips = computed(() => {
   return chips;
 });
 
-const hasActiveQuery = computed(() => !!query.value.trim() || filterChips.value.length > 0);
-
 const headers = computed(() => [
   { title: 'رقم الفاتورة', key: 'invoiceNumber' },
   { title: 'العميل', key: 'customer' },
   { title: 'رقم الهاتف', key: 'customerPhone' },
-  { title: 'المبلغ الإجمالي', key: 'total' },
-  { title: 'نوع الدفع', key: 'paymentType' },
+  { title: 'المبلغ الإجمالي', key: 'total', format: 'currency', align: 'end' },
+  { title: 'نوع الدفع', key: 'paymentType', exportValue: (r) => getPaymentTypeText(r.paymentType) },
   // Price tier used on the invoice — only when the agentPricing feature is on.
-  ...(agentPricingOn.value ? [{ title: 'نوع السعر', key: 'priceType', sortable: false }] : []),
-  { title: 'الحالة', key: 'status' },
-  { title: 'التاريخ', key: 'createdAt' },
-  { title: 'بواسطة', key: 'createdBy', sortable: false },
-  { title: 'الفرع', key: 'branch', sortable: false },
-  { title: 'الاجرائات', key: 'actions', sortable: false },
+  ...(agentPricingOn.value
+    ? [{ title: 'نوع السعر', key: 'priceType', exportValue: (r) => priceTierLabel(r.priceType) }]
+    : []),
+  { title: 'الحالة', key: 'status', exportValue: (r) => getStatusText(r.status) },
+  { title: 'التاريخ', key: 'createdAt', exportValue: (r) => toYmd(r.createdAt) },
+  { title: 'بواسطة', key: 'createdBy' },
+  {
+    title: 'الفرع',
+    key: 'branch',
+    exportValue: (r) => r.branchName ?? r.branch?.name ?? 'غير محدد',
+  },
 ]);
+
+// Row actions replace the old per-row buttons + the standalone cancel/restore
+// ConfirmDialogs. Each is gated by its existing permission AND the row's state
+// (mirroring the prior v-if conditions): view for non-drafts, complete/delete
+// for drafts, cancel for live sales, restore for cancelled ones. SmartTable's
+// built-in confirm runs before the destructive handlers.
+const rowActions = computed(() => {
+  const canDel = canDelete.value;
+  const dVisible = draftsVisible.value;
+  const dDisabled = draftsDisabled.value;
+  const dReason = draftsReason.value;
+  return [
+    {
+      key: 'view',
+      icon: 'mdi-eye-outline',
+      title: 'عرض الفاتورة',
+      hidden: (item) => item.status === 'draft',
+      handler: (item) => openSale(item),
+    },
+    {
+      key: 'complete',
+      icon: 'mdi-check',
+      color: 'primary',
+      title: dDisabled ? dReason || 'إكمال المسودة' : 'إكمال المسودة',
+      hidden: (item) => item.status !== 'draft' || !dVisible,
+      disabled: () => dDisabled,
+      handler: (item) => completeDraft(item),
+    },
+    {
+      key: 'cancel',
+      icon: 'mdi-cancel',
+      color: 'error',
+      danger: true,
+      title: 'إلغاء البيع',
+      hidden: (item) => !canDel || item.status === 'draft' || item.status === 'cancelled',
+      handler: (item) => cancelSaleNow(item),
+      confirm: (item) => ({
+        title: 'إلغاء البيع',
+        message: 'هل أنت متأكد من رغبتك في إلغاء هذه المبيعات؟',
+        details: `الفاتورة: ${item.invoiceNumber}`,
+        type: 'error',
+        confirmText: 'نعم، تأكيد',
+      }),
+    },
+    {
+      key: 'delete',
+      icon: 'mdi-delete',
+      color: 'error',
+      danger: true,
+      title: 'حذف المسودة',
+      hidden: (item) => item.status !== 'draft',
+      disabled: () => !canDel,
+      handler: (item) => removeDraft(item),
+      confirm: (item) => ({
+        title: 'حذف المسودة',
+        message: 'هل أنت متأكد من حذف هذه المسودة؟',
+        details: `الفاتورة: ${item.invoiceNumber}`,
+        type: 'error',
+        confirmText: 'نعم، تأكيد',
+      }),
+    },
+    {
+      key: 'restore',
+      icon: 'mdi-restore',
+      color: 'info',
+      title: 'استعادة البيع',
+      hidden: (item) => !canDel || item.status !== 'cancelled',
+      handler: (item) => restoreSaleNow(item),
+      confirm: (item) => ({
+        title: 'استعادة البيع',
+        message: 'هل أنت متأكد من رغبتك في استعادة هذه المبيعات؟',
+        details: `الفاتورة: ${item.invoiceNumber}`,
+        type: 'info',
+        confirmText: 'نعم، استعادة',
+      }),
+    },
+  ];
+});
 
 const toYmd = (date) => {
   const d = new Date(date);
@@ -678,7 +607,10 @@ const draftRouteFor = (sale) => {
   return { name: target, query: { draftId: sale.id } };
 };
 
-const viewSale = (_event, { item }) => {
+// Row click + the "view" action: drafts resume in their editor, everything
+// else opens the read-only invoice details.
+const openSale = (item) => {
+  if (!item) return;
   if (item.status === 'draft') {
     router.push(draftRouteFor(item));
   } else {
@@ -686,93 +618,44 @@ const viewSale = (_event, { item }) => {
   }
 };
 
-const deleteSale = async (id) => {
-  // التحقق من نوع العملية (مسودة أو بيع عادي)
-  const sale = saleStore.sales.find((s) => s.id === id);
-
-  selectedSaleForDelete.value = sale;
-  deleteSaleDialog.value = true;
+const completeDraft = (item) => {
+  if (!item) return;
+  router.push(draftRouteFor(item));
 };
 
-const confirmDeleteSale = async () => {
-  const sale = selectedSaleForDelete.value;
-  if (!sale) return;
-
-  const isDraft = sale.status === 'draft';
-
-  if (isDraft) {
-    // حذف المسودة مباشرة
-    try {
-      await saleStore.removeSale(sale.id);
-      refresh();
-      deleteSaleDialog.value = false;
-    } catch {
-      // Error handled by store
-    }
-  } else {
-    // إلغاء البيع العادي
-    try {
-      await saleStore.cancelSale(sale.id);
-      refresh();
-      deleteSaleDialog.value = false;
-    } catch {
-      // Error handled by store
-    }
-  }
-};
-
-const restoreSale = async (id) => {
-  const sale = saleStore.sales.find((s) => s.id === id);
-  selectedSaleForRestore.value = sale;
-  restoreSaleDialog.value = true;
-};
-
-const confirmRestoreSale = async () => {
-  const sale = selectedSaleForRestore.value;
-  if (!sale) return;
-
+const removeDraft = async (item) => {
   try {
-    await saleStore.restoreSale(sale.id);
+    await saleStore.removeSale(item.id);
     refresh();
-    restoreSaleDialog.value = false;
   } catch {
     // Error handled by store
   }
 };
 
-const completeDraft = async (id) => {
-  const sale = saleStore.sales.find((s) => s.id === id);
-  if (!sale) return;
-  router.push(draftRouteFor(sale));
+const cancelSaleNow = async (item) => {
+  try {
+    await saleStore.cancelSale(item.id);
+    refresh();
+  } catch {
+    // Error handled by store
+  }
 };
 
-const handleExport = () => {
+const restoreSaleNow = async (item) => {
   try {
-    const exportHeaders = headers.value.map((h) => ({
-      title: h.title,
-      key: h.key,
-      value: (item) => {
-        if (h.key === 'total') return formatCurrency(item.total, item.currency);
-        if (h.key === 'status') return getStatusText(item.status);
-        if (h.key === 'paymentType') return getPaymentTypeText(item.paymentType);
-        if (h.key === 'priceType') return priceTierLabel(item.priceType);
-        if (h.key === 'createdAt') return toYmd(item.createdAt);
-        return item[h.key] || '';
-      },
-    }));
-    exportToCSV(saleStore.sales, exportHeaders, 'sales.csv');
-    notificationStore.success('تم تصدير البيانات بنجاح');
+    await saleStore.restoreSale(item.id);
+    refresh();
   } catch {
-    notificationStore.error('فشل تصدير البيانات');
+    // Error handled by store
   }
 };
 
 // دالة البحث المخصصة: البحث بالاسم أو رقم الهاتف
 const customFilter = (itemText, queryText, item) => {
-  const query = queryText.toLowerCase();
+  const queryStr = queryText.toLowerCase();
   const name = item.raw.name?.toLowerCase() || '';
   const phone = item.raw.phone?.toLowerCase() || '';
-  return name.includes(query) || phone.includes(query);
+  return name.includes(queryStr) || phone.includes(queryStr);
 };
 
 onMounted(async () => {
@@ -789,12 +672,6 @@ onMounted(async () => {
 </script>
 
 <style scoped lang="scss">
-.search-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-}
-
 .search-hl {
   background-color: rgba(var(--v-theme-warning), 0.38);
   color: inherit;

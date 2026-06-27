@@ -249,6 +249,16 @@
                   :to="`/sales/${item.id}`"
                   aria-label="عرض الفاتورة"
                 />
+                <v-btn
+                  v-if="canCollect && item.status === 'pending' && item.remaining > 0"
+                  icon="mdi-cash-plus"
+                  size="x-small"
+                  variant="text"
+                  color="success"
+                  title="تسديد دفعة"
+                  aria-label="تسديد دفعة"
+                  @click="openSalePayDialog(item)"
+                />
               </template>
             </v-data-table>
           </v-window-item>
@@ -801,12 +811,78 @@
         </v-card-text>
       </v-card>
     </v-dialog>
+
+    <!-- Settle an open invoice's balance directly from the profile, via the SAME
+         unified endpoint SaleDetails uses (POST /sales/:id/payment). Works for any
+         pending sale with a balance — installment OR cash partial/deferred. -->
+    <v-dialog v-model="payDialog" max-width="460" persistent>
+      <v-card v-if="paySale">
+        <v-card-title class="d-flex align-center gap-2">
+          <v-icon color="success">mdi-cash-plus</v-icon>
+          <span>تسديد دفعة — {{ paySale.invoiceNumber }}</span>
+        </v-card-title>
+        <v-divider />
+        <v-card-text class="pt-4">
+          <div class="d-flex justify-space-between mb-3 text-body-2">
+            <span class="text-medium-emphasis">المبلغ المتبقي</span>
+            <strong class="text-error">{{ formatCurrency(paySale.remaining, paySale.currency) }}</strong>
+          </div>
+          <v-text-field
+            v-model.number="payForm.amount"
+            type="number"
+            label="مبلغ الدفعة"
+            :suffix="paySale.currency"
+            variant="outlined"
+            density="comfortable"
+            min="0"
+            :max="paySale.remaining"
+            :rules="[
+              (v) => Number(v) > 0 || 'أدخل مبلغاً أكبر من صفر',
+              (v) => Number(v) <= Number(paySale.remaining) || 'مبلغ الدفعة يتجاوز المبلغ المتبقي',
+            ]"
+            class="mb-3"
+          />
+          <v-select
+            v-model="payForm.paymentMethod"
+            :items="[
+              { title: 'نقد', value: 'cash' },
+              { title: 'بطاقة', value: 'card' },
+            ]"
+            label="طريقة الدفع"
+            variant="outlined"
+            density="comfortable"
+            class="mb-3"
+          />
+          <v-text-field
+            v-model="payForm.notes"
+            label="ملاحظات (اختياري)"
+            variant="outlined"
+            density="comfortable"
+          />
+        </v-card-text>
+        <v-divider />
+        <v-card-actions>
+          <v-btn variant="text" :disabled="paySubmitting" @click="payDialog = false">إلغاء</v-btn>
+          <v-spacer />
+          <v-btn
+            color="success"
+            prepend-icon="mdi-check"
+            :loading="paySubmitting"
+            :disabled="!payValid"
+            @click="submitSalePayment"
+          >
+            تسجيل الدفعة
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, RouterLink } from 'vue-router';
+import api from '@/plugins/axios';
 import { useAuthStore } from '@/stores/auth';
 import { useNotificationSettingsStore } from '@/stores/notificationSettings';
 import { useNotificationStore } from '@/stores/notification';
@@ -863,6 +939,53 @@ const canEdit = computed(() => uiAccess.canManageCustomers(userRole.value));
 // rule as adding a payment), so the UI surfaces the workflow exactly when
 // the user could already record a payment elsewhere.
 const canCollect = computed(() => uiAccess.canAddPayments(userRole.value));
+
+// ── Settle an open invoice's balance directly from the profile ───────────────
+// Reuses the single backend payment service (POST /sales/:id/payment) — the same
+// one SaleDetails uses — so a cash partial/deferred debt (no installment plan)
+// is collectable here too, not only from the invoice page. `loadProfile()` is a
+// const defined later; it's only invoked on submit (after full script eval).
+const payDialog = ref(false);
+const paySale = ref(null);
+const paySubmitting = ref(false);
+const payForm = reactive({ amount: 0, paymentMethod: 'cash', notes: '' });
+
+const payValid = computed(
+  () =>
+    !!paySale.value &&
+    Number(payForm.amount) > 0 &&
+    Number(payForm.amount) <= Number(paySale.value.remaining)
+);
+
+const openSalePayDialog = (sale) => {
+  paySale.value = sale;
+  payForm.amount = Number(sale.remaining) || 0;
+  payForm.paymentMethod = 'cash';
+  payForm.notes = '';
+  payDialog.value = true;
+};
+
+const submitSalePayment = async () => {
+  if (!payValid.value) return;
+  paySubmitting.value = true;
+  try {
+    await api.post(`/sales/${paySale.value.id}/payment`, {
+      amount: Number(payForm.amount),
+      paymentMethod: payForm.paymentMethod,
+      notes: payForm.notes || null,
+      currency: paySale.value.currency,
+    });
+    toastStore.success('تم تسجيل الدفعة بنجاح');
+    payDialog.value = false;
+    await loadProfile();
+  } catch {
+    // The global API layer already presents the precise Arabic error (e.g.
+    // "مبلغ الدفعة يتجاوز المبلغ المتبقي"); keep the dialog open so the user
+    // can correct the amount and retry.
+  } finally {
+    paySubmitting.value = false;
+  }
+};
 // Only admins / managers with settings:manage can read messaging settings,
 // so only they can know whether the WhatsApp gate is satisfied. Hide the
 // button for everyone else.

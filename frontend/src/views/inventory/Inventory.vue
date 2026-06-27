@@ -15,8 +15,8 @@
         نقل مخزون
       </v-btn>
       <v-btn
-        data-testid="inventory-adjust-btn"
         v-if="canAdjust"
+        data-testid="inventory-adjust-btn"
         color="warning"
         variant="tonal"
         prepend-icon="mdi-tune"
@@ -61,107 +61,52 @@
       </div>
     </v-alert>
 
-    <v-card class="page-section filter-toolbar pa-3">
-      <v-row dense>
-        <v-col cols="12" md="8">
-          <v-text-field
-            v-model="search"
-            prepend-inner-icon="mdi-magnify"
-            label="البحث عن منتج بالاسم أو الرمز"
-            hide-details
-            density="comfortable"
-            variant="outlined"
-            clearable
-            @input="reload"
-            @click:clear="reload"
-          />
-        </v-col>
-        <v-col cols="12" md="4" class="d-flex align-center">
-          <v-switch
-            v-model="lowStockOnly"
-            color="error"
-            density="comfortable"
-            hide-details
-            label="عرض المنخفض فقط"
-            @update:model-value="reload"
-          />
-        </v-col>
-      </v-row>
-    </v-card>
-
-    <v-card class="page-section">
-      <v-data-table
-        data-testid="inventory-table"
-        :headers="headers"
-        :items="filteredStock"
-        :loading="inventoryStore.loading"
-        :items-per-page="25"
-        density="comfortable"
-      >
-        <template #[`item.quantity`]="{ item }">
-          <v-chip :color="item.isLowStock ? 'error' : 'success'" size="small">
-            {{ item.quantity }}
-          </v-chip>
-        </template>
-        <template #[`item.sellingPrice`]="{ item }">
-          {{ formatMoney(item.sellingPrice, item.currency) }}
-        </template>
-        <template #[`item.nearestExpiry`]="{ item }">
-          {{ item.nearestExpiry || '—' }}
-        </template>
-        <template #[`item.expiryStatus`]="{ item }">
-          <v-chip
-            size="small"
-            variant="tonal"
-            :color="
-              item.expiryStatus === 'منتهي'
-                ? 'error'
-                : item.expiryStatus?.includes('7')
-                  ? 'warning'
-                  : item.expiryStatus === 'بدون تاريخ انتهاء'
-                    ? 'grey'
-                    : 'success'
-            "
-          >
-            {{ item.expiryStatus }}
-          </v-chip>
-        </template>
-        <template #[`item.actions`]="{ item }">
-          <v-btn
-            v-if="canAdjust"
-            icon="mdi-tune"
-            size="small"
-            variant="text"
-            title="إضافة / تعديل مخزون"
-            @click="openAdjustDialog(item)"
-          >
-            <v-icon size="20">mdi-tune</v-icon>
-          </v-btn>
-          <v-btn
-            v-if="canRequestTransfer"
-            icon="mdi-transfer"
-            size="small"
-            variant="text"
-            title="نقل"
-            @click="openTransferFor(item)"
-          >
-            <v-icon size="20">mdi-transfer</v-icon>
-          </v-btn>
-        </template>
-        <template #no-data>
-          <EmptyState
-            title="لا توجد بيانات لعرضها"
-            :description="
-              inventoryStore.selectedWarehouseId
-                ? 'لا توجد منتجات تطابق هذا الفلتر — جرّب تعديل البحث.'
-                : 'اختر مخزنًا من شريط الأدوات لعرض المخزون.'
-            "
-            icon="mdi-warehouse"
-            compact
-          />
-        </template>
-      </v-data-table>
-    </v-card>
+    <!-- Unified SmartTable (client-side): the built-in search replaces the old
+         search field and the low-stock toggle becomes a boolean filter; both
+         filter the loaded warehouse stock in memory. -->
+    <SmartTable
+      v-model:filter-values="filterValues"
+      class="page-section"
+      data-testid="inventory-table"
+      table-key="inventory-table"
+      :headers="headers"
+      :items="filteredStock"
+      :loading="inventoryStore.loading"
+      item-value="productId"
+      :row-actions="rowActions"
+      :filters="filterDefs"
+      show-export
+      export-file-base="inventory"
+      print-title="تقرير المخزون"
+      search-placeholder="البحث عن منتج بالاسم أو الرمز"
+      empty-title="لا توجد بيانات لعرضها"
+      :empty-description="emptyDescription"
+      empty-icon="mdi-warehouse"
+      @refresh="reload"
+    >
+      <template #[`item.quantity`]="{ item }">
+        <v-chip :color="item.isLowStock ? 'error' : 'success'" size="small">
+          {{ item.quantity }}
+        </v-chip>
+      </template>
+      <template #[`item.expiryStatus`]="{ item }">
+        <v-chip
+          size="small"
+          variant="tonal"
+          :color="
+            item.expiryStatus === 'منتهي'
+              ? 'error'
+              : item.expiryStatus?.includes('7')
+                ? 'warning'
+                : item.expiryStatus === 'بدون تاريخ انتهاء'
+                  ? 'grey'
+                  : 'success'
+          "
+        >
+          {{ item.expiryStatus }}
+        </v-chip>
+      </template>
+    </SmartTable>
 
     <!-- Adjust dialog -->
     <v-dialog
@@ -280,8 +225,7 @@ import { useNotificationStore } from '@/stores/notification';
 import { useAuthStore } from '@/stores/auth';
 import { useProductStore } from '@/stores/product';
 import PageHeader from '@/components/PageHeader.vue';
-import EmptyState from '@/components/EmptyState.vue';
-import { formatCurrency as formatMoney } from '@/utils/formatters';
+import SmartTable from '@/components/common/SmartTable';
 import {
   getInventoryMovementTypeLabel,
   manualInventoryMovementTypes,
@@ -325,19 +269,59 @@ const createDefaultWarehouse = async () => {
   }
 };
 
-const search = ref('');
-const lowStockOnly = ref(false);
-
 const headers = [
-  { title: 'المنتج', key: 'name' },
-  { title: 'الرمز', key: 'sku' },
-  { title: 'السعر', key: 'sellingPrice' },
-  { title: 'الكمية', key: 'quantity' },
-  { title: 'الحد الأدنى', key: 'lowStockThreshold' },
-  { title: 'أقرب تاريخ انتهاء', key: 'nearestExpiry' },
-  { title: 'حالة الصلاحية', key: 'expiryStatus' },
-  { title: 'إجراءات', key: 'actions', sortable: false },
+  { title: 'المنتج', key: 'name', minWidth: 180 },
+  { title: 'الرمز', key: 'sku', format: 'sku' },
+  { title: 'السعر', key: 'sellingPrice', format: 'currency', align: 'end', searchable: false },
+  { title: 'الكمية', key: 'quantity', align: 'end', searchable: false },
+  { title: 'الحد الأدنى', key: 'lowStockThreshold', format: 'number', align: 'end', searchable: false },
+  { title: 'أقرب تاريخ انتهاء', key: 'nearestExpiry', format: 'date', searchable: false },
+  { title: 'حالة الصلاحية', key: 'expiryStatus', searchable: false },
 ];
+
+// Low-stock toggle → a client-side boolean filter (predicate handles 1/0/bool).
+const filterDefs = [
+  {
+    key: 'lowStock',
+    type: 'boolean',
+    label: 'حالة المخزون',
+    trueLabel: 'المنخفض فقط',
+    falseLabel: 'ضمن الحد',
+    predicate: (row, val) => (val === true ? !!row.isLowStock : !row.isLowStock),
+  },
+];
+const filterValues = ref({});
+
+const emptyDescription = computed(() =>
+  inventoryStore.selectedWarehouseId
+    ? 'لا توجد منتجات في هذا المخزن — أضف مخزوناً أو عدّل البحث.'
+    : 'اختر مخزنًا من شريط الأدوات لعرض المخزون.'
+);
+
+// Row actions: adjust + transfer, both primary (inline) like the original,
+// each gated on its existing capability.
+const rowActions = computed(() => {
+  const list = [];
+  if (canAdjust.value) {
+    list.push({
+      key: 'adjust',
+      icon: 'mdi-tune',
+      title: 'إضافة / تعديل مخزون',
+      primary: true,
+      handler: (item) => openAdjustDialog(item),
+    });
+  }
+  if (canRequestTransfer.value) {
+    list.push({
+      key: 'transfer',
+      icon: 'mdi-transfer',
+      title: 'نقل',
+      primary: true,
+      handler: (item) => openTransferFor(item),
+    });
+  }
+  return list;
+});
 
 const expiryMap = ref(new Map());
 const filteredStock = computed(() =>
@@ -357,10 +341,7 @@ const reload = async () => {
   // Load the warehouse stock and the expiry alerts in parallel so the page's
   // base data is ready together — the post-create auto-open waits on this.
   const [, alerts] = await Promise.all([
-    inventoryStore.fetchWarehouseStock(inventoryStore.selectedWarehouseId, {
-      search: search.value || undefined,
-      lowStockOnly: lowStockOnly.value || undefined,
-    }),
+    inventoryStore.fetchWarehouseStock(inventoryStore.selectedWarehouseId),
     inventoryStore.fetchExpiryAlerts({
       warehouseId: inventoryStore.selectedWarehouseId,
     }),
@@ -563,16 +544,6 @@ const unitOptionsForSelected = computed(() => {
   }));
 });
 
-const conversionForSelected = computed(() => {
-  const units = productUnitsCache.value.get(adjustForm.value.productId) || [];
-  const u = units.find((x) => x.id === adjustForm.value.unitId);
-  return Number(u?.conversionFactor) || 1;
-});
-
-const baseUnitNameForSelected = computed(() => {
-  const units = productUnitsCache.value.get(adjustForm.value.productId) || [];
-  return units.find((u) => u.isBase)?.name || 'قطعة';
-});
 const movementTypeOptions = manualInventoryMovementTypes.map((value) => ({
   value,
   title: getInventoryMovementTypeLabel(value),

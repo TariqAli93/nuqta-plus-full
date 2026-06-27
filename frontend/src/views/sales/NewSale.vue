@@ -81,7 +81,9 @@
             :currency="sale.currency"
             :total="total"
             :received-amount="sale.receivedAmount"
-            :change-amount="changeAmount"
+            :remaining-amount="remainingAmount"
+            :payment-status="paymentStatus"
+            :has-customer="!!sale.customerId"
             @update:received-amount="setReceivedAmount"
           />
 
@@ -131,9 +133,10 @@
             :total="total"
             :interest-value="interestValue"
             :total-with-interest="totalWithInterest"
-            :paid-amount="sale.paidAmount"
+            :paid-amount="paidAmount"
             :remaining-amount="remainingAmount"
             :change-amount="changeAmount"
+            :payment-status="paymentStatus"
             :payment-type="sale.paymentType"
             :discount-type="sale.discountType"
             :discount-value="sale.discountValue"
@@ -245,7 +248,9 @@ const {
   totalWithInterest,
   actualInterestRate,
   installmentAmount,
+  paidAmount,
   remainingAmount,
+  paymentStatus,
   changeAmount,
   installmentSchedule,
 } = calc;
@@ -263,11 +268,16 @@ const agentPricingOn = computed(() => authStore.hasFeature('agentPricing'));
 // Patch installment fields from the child form (avoids mutating its prop).
 const patchSale = (patch) => Object.assign(sale.value, patch);
 
-// Force cash if the installments module is (or becomes) disabled.
+// Belt-and-suspenders guard: installments can only be the ACTIVE payment type
+// when the feature is enabled. This watches BOTH the payment type and the flag,
+// so it also catches a programmatic / v-model change and a loaded draft whose
+// stored paymentType is 'installment'. Coercing to cash re-triggers the form's
+// own paymentType watcher, which safely resets the installment fields. Setting
+// it to 'cash' re-runs this watcher with a no-op, so there is no loop.
 watch(
-  installmentsEnabled,
-  (on) => {
-    if (!on && sale.value.paymentType === 'installment') sale.value.paymentType = 'cash';
+  () => [sale.value.paymentType, installmentsEnabled.value],
+  ([type, enabled]) => {
+    if (type === 'installment' && !enabled) sale.value.paymentType = 'cash';
   },
   { immediate: true }
 );

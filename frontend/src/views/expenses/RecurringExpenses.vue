@@ -34,82 +34,45 @@
       text="المصروف الثابت يولّد قيد مصروف عادي في موعد استحقاقه، فيظهر في كل التقارير والأرباح تلقائياً. لو كان البرنامج مغلقاً وقت الاستحقاق تُنشأ المصاريف الفائتة عند التشغيل."
     />
 
-    <v-card class="page-section">
-      <div class="section-title">
-        <span class="section-title__label">
-          <v-icon size="20" color="primary">mdi-format-list-bulleted</v-icon>
-          قائمة المصاريف الثابتة
+    <!-- Unified SmartTable (client-side): the recurring-expense list with
+         search + columns + export. The overdue indicator and the active/paused
+         toggle are preserved exactly. -->
+    <SmartTable
+      class="page-section"
+      table-key="recurring-expenses-table"
+      :headers="headers"
+      :items="items"
+      :loading="loading"
+      :row-actions="rowActions"
+      show-export
+      export-file-base="recurring-expenses"
+      print-title="قائمة المصاريف الثابتة"
+      search-placeholder="ابحث في المصاريف الثابتة بالاسم أو الفئة..."
+      empty-title="لا توجد مصاريف ثابتة"
+      empty-description="أضف مصروفاً ثابتاً (مثل الإيجار أو الرواتب) ليُسجَّل تلقائياً عند موعده."
+      empty-icon="mdi-calendar-sync"
+      @refresh="reloadList"
+    >
+      <template #[`item.amount`]="{ item }">
+        <span class="font-weight-bold">{{ formatCurrency(item.amount, item.currency) }}</span>
+      </template>
+      <template #[`item.category`]="{ item }">
+        <v-chip size="small" variant="tonal">{{ categoryLabel(item.category) }}</v-chip>
+      </template>
+      <template #[`item.schedule`]="{ item }">
+        {{ scheduleLabel(item) }}
+      </template>
+      <template #[`item.nextDueDate`]="{ item }">
+        <span :class="{ 'text-error': item.isActive && isOverdue(item.nextDueDate) }">
+          {{ item.isActive ? item.nextDueDate || '—' : '—' }}
         </span>
-      </div>
-      <v-data-table
-        :headers="headers"
-        :items="items"
-        :loading="loading"
-        density="comfortable"
-        items-per-page="25"
-      >
-        <template #loading>
-          <TableSkeleton :rows="5" :columns="headers.length" />
-        </template>
-        <template #[`item.amount`]="{ item }">
-          <span class="font-weight-bold">{{ formatCurrency(item.amount, item.currency) }}</span>
-        </template>
-        <template #[`item.category`]="{ item }">
-          <v-chip size="small" variant="tonal">{{ categoryLabel(item.category) }}</v-chip>
-        </template>
-        <template #[`item.schedule`]="{ item }">
-          {{ scheduleLabel(item) }}
-        </template>
-        <template #[`item.lastRunDate`]="{ item }">
-          {{ item.lastRunDate || '—' }}
-        </template>
-        <template #[`item.nextDueDate`]="{ item }">
-          <span :class="{ 'text-error': item.isActive && isOverdue(item.nextDueDate) }">
-            {{ item.isActive ? item.nextDueDate || '—' : '—' }}
-          </span>
-        </template>
-        <template #[`item.isActive`]="{ item }">
-          <v-chip :color="item.isActive ? 'success' : 'grey'" size="small" variant="tonal">
-            {{ item.isActive ? 'فعّال' : 'متوقف' }}
-          </v-chip>
-        </template>
-        <template #[`item.actions`]="{ item }">
-          <v-btn
-            v-if="canManage"
-            :icon="item.isActive ? 'mdi-pause' : 'mdi-play'"
-            size="small"
-            variant="text"
-            :title="item.isActive ? 'إيقاف مؤقت' : 'تفعيل'"
-            @click="toggleActive(item)"
-          />
-          <v-btn
-            v-if="canManage"
-            icon="mdi-pencil"
-            size="small"
-            variant="text"
-            title="تعديل"
-            @click="openEdit(item)"
-          />
-          <v-btn
-            v-if="canDelete"
-            icon="mdi-delete"
-            size="small"
-            variant="text"
-            color="error"
-            title="حذف"
-            @click="confirmDelete(item)"
-          />
-        </template>
-        <template #no-data>
-          <EmptyState
-            title="لا توجد مصاريف ثابتة"
-            description="أضف مصروفاً ثابتاً (مثل الإيجار أو الرواتب) ليُسجَّل تلقائياً عند موعده."
-            icon="mdi-calendar-sync"
-            compact
-          />
-        </template>
-      </v-data-table>
-    </v-card>
+      </template>
+      <template #[`item.isActive`]="{ item }">
+        <v-chip :color="item.isActive ? 'success' : 'grey'" size="small" variant="tonal">
+          {{ item.isActive ? 'فعّال' : 'متوقف' }}
+        </v-chip>
+      </template>
+    </SmartTable>
 
     <!-- Create/Edit dialog -->
     <v-dialog v-model="dialog" max-width="560">
@@ -302,8 +265,7 @@ import { useTreasuryStore } from '@/stores/treasury';
 import { useNotificationStore } from '@/stores/notification';
 import PageHeader from '@/components/PageHeader.vue';
 import OnboardingTip from '@/components/OnboardingTip.vue';
-import EmptyState from '@/components/EmptyState.vue';
-import TableSkeleton from '@/components/TableSkeleton.vue';
+import SmartTable from '@/components/common/SmartTable';
 import { formatCurrency } from '@/utils/formatters';
 
 const route = useRoute();
@@ -411,15 +373,71 @@ function isOverdue(dateStr) {
 
 const headers = [
   { title: 'الاسم', key: 'name' },
-  { title: 'الفئة', key: 'category' },
-  { title: 'المبلغ', key: 'amount' },
-  { title: 'التكرار', key: 'schedule', sortable: false },
-  { title: 'آخر استقطاع', key: 'lastRunDate' },
-  { title: 'الاستحقاق القادم', key: 'nextDueDate' },
-  { title: 'الحالة', key: 'isActive' },
+  { title: 'الفئة', key: 'category', exportValue: (r) => categoryLabel(r.category) },
+  { title: 'المبلغ', key: 'amount', format: 'currency', align: 'end' },
+  { title: 'التكرار', key: 'schedule', sortable: false, exportValue: (r) => scheduleLabel(r) },
+  { title: 'آخر استقطاع', key: 'lastRunDate', format: 'date' },
+  {
+    title: 'الاستحقاق القادم',
+    key: 'nextDueDate',
+    exportValue: (r) => (r.isActive ? r.nextDueDate || '' : ''),
+  },
+  { title: 'الحالة', key: 'isActive', exportValue: (r) => (r.isActive ? 'فعّال' : 'متوقف') },
   { title: 'الفرع', key: 'branchName' },
-  { title: '', key: 'actions', sortable: false, align: 'end' },
 ];
+
+const reloadList = () => store.fetch();
+
+// Row actions. pause/play are a single state toggle modelled as two mutually
+// exclusive actions via hidden(row): pause shows only when active, play only
+// when paused — mirroring the original button. delete carries a built-in
+// confirm. All gated on the original permissions.
+const rowActions = computed(() => {
+  const list = [];
+  if (canManage.value) {
+    list.push({
+      key: 'pause',
+      icon: 'mdi-pause',
+      title: 'إيقاف مؤقت',
+      primary: true,
+      hidden: (i) => !i.isActive,
+      handler: (i) => toggleActive(i),
+    });
+    list.push({
+      key: 'play',
+      icon: 'mdi-play',
+      title: 'تفعيل',
+      primary: true,
+      hidden: (i) => i.isActive,
+      handler: (i) => toggleActive(i),
+    });
+    list.push({
+      key: 'edit',
+      icon: 'mdi-pencil',
+      title: 'تعديل',
+      primary: true,
+      handler: (i) => openEdit(i),
+    });
+  }
+  if (canDelete.value) {
+    list.push({
+      key: 'delete',
+      icon: 'mdi-delete',
+      title: 'حذف',
+      color: 'error',
+      danger: true,
+      handler: (i) => removeRecurring(i),
+      confirm: (i) => ({
+        title: 'حذف مصروف ثابت',
+        message: 'سيتم حذف المصروف الثابت. المصاريف المُولّدة سابقاً تبقى في التقارير.',
+        details: `«${i.name}»`,
+        type: 'error',
+        confirmText: 'حذف',
+      }),
+    });
+  }
+  return list;
+});
 
 const dialog = ref(false);
 const saving = ref(false);
@@ -537,13 +555,7 @@ async function toggleActive(row) {
   }
 }
 
-async function confirmDelete(row) {
-  if (
-    !window.confirm(
-      `حذف المصروف الثابت «${row.name}»؟ (المصاريف المُولّدة سابقاً تبقى في التقارير)`
-    )
-  )
-    return;
+async function removeRecurring(row) {
   try {
     await store.remove(row.id);
     await store.fetch();

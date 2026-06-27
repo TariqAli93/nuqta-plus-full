@@ -6,8 +6,8 @@
       icon="mdi-package-variant"
     >
       <v-btn
-        data-testid="product-new-btn"
         v-if="canManageProducts"
+        data-testid="product-new-btn"
         color="primary"
         prepend-icon="mdi-plus"
         size="default"
@@ -18,27 +18,47 @@
       </v-btn>
     </PageHeader>
 
-    <v-card class="page-section filter-toolbar pa-3">
-      <div class="search-toolbar">
-        <SearchBar
-          :model-value="query"
-          :loading="isSearching"
-          placeholder="ابحث بالاسم، الرمز، الباركود، الوحدة..."
-          aria-label="البحث عن منتج"
-          @update:model-value="onQueryChange"
-          @search="runNow"
-          @clear="clear"
-        />
-      </div>
-
-      <AdvancedFilters
-        class="mt-3"
-        :chips="filterChips"
-        @clear="onClearFilters"
-        @remove="onRemoveFilter"
-      >
+    <!-- Unified SmartTable: search + advanced filters + columns + export + print
+         + saved views, backed by the existing useServerSearch data engine. -->
+    <SmartTable
+      ref="tableRef"
+      data-testid="products-table"
+      table-key="products-table"
+      :headers="headers"
+      :items="productStore.products"
+      :loading="tableLoading"
+      :error="error"
+      :total-items="productStore.pagination.total"
+      server-side
+      :initial-load="false"
+      :page="productStore.pagination.page"
+      :page-size="productStore.pagination.limit"
+      :search="query"
+      :search-placeholder="'ابحث بالاسم، الرمز، الباركود، الوحدة...'"
+      :filter-chips="filterChips"
+      :row-actions="rowActions"
+      show-export
+      show-print
+      show-saved-views
+      print-title="قائمة المنتجات"
+      export-file-base="products"
+      :empty-title="'لا توجد منتجات'"
+      :empty-description="'ابدأ بإضافة منتج جديد لبناء مخزونك'"
+      empty-icon="mdi-package-variant"
+      :empty-actions="[{ text: 'إضافة منتج جديد', icon: 'mdi-plus', to: '/products/new', color: 'primary' }]"
+      @update:search="onQueryChange"
+      @search-now="runNow"
+      @clear-search="clear"
+      @update:page="setPage"
+      @update:page-size="setPageSize"
+      @clear-filters="onClearFilters"
+      @remove-filter="onRemoveFilter"
+      @refresh="refresh"
+    >
+      <!-- Advanced filters live in the toolbar popover (page-owned controls). -->
+      <template #filters>
         <v-row dense>
-          <v-col v-if="canReadCategories" cols="12" sm="6" md="4">
+          <v-col v-if="canReadCategories" cols="12" sm="6">
             <v-select
               v-model="selectedCategory"
               :items="categories"
@@ -51,9 +71,9 @@
               hide-details
               prepend-inner-icon="mdi-shape-outline"
               @update:model-value="onCategoryChange"
-            ></v-select>
+            />
           </v-col>
-          <v-col cols="12" sm="6" md="4">
+          <v-col cols="12" sm="6">
             <v-select
               v-model="statusFilter"
               :items="statusOptions"
@@ -66,9 +86,9 @@
               hide-details
               prepend-inner-icon="mdi-flag-outline"
               @update:model-value="onStatusChange"
-            ></v-select>
+            />
           </v-col>
-          <v-col cols="12" sm="6" md="4">
+          <v-col cols="12" sm="6">
             <v-select
               v-model="productTypeFilter"
               :items="productTypeOptions"
@@ -82,9 +102,9 @@
               hide-details
               prepend-inner-icon="mdi-shape-plus-outline"
               @update:model-value="onTypeChange"
-            ></v-select>
+            />
           </v-col>
-          <v-col cols="6" sm="3" md="2">
+          <v-col cols="6" sm="3">
             <v-text-field
               v-model.number="minPrice"
               type="number"
@@ -94,9 +114,9 @@
               hide-details
               min="0"
               @update:model-value="onPriceChange"
-            ></v-text-field>
+            />
           </v-col>
-          <v-col cols="6" sm="3" md="2">
+          <v-col cols="6" sm="3">
             <v-text-field
               v-model.number="maxPrice"
               type="number"
@@ -106,210 +126,93 @@
               hide-details
               min="0"
               @update:model-value="onPriceChange"
-            ></v-text-field>
+            />
           </v-col>
         </v-row>
-      </AdvancedFilters>
-    </v-card>
+      </template>
 
-    <v-card class="page-section">
-      <div class="section-title">
-        <span class="section-title__label">
-          <v-icon size="20" color="primary">mdi-format-list-bulleted</v-icon>
-          قائمة المنتجات
-        </span>
-        <v-btn
-          data-testid="products-export"
-          variant="text"
-          size="small"
-          prepend-icon="mdi-download"
-          :disabled="productStore.products.length === 0"
-          aria-label="تصدير البيانات"
-          @click="handleExport"
-        >
-          تصدير
-        </v-btn>
-      </div>
-      <v-alert
-        v-if="error"
-        type="error"
-        variant="tonal"
-        density="comfortable"
-        class="mx-3 mt-3"
-        closable
-        @click:close="dismissError"
-      >
-        تعذر تنفيذ البحث حالياً، حاول مرة أخرى.
-        <template #append>
-          <v-btn size="small" variant="text" @click="refresh">إعادة المحاولة</v-btn>
-        </template>
-      </v-alert>
-
-      <!-- Initial load shows a skeleton; subsequent searches keep the previous
-           rows visible with a subtle top progress line (no layout jump). -->
-      <TableSkeleton v-if="initialLoading" :rows="8" :columns="headers.length" class="pa-3" />
-      <v-data-table
-        v-else
-        data-testid="products-table"
-        :headers="headers"
-        :items="productStore.products"
-        :loading="tableLoading"
-        :items-per-page="productStore.pagination.limit"
-        :page="productStore.pagination.page"
-        :items-length="productStore.pagination.limit"
-        hide-default-footer
-      >
-        <template #no-data>
-          <EmptyState
-            v-if="hasActiveQuery"
-            title="لا توجد نتائج مطابقة"
-            description="حاول البحث بالاسم أو الرقم أو الباركود"
-            icon="mdi-magnify-close"
-            compact
+      <!-- Custom cells (search highlighting, chips, badges) pass straight through. -->
+      <template #[`item.name`]="{ item }">
+        <div class="d-flex flex-column py-1">
+          <span class="font-weight-medium">
+            <template v-for="(seg, i) in highlightOf(item.name)" :key="i">
+              <mark v-if="seg.match" class="search-hl">{{ seg.text }}</mark>
+              <template v-else>{{ seg.text }}</template>
+            </template>
+          </span>
+          <MatchBadge
+            v-if="item.matchedField"
+            :field="item.matchedField"
+            :value="item.matchedValue"
+            class="mt-1 align-self-start"
           />
-          <EmptyState
-            v-else
-            title="لا توجد منتجات"
-            description="ابدأ بإضافة منتج جديد لبناء مخزونك"
-            icon="mdi-package-variant"
-            :actions="[
-              {
-                text: 'إضافة منتج جديد',
-                icon: 'mdi-plus',
-                to: '/products/new',
-                color: 'primary',
-              },
-            ]"
-            compact
-          />
-        </template>
-        <template #[`item.name`]="{ item }">
-          <div class="d-flex flex-column py-1">
-            <span class="font-weight-medium">
-              <template v-for="(seg, i) in highlightOf(item.name)" :key="i">
-                <mark v-if="seg.match" class="search-hl">{{ seg.text }}</mark>
-                <template v-else>{{ seg.text }}</template>
-              </template>
-            </span>
-            <MatchBadge
-              v-if="item.matchedField"
-              :field="item.matchedField"
-              :value="item.matchedValue"
-              class="mt-1 align-self-start"
-            />
-          </div>
-        </template>
-        <template #[`item.sku`]="{ item }">
+        </div>
+      </template>
+      <template #[`item.sku`]="{ item }">
+        <span dir="ltr" class="st-cell-num">
           <template v-for="(seg, i) in highlightOf(item.sku)" :key="i">
             <mark v-if="seg.match" class="search-hl">{{ seg.text }}</mark>
             <template v-else>{{ seg.text }}</template>
           </template>
-        </template>
-        <template #[`item.barcode`]="{ item }">
+        </span>
+      </template>
+      <template #[`item.barcode`]="{ item }">
+        <span dir="ltr" class="st-cell-num">
           <template v-for="(seg, i) in highlightOf(item.barcode)" :key="i">
             <mark v-if="seg.match" class="search-hl">{{ seg.text }}</mark>
             <template v-else>{{ seg.text }}</template>
           </template>
-        </template>
-        <template #[`item.productType`]="{ item }">
+        </span>
+      </template>
+      <template #[`item.productType`]="{ item }">
+        <v-chip
+          :color="isServiceItem(item) ? 'purple' : 'blue-grey'"
+          size="small"
+          variant="tonal"
+          :prepend-icon="isServiceItem(item) ? 'mdi-room-service-outline' : 'mdi-package-variant'"
+        >
+          {{ isServiceItem(item) ? 'خدمة' : 'منتج' }}
+        </v-chip>
+      </template>
+      <template #[`item.stock`]="{ item }">
+        <span v-if="isServiceItem(item)" class="text-caption text-medium-emphasis">لا ينطبق</span>
+        <div v-else class="d-flex align-center ga-1">
           <v-chip
-            :color="isServiceItem(item) ? 'purple' : 'blue-grey'"
+            :color="isLowStock(item) ? 'error' : 'success'"
             size="small"
-            variant="tonal"
-            :prepend-icon="isServiceItem(item) ? 'mdi-room-service-outline' : 'mdi-package-variant'"
+            :title="`المتوفر في المخزن المحدد: ${resolvedStock(item)}`"
           >
-            {{ isServiceItem(item) ? 'خدمة' : 'منتج' }}
+            {{ resolvedStock(item) }}
           </v-chip>
-        </template>
-        <template #[`item.stock`]="{ item }">
-          <span v-if="isServiceItem(item)" class="text-caption text-medium-emphasis">
-            لا ينطبق
+          <span v-if="item.totalStock != null" class="text-caption text-medium-emphasis">
+            / {{ item.totalStock }} إجمالي
           </span>
-          <div v-else class="flex items-center gap-1">
-            <v-chip
-              :color="isLowStock(item) ? 'error' : 'success'"
-              size="small"
-              :title="`المتوفر في المخزن المحدد: ${resolvedStock(item)}`"
-            >
-              {{ resolvedStock(item) }}
-            </v-chip>
-            <span v-if="item.totalStock != null" class="text-caption text-medium-emphasis">
-              / {{ item.totalStock }} إجمالي
-            </span>
-          </div>
-        </template>
-        <template #[`item.sellingPrice`]="{ item }">
-          {{ formatCurrency(item.sellingPrice, item.currency) }}
-        </template>
-        <template #[`item.wholesalePrice`]="{ item }">
-          <span :class="{ 'text-medium-emphasis': item.wholesalePrice == null }">
-            {{
-              item.wholesalePrice == null ? '—' : formatCurrency(item.wholesalePrice, item.currency)
-            }}
-          </span>
-        </template>
-        <template #[`item.agentPrice`]="{ item }">
-          <span :class="{ 'text-medium-emphasis': item.agentPrice == null }">
-            {{ item.agentPrice == null ? '—' : formatCurrency(item.agentPrice, item.currency) }}
-          </span>
-        </template>
-        <template #[`item.status`]="{ item }">
-          <v-chip :color="getStatusColor(item.status)" size="small">
-            {{ getStatusText(item.status) }}
-          </v-chip>
-        </template>
-        <template #[`item.expiry`]="{ item }">
-          <v-chip :color="item.tracksExpiry ? 'info' : 'grey'" size="small" variant="tonal">
-            {{ item.tracksExpiry ? 'له تاريخ انتهاء' : 'بدون تاريخ انتهاء' }}
-          </v-chip>
-        </template>
-        <template #[`item.actions`]="{ item }">
-          <v-btn
-            v-if="canManageProducts"
-            data-testid="product-edit"
-            icon="mdi-pencil"
-            size="small"
-            variant="text"
-            :to="`/products/${item.id}/edit`"
-            title="تعديل"
-            aria-label="تعديل المنتج"
-          >
-            <v-icon size="20">mdi-pencil</v-icon>
-          </v-btn>
-          <v-btn
-            v-if="canDeleteProducts"
-            data-testid="product-delete"
-            icon="mdi-delete"
-            size="small"
-            variant="text"
-            color="error"
-            title="حذف"
-            aria-label="حذف المنتج"
-            @click="confirmDelete(item)"
-          >
-            <v-icon size="20">mdi-delete</v-icon>
-          </v-btn>
-        </template>
-      </v-data-table>
-
-      <PaginationControls
-        :pagination="productStore.pagination"
-        @update:page="setPage"
-        @update:items-per-page="setPageSize"
-      />
-    </v-card>
-
-    <ConfirmDialog
-      v-model="deleteDialog"
-      title="تحذير: حذف نهائي"
-      message="سيتم حذف المنتج نهائياً. سيتم الاحتفاظ باسم المنتج داخل الفواتير الملغية فقط، ولن تتأثر سجلات الأرشفة. إذا كان المنتج مستخدماً في بيانات فعالة (فواتير أو عمليات غير ملغية) فسيُرفض الحذف."
-      :details="selectedProduct ? `المنتج: ${selectedProduct.name}` : ''"
-      type="error"
-      confirm-text="حذف نهائي"
-      cancel-text="إلغاء"
-      @confirm="handleDelete"
-      @cancel="deleteDialog = false"
-    />
+        </div>
+      </template>
+      <template #[`item.sellingPrice`]="{ item }">
+        {{ formatCurrency(item.sellingPrice, item.currency) }}
+      </template>
+      <template #[`item.wholesalePrice`]="{ item }">
+        <span :class="{ 'text-medium-emphasis': item.wholesalePrice == null }">
+          {{ item.wholesalePrice == null ? '—' : formatCurrency(item.wholesalePrice, item.currency) }}
+        </span>
+      </template>
+      <template #[`item.agentPrice`]="{ item }">
+        <span :class="{ 'text-medium-emphasis': item.agentPrice == null }">
+          {{ item.agentPrice == null ? '—' : formatCurrency(item.agentPrice, item.currency) }}
+        </span>
+      </template>
+      <template #[`item.status`]="{ item }">
+        <v-chip :color="getStatusColor(item.status)" size="small">
+          {{ getStatusText(item.status) }}
+        </v-chip>
+      </template>
+      <template #[`item.expiry`]="{ item }">
+        <v-chip :color="item.tracksExpiry ? 'info' : 'grey'" size="small" variant="tonal">
+          {{ item.tracksExpiry ? 'له تاريخ انتهاء' : 'بدون تاريخ انتهاء' }}
+        </v-chip>
+      </template>
+    </SmartTable>
   </div>
 </template>
 
@@ -321,18 +224,12 @@ import { useAuthStore } from '@/stores/auth';
 import { useInventoryStore } from '@/stores/inventory';
 import { usePermissions } from '@/composables/usePermissions';
 import * as uiAccess from '@/auth/uiAccess.js';
-import EmptyState from '@/components/EmptyState.vue';
-import TableSkeleton from '@/components/TableSkeleton.vue';
-import ConfirmDialog from '@/components/ConfirmDialog.vue';
-import PaginationControls from '@/components/PaginationControls.vue';
 import PageHeader from '@/components/PageHeader.vue';
-import SearchBar from '@/components/SearchBar.vue';
-import AdvancedFilters from '@/components/AdvancedFilters.vue';
 import MatchBadge from '@/components/MatchBadge.vue';
+import SmartTable from '@/components/common/SmartTable';
 import { useServerSearch } from '@/composables/useServerSearch';
 import { highlightSegments } from '@/utils/highlight';
 import { formatCurrency } from '@/utils/formatters';
-import { useExport } from '@/composables/useExport';
 import { usePageActions } from '@/commands/pageActions';
 import { useUndo } from '@/composables/useUndo';
 import { useNotificationStore } from '@/stores/notification';
@@ -341,30 +238,24 @@ const productStore = useProductStore();
 const categoryStore = useCategoryStore();
 const authStore = useAuthStore();
 const inventoryStore = useInventoryStore();
+const notificationStore = useNotificationStore();
+const { registerUndo } = useUndo();
 
 const { can } = usePermissions();
-// Category filter is a secondary/optional feature on this page: it loads the
-// categories list (categories:read), a DIFFERENT permission than the products
-// page itself. Guard both the fetch and the filter UI on it.
 const canReadCategories = computed(() => can('categories:read'));
 
 const userRole = computed(() => authStore.user?.role);
 const canManageProducts = computed(() =>
   userRole.value ? uiAccess.canManageProducts(userRole.value) : false
 );
-// Wholesale/agent price tiers (تسعير الوكلاء) — when on, the catalogue shows
-// the جملة/وكيل columns next to سعر البيع. Off → table is unchanged.
 const agentPricingOn = computed(() => authStore.hasFeature?.('agentPricing') === true);
 const canDeleteProducts = computed(() =>
   userRole.value ? uiAccess.canManageProducts(userRole.value) : false
 );
 
+const tableRef = ref(null);
 const categories = ref([]);
-const deleteDialog = ref(false);
-const selectedProduct = ref(null);
 
-// Local refs backing the advanced-filter controls (kept in sync with the
-// search composable's filter state).
 const selectedCategory = ref(null);
 const statusFilter = ref(null);
 const productTypeFilter = ref(null);
@@ -376,20 +267,14 @@ const statusOptions = [
   { title: 'نفذ', value: 'out_of_stock' },
   { title: 'متوقف', value: 'discontinued' },
 ];
-
-// Product-type filter: null = الكل (both kinds).
 const productTypeOptions = [
   { title: 'منتجات مخزنية', value: 'inventory' },
   { title: 'خدمات', value: 'service' },
 ];
-const productTypeLabel = (v) =>
-  v === 'service' ? 'خدمات' : v === 'inventory' ? 'منتجات مخزنية' : '';
+const productTypeLabel = (v) => (v === 'service' ? 'خدمات' : v === 'inventory' ? 'منتجات مخزنية' : '');
 
 const currentWarehouseId = () => inventoryStore.selectedWarehouseId || undefined;
 
-// Centralized debounced/cancelable/cached search. `warehouseId` is injected per
-// request (not a user filter) so "مسح الفلاتر" never drops the warehouse
-// context; warehouse changes bust the cache via refresh().
 const {
   query,
   isSearching,
@@ -427,8 +312,6 @@ const {
 });
 
 const tableLoading = computed(() => isSearching.value || productStore.loading);
-const initialLoading = computed(() => tableLoading.value && productStore.products.length === 0);
-const hasActiveQuery = computed(() => !!query.value.trim() || filterChips.value.length > 0);
 
 const filterChips = computed(() => {
   const chips = [];
@@ -436,15 +319,9 @@ const filterChips = computed(() => {
     const cat = categories.value.find((c) => c.id === selectedCategory.value);
     chips.push({ key: 'categoryId', label: `التصنيف: ${cat?.name ?? selectedCategory.value}` });
   }
-  if (statusFilter.value) {
-    chips.push({ key: 'status', label: `الحالة: ${getStatusText(statusFilter.value)}` });
-  }
-  if (productTypeFilter.value) {
-    chips.push({
-      key: 'productType',
-      label: `النوع: ${productTypeLabel(productTypeFilter.value)}`,
-    });
-  }
+  if (statusFilter.value) chips.push({ key: 'status', label: `الحالة: ${getStatusText(statusFilter.value)}` });
+  if (productTypeFilter.value)
+    chips.push({ key: 'productType', label: `النوع: ${productTypeLabel(productTypeFilter.value)}` });
   if (minPrice.value) chips.push({ key: 'minPrice', label: `السعر من: ${minPrice.value}` });
   if (maxPrice.value) chips.push({ key: 'maxPrice', label: `السعر إلى: ${maxPrice.value}` });
   return chips;
@@ -476,154 +353,119 @@ const onClearFilters = () => {
   clearFilters();
 };
 
-const dismissError = () => {
-  error.value = null;
-};
-
 const headers = computed(() => [
-  { title: 'الاسم', key: 'name' },
-  { title: 'رمز المنتج', key: 'sku' },
+  { title: 'الاسم', key: 'name', minWidth: 180 },
+  { title: 'رمز المنتج', key: 'sku', format: 'sku', ltr: true },
   { title: 'النوع', key: 'productType', sortable: false },
   { title: 'التصنيف', key: 'category' },
-  { title: 'سعر المفرد', key: 'sellingPrice' },
-  // Wholesale/agent tiers — only shown when the agentPricing feature is on.
+  { title: 'سعر المفرد', key: 'sellingPrice', format: 'currency', align: 'end' },
   ...(agentPricingOn.value
     ? [
-        { title: 'سعر الجملة', key: 'wholesalePrice' },
-        { title: 'سعر الوكيل', key: 'agentPrice' },
+        { title: 'سعر الجملة', key: 'wholesalePrice', format: 'currency', align: 'end' },
+        { title: 'سعر الوكيل', key: 'agentPrice', format: 'currency', align: 'end' },
       ]
     : []),
-  { title: 'المخزون', key: 'stock' },
-  { title: 'الحد الأدنى للمخزون', key: 'minStock' },
-  { title: 'باركود', key: 'barcode' },
-  { title: 'حالة الصلاحية', key: 'expiry' },
-  { title: 'الحالة', key: 'status' },
-  { title: 'إجراءات', key: 'actions', sortable: false },
+  { title: 'المخزون', key: 'stock', sortable: false, exportValue: (r) => r.totalStock ?? r.stock },
+  { title: 'الحد الأدنى للمخزون', key: 'minStock', format: 'number', align: 'end' },
+  { title: 'باركود', key: 'barcode', format: 'barcode', ltr: true },
+  {
+    title: 'حالة الصلاحية',
+    key: 'expiry',
+    sortable: false,
+    exportValue: (r) => (r.tracksExpiry ? 'له تاريخ انتهاء' : 'بدون تاريخ انتهاء'),
+  },
+  { title: 'الحالة', key: 'status', exportValue: (r) => getStatusText(r.status) },
 ]);
 
-const getStatusColor = (status) => {
-  const colors = {
-    available: 'success',
-    out_of_stock: 'warning',
-    discontinued: 'error',
-  };
-  return colors[status] || 'grey';
-};
+// Row actions: edit + delete, gated on the existing role-based UI access.
+const rowActions = computed(() => {
+  const list = [];
+  if (canManageProducts.value) {
+    list.push({
+      key: 'edit',
+      icon: 'mdi-pencil',
+      title: 'تعديل',
+      to: (item) => `/products/${item.id}/edit`,
+      primary: true,
+    });
+  }
+  if (canDeleteProducts.value) {
+    list.push({
+      key: 'delete',
+      icon: 'mdi-delete',
+      title: 'حذف',
+      color: 'error',
+      danger: true,
+      handler: (item) => handleDelete(item),
+      confirm: (item) => ({
+        title: 'تحذير: حذف نهائي',
+        message:
+          'سيتم حذف المنتج نهائياً. سيتم الاحتفاظ باسم المنتج داخل الفواتير الملغية فقط، ولن تتأثر سجلات الأرشفة. إذا كان المنتج مستخدماً في بيانات فعالة (فواتير أو عمليات غير ملغية) فسيُرفض الحذف.',
+        details: `المنتج: ${item.name}`,
+        type: 'error',
+        confirmText: 'حذف نهائي',
+      }),
+    });
+  }
+  return list;
+});
 
-const getStatusText = (status) => {
-  const texts = {
-    available: 'متاح',
-    out_of_stock: 'نفذ',
-    discontinued: 'متوقف',
-  };
-
-  return texts[status] || status;
-};
+const getStatusColor = (status) =>
+  ({ available: 'success', out_of_stock: 'warning', discontinued: 'error' })[status] || 'grey';
+const getStatusText = (status) =>
+  ({ available: 'متاح', out_of_stock: 'نفذ', discontinued: 'متوقف' })[status] || status;
 
 const isServiceItem = (item) => item?.productType === 'service';
-
 const resolvedStock = (item) => {
-  if (inventoryStore.selectedWarehouseId && item.warehouseStock != null) {
-    return item.warehouseStock;
-  }
+  if (inventoryStore.selectedWarehouseId && item.warehouseStock != null) return item.warehouseStock;
   return item.totalStock != null ? item.totalStock : item.stock;
 };
-
 const isLowStock = (item) => {
-  // Services carry no stock, so they are never "low".
   if (isServiceItem(item)) return false;
   const qty = resolvedStock(item);
   const threshold =
-    item.lowStockThreshold && item.lowStockThreshold > 0
-      ? item.lowStockThreshold
-      : item.minStock || 0;
+    item.lowStockThreshold && item.lowStockThreshold > 0 ? item.lowStockThreshold : item.minStock || 0;
   return qty <= threshold;
 };
 
-const confirmDelete = (product) => {
-  selectedProduct.value = product;
-  deleteDialog.value = true;
-};
-
-const { exportToCSV } = useExport();
-const { registerUndo } = useUndo();
-const notificationStore = useNotificationStore();
-
-const handleExport = () => {
+const handleDelete = async (product) => {
+  const productName = product.name;
   try {
-    const exportHeaders = headers.value.map((h) => ({
-      title: h.title,
-      key: h.key,
-      value: (item) => {
-        if (h.key === 'stock') return item.stock;
-        if (h.key === 'sellingPrice') return `${item.sellingPrice} ${item.currency}`;
-        if (h.key === 'wholesalePrice')
-          return item.wholesalePrice == null ? '' : `${item.wholesalePrice} ${item.currency}`;
-        if (h.key === 'agentPrice')
-          return item.agentPrice == null ? '' : `${item.agentPrice} ${item.currency}`;
-        if (h.key === 'status') return getStatusText(item.status);
-        return item[h.key] || '';
-      },
-    }));
-    exportToCSV(productStore.products, exportHeaders, 'products.csv');
-    notificationStore.success('تم تصدير البيانات بنجاح');
-  } catch {
-    notificationStore.error('فشل تصدير البيانات');
-  }
-};
-
-// Expose real page actions to the Command Registry so `products.export` /
-// `products.refresh` (palette, command bar, shortcuts) run THESE handlers.
-usePageActions('products', {
-  export: () => handleExport(),
-  refresh: () => refresh(),
-});
-
-const handleDelete = async () => {
-  const productId = selectedProduct.value.id;
-  const productName = selectedProduct.value.name;
-
-  try {
-    await productStore.deleteProduct(productId);
-    deleteDialog.value = false;
-    // Bust the search cache so counts/pages reflect the deletion.
+    await productStore.deleteProduct(product.id);
     refresh();
-
-    // Register undo
     registerUndo(
       {
         undo: async () => {
-          // Note: This would require a restore endpoint
           notificationStore.info('لا يمكن التراجع عن حذف المنتج');
         },
       },
       `تم حذف المنتج "${productName}"`
     );
-  } catch (error) {
-    // Error handled by notification
-    notificationStore.error(error?.message || 'فشل حذف المنتج');
-    console.error('Error deleting product:', error.message);
+  } catch (err) {
+    notificationStore.error(err?.message || 'فشل حذف المنتج');
+    console.error('Error deleting product:', err?.message);
   }
 };
 
+// Command Registry: products.export / products.refresh run THESE handlers from
+// the command bar / palette / shortcuts.
+usePageActions('products', {
+  export: () => tableRef.value?.exportData('excel', { scope: 'all' }),
+  refresh: () => refresh(),
+});
+
 onMounted(async () => {
-  // Ensure inventory store has branches/warehouses so the per-warehouse column works
   if (inventoryStore.branches.length === 0) await inventoryStore.fetchBranches();
   if (inventoryStore.warehouses.length === 0) await inventoryStore.fetchWarehouses();
 
-  // Initial load goes through the search composable (default list).
   refresh();
 
-  // Fetch all categories for the dropdown — optional feature gated on
-  // categories:read so users without it never trigger a 403 toast.
   if (canReadCategories.value) {
     const { data } = await categoryStore.fetchCategories();
     categories.value = data || [];
   }
 });
 
-// React to warehouse selection changes — bust the cache (results are
-// warehouse-specific) and reload with the new warehouse context.
 watch(
   () => inventoryStore.selectedWarehouseId,
   () => refresh()
@@ -631,12 +473,6 @@ watch(
 </script>
 
 <style scoped lang="scss">
-.search-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-}
-
 .search-hl {
   background-color: rgba(var(--v-theme-warning), 0.38);
   color: inherit;

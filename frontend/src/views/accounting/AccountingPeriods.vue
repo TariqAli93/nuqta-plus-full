@@ -6,8 +6,8 @@
       icon="mdi-book-clock-outline"
     >
       <v-btn
-        data-testid="period-open-btn"
         v-if="canOpen"
+        data-testid="period-open-btn"
         color="primary"
         prepend-icon="mdi-plus"
         @click="openDialog = true"
@@ -16,76 +16,54 @@
       </v-btn>
     </PageHeader>
 
-    <v-card class="page-section">
-      <v-data-table
-        data-testid="periods-table"
-        :headers="headers"
-        :items="store.periods"
-        :loading="store.loading"
-        density="comfortable"
-        @click:row="(_, { item }) => showDetails(item)"
-      >
-        <template #[`item.type`]="{ item }">{{ typeLabel(item.type) }}</template>
-        <template #[`item.scope`]="{ item }">
-          {{ item.branchName || (item.scopeType === 'global' ? 'النظام كامل' : '—') }}
-        </template>
-        <template #[`item.status`]="{ item }">
-          <v-chip
-            :color="item.status === 'open' ? 'success' : isAutoClosed(item) ? 'info' : 'grey'"
-            size="small"
-            :title="isAutoClosed(item) ? 'أُغلق تلقائياً عند انتهاء المدة' : undefined"
-          >
-            <v-icon v-if="isAutoClosed(item)" start size="x-small">mdi-timer-lock-outline</v-icon>
-            {{ statusLabel(item) }}
-          </v-chip>
-        </template>
-        <template #[`item.openedAt`]="{ item }">{{ fmtDate(item.openedAt) }}</template>
-        <template #[`item.endsAt`]="{ item }">
-          <span v-if="item.endsAt">{{ fmtDate(item.endsAt) }}</span>
-          <span v-else class="text-medium-emphasis" title="إغلاق يدوي — لا ينتهي تلقائياً">يدوي</span>
-        </template>
-        <template #[`item.closedAt`]="{ item }">{{
-          item.closedAt ? fmtDate(item.closedAt) : '—'
-        }}</template>
-        <template #[`item.netProfit`]="{ item }">
-          <span v-if="firstCur(item)" :class="netClass(item)">
-            {{ formatCurrency(firstTotals(item).netProfit, firstCur(item)) }}
-          </span>
-          <span v-else class="text-medium-emphasis">—</span>
-        </template>
-        <template #[`item.actions`]="{ item }">
-          <v-btn
-            size="small"
-            variant="text"
-            icon="mdi-eye"
-            title="تفاصيل"
-            @click.stop="showDetails(item)"
-          >
-            <v-icon>mdi-eye</v-icon>
-          </v-btn>
-          <v-btn
-            data-testid="period-close-btn"
-            v-if="item.status === 'open' && canClose"
-            size="small"
-            variant="text"
-            color="warning"
-            icon="mdi-lock"
-            title="إغلاق القيد"
-            @click.stop="startClose(item)"
-          >
-            <v-icon>mdi-lock</v-icon>
-          </v-btn>
-        </template>
-        <template #no-data>
-          <EmptyState
-            title="لا توجد قيود محاسبية"
-            description="افتح قيداً محاسبياً لبدء فترة مالية جديدة."
-            icon="mdi-book-clock-outline"
-            compact
-          />
-        </template>
-      </v-data-table>
-    </v-card>
+    <!-- Unified SmartTable (client-side): click a row to open its details;
+         view + close (open periods only, permission-gated) as row actions. -->
+    <SmartTable
+      data-testid="periods-table"
+      table-key="accounting-periods-table"
+      :headers="headers"
+      :items="store.periods"
+      :loading="store.loading"
+      :row-actions="rowActions"
+      show-export
+      show-print
+      print-title="القيود المحاسبية"
+      export-file-base="accounting-periods"
+      empty-title="لا توجد قيود محاسبية"
+      empty-description="افتح قيداً محاسبياً لبدء فترة مالية جديدة."
+      empty-icon="mdi-book-clock-outline"
+      @row-click="showDetails"
+      @refresh="reloadPeriods"
+    >
+      <template #[`item.type`]="{ item }">{{ typeLabel(item.type) }}</template>
+      <template #[`item.scope`]="{ item }">
+        {{ item.branchName || (item.scopeType === 'global' ? 'النظام كامل' : '—') }}
+      </template>
+      <template #[`item.status`]="{ item }">
+        <v-chip
+          :color="item.status === 'open' ? 'success' : isAutoClosed(item) ? 'info' : 'grey'"
+          size="small"
+          :title="isAutoClosed(item) ? 'أُغلق تلقائياً عند انتهاء المدة' : undefined"
+        >
+          <v-icon v-if="isAutoClosed(item)" start size="x-small">mdi-timer-lock-outline</v-icon>
+          {{ statusLabel(item) }}
+        </v-chip>
+      </template>
+      <template #[`item.openedAt`]="{ item }">{{ fmtDate(item.openedAt) }}</template>
+      <template #[`item.endsAt`]="{ item }">
+        <span v-if="item.endsAt">{{ fmtDate(item.endsAt) }}</span>
+        <span v-else class="text-medium-emphasis" title="إغلاق يدوي — لا ينتهي تلقائياً">يدوي</span>
+      </template>
+      <template #[`item.closedAt`]="{ item }">{{
+        item.closedAt ? fmtDate(item.closedAt) : '—'
+      }}</template>
+      <template #[`item.netProfit`]="{ item }">
+        <span v-if="firstCur(item)" :class="netClass(item)">
+          {{ formatCurrency(firstTotals(item).netProfit, firstCur(item)) }}
+        </span>
+        <span v-else class="text-medium-emphasis">—</span>
+      </template>
+    </SmartTable>
 
     <!-- Open dialog -->
     <v-dialog v-model="openDialog" max-width="480">
@@ -97,8 +75,8 @@
         <v-divider />
         <v-card-text class="pt-4">
           <v-select
-            data-testid="period-type"
             v-model="form.type"
+            data-testid="period-type"
             :items="typeOptions"
             item-title="title"
             item-value="value"
@@ -108,8 +86,8 @@
             class="mb-3"
           />
           <v-switch
-            data-testid="period-auto-close"
             v-model="form.autoClose"
+            data-testid="period-auto-close"
             color="primary"
             density="compact"
             hide-details
@@ -136,8 +114,8 @@
             class="mb-3"
           />
           <v-textarea
-            data-testid="period-notes"
             v-model="form.notes"
+            data-testid="period-notes"
             label="ملاحظات (اختياري)"
             variant="outlined"
             density="comfortable"
@@ -275,7 +253,7 @@ import { useAccountingPeriodStore } from '@/stores/accountingPeriod';
 import { useAuthStore } from '@/stores/auth';
 import { useInventoryStore } from '@/stores/inventory';
 import PageHeader from '@/components/PageHeader.vue';
-import EmptyState from '@/components/EmptyState.vue';
+import SmartTable from '@/components/common/SmartTable';
 import { formatCurrency } from '@/utils/formatters';
 
 // Tiny inline label/value row to avoid an extra file.
@@ -303,18 +281,6 @@ const canClose = computed(() => authStore.hasPermission?.('accounting_periods:cl
 // without inventory access doesn't trigger a spurious 403 toast.
 const canReadBranches = computed(() => authStore.hasPermission?.('inventory:read') === true);
 const branches = computed(() => inventoryStore.branches || []);
-
-const headers = [
-  { title: 'النوع', key: 'type' },
-  { title: 'النطاق', key: 'scope' },
-  { title: 'الحالة', key: 'status' },
-  { title: 'تاريخ الفتح', key: 'openedAt' },
-  { title: 'تاريخ الانتهاء', key: 'endsAt' },
-  { title: 'تاريخ الإغلاق', key: 'closedAt' },
-  { title: 'فتحه', key: 'openedByName' },
-  { title: 'صافي الربح', key: 'netProfit', align: 'end' },
-  { title: '', key: 'actions', sortable: false, align: 'end' },
-];
 
 const typeOptions = [
   { value: 'daily', title: 'يومي' },
@@ -350,6 +316,28 @@ const netClass = (item) => {
   const t = firstTotals(item);
   return t && t.netProfit < 0 ? 'text-error' : 'text-success';
 };
+
+const headers = [
+  { title: 'النوع', key: 'type', exportValue: (r) => typeLabel(r.type) },
+  {
+    title: 'النطاق',
+    key: 'scope',
+    sortable: false,
+    exportValue: (r) => r.branchName || (r.scopeType === 'global' ? 'النظام كامل' : '—'),
+  },
+  { title: 'الحالة', key: 'status', exportValue: (r) => statusLabel(r) },
+  { title: 'تاريخ الفتح', key: 'openedAt', format: 'datetime' },
+  { title: 'تاريخ الانتهاء', key: 'endsAt', exportValue: (r) => (r.endsAt ? fmtDate(r.endsAt) : 'يدوي') },
+  { title: 'تاريخ الإغلاق', key: 'closedAt', exportValue: (r) => (r.closedAt ? fmtDate(r.closedAt) : '—') },
+  { title: 'فتحه', key: 'openedByName' },
+  {
+    title: 'صافي الربح',
+    key: 'netProfit',
+    align: 'end',
+    sortable: false,
+    exportValue: (r) => firstTotals(r)?.netProfit ?? '',
+  },
+];
 
 // ── Open ───────────────────────────────────────────────────────────────────
 const openDialog = ref(false);
@@ -410,6 +398,23 @@ const showDetails = async (item) => {
   detailDialog.value = true;
 };
 
+// Row actions: view (always) + close (open periods only, permission-gated).
+const rowActions = computed(() => [
+  { key: 'view', icon: 'mdi-eye', title: 'تفاصيل', primary: true, handler: (item) => showDetails(item) },
+  {
+    key: 'close',
+    icon: 'mdi-lock',
+    title: 'إغلاق القيد',
+    color: 'warning',
+    testId: 'period-close-btn',
+    primary: true,
+    hidden: (item) => !(item.status === 'open' && canClose.value),
+    handler: (item) => startClose(item),
+  },
+]);
+
+const reloadPeriods = () => store.fetchAll();
+
 // Live refresh: re-list periodically so a period that auto-closes (scheduler /
 // boot catch-up / on-access expiry) shows its new "مغلق تلقائياً" status without
 // a page reload. Each list call also triggers the backend's expiry sweep.
@@ -466,7 +471,8 @@ onUnmounted(() => {
   color: rgba(var(--v-theme-on-surface), 0.7);
   font-size: 0.875rem;
 }
-:deep(tr) {
+/* Rows are clickable (open details) — keep the pointer affordance. */
+:deep(.smart-table tbody tr) {
   cursor: pointer;
 }
 </style>

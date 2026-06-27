@@ -20,6 +20,13 @@ extraResources:
   - from: ./electron/scripts
     to: dist-electron/scripts
 
+  # UpdaterV2 native window assets (client also shows the native update UI).
+  - from: ./electron/updater
+    to: updater
+    filter:
+      - '*.html'
+      - '*.cjs'
+
 # Client installer DELIBERATELY does NOT ship:
 #   - resources/backend/        (no local backend; clients call the LAN server)
 #   - credit-score.onnx         (no local ONNX inference; clients are renderer-only)

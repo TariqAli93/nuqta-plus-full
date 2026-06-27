@@ -7,6 +7,7 @@
     >
       <v-btn
         v-if="can('sales_channels:create')"
+        data-testid="sales-channel-new-btn"
         color="primary"
         variant="flat"
         prepend-icon="mdi-plus"
@@ -15,65 +16,59 @@
       </v-btn>
     </PageHeader>
 
-    <v-card class="page-section">
-      <v-data-table
-        :headers="headers"
-        :items="channelStore.channels"
-        :loading="channelStore.loading"
-        :items-per-page="channelStore.pagination.limit"
-        :page="channelStore.pagination.page"
-        :items-length="channelStore.pagination.total"
-        server-items-length
-        density="comfortable"
-        hide-default-footer
-        @update:items-per-page="changeItemsPerPage"
-      >
-        <template #[`item.name`]="{ item }">
-          <div class="d-flex align-center gap-2">
-            <v-avatar :color="item.color || 'grey-lighten-1'" size="32">
-              <v-icon color="white" size="18">{{
-                `mdi-${item.icon}` || 'mdi-bullhorn-variant'
-              }}</v-icon>
-            </v-avatar>
-            <span>{{ item.name }}</span>
-          </div>
-        </template>
+    <!-- Unified SmartTable (Recipe A: SmartTable owns search + the active filter +
+         pagination and drives fetching via @update:options). The create/edit
+         dialog stays page-owned; delete uses the row action's built-in confirm. -->
+    <SmartTable
+      data-testid="sales-channels-table"
+      table-key="sales-channels-table"
+      :headers="headers"
+      :items="channelStore.channels"
+      :loading="channelStore.loading"
+      :total-items="channelStore.pagination.total"
+      server-side
+      :page="channelStore.pagination.page"
+      :page-size="channelStore.pagination.limit"
+      :filters="filterDefs"
+      :row-actions="rowActions"
+      show-export
+      show-print
+      print-title="قائمة قنوات البيع"
+      export-file-base="sales-channels"
+      :export-fetcher="fetchAllForExport"
+      search-placeholder="ابحث بالاسم أو الرمز..."
+      empty-title="لا توجد قنوات بيع"
+      empty-description="أضف قناة بيع لتصنيف مصادر الطلبات الواردة"
+      empty-icon="mdi-bullhorn-variant"
+      :empty-actions="
+        can('sales_channels:create')
+          ? [{ text: 'قناة جديدة', icon: 'mdi-plus', onClick: () => openDialog() }]
+          : []
+      "
+      @update:options="loadChannels"
+      @refresh="onRefresh"
+    >
+      <template #[`item.name`]="{ item }">
+        <div class="d-flex align-center gap-2">
+          <v-avatar :color="item.color || 'grey-lighten-1'" size="32">
+            <v-icon color="white" size="18">{{
+              `mdi-${item.icon}` || 'mdi-bullhorn-variant'
+            }}</v-icon>
+          </v-avatar>
+          <span>{{ item.name }}</span>
+        </div>
+      </template>
 
-        <template #[`item.code`]="{ item }">
-          <v-chip size="small" variant="tonal" label>{{ item.code }}</v-chip>
-        </template>
+      <template #[`item.code`]="{ item }">
+        <v-chip size="small" variant="tonal" label>{{ item.code }}</v-chip>
+      </template>
 
-        <template #[`item.isActive`]="{ item }">
-          <v-chip :color="item.isActive ? 'success' : 'grey'" size="small" variant="tonal">
-            {{ item.isActive ? 'مفعّلة' : 'معطّلة' }}
-          </v-chip>
-        </template>
-
-        <template #[`item.actions`]="{ item }">
-          <v-btn
-            v-if="can('sales_channels:update')"
-            icon="mdi-pencil"
-            size="small"
-            variant="text"
-            @click="openDialog(item)"
-          ></v-btn>
-          <v-btn
-            v-if="can('sales_channels:delete')"
-            icon="mdi-delete"
-            size="small"
-            variant="text"
-            color="error"
-            @click="confirmDelete(item)"
-          ></v-btn>
-        </template>
-      </v-data-table>
-
-      <PaginationControls
-        :pagination="channelStore.pagination"
-        @update:page="changePage"
-        @update:items-per-page="changeItemsPerPage"
-      />
-    </v-card>
+      <template #[`item.isActive`]="{ item }">
+        <v-chip :color="item.isActive ? 'success' : 'grey'" size="small" variant="tonal">
+          {{ item.isActive ? 'مفعّلة' : 'معطّلة' }}
+        </v-chip>
+      </template>
+    </SmartTable>
 
     <v-dialog v-model="dialog" max-width="520">
       <v-card>
@@ -174,34 +169,21 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
-
-    <ConfirmDialog
-      v-model="deleteDialog"
-      title="تأكيد الحذف"
-      message="هل أنت متأكد من حذف قناة البيع؟"
-      :details="selectedChannel ? `القناة: ${selectedChannel.name}` : ''"
-      type="error"
-      confirm-text="حذف"
-      cancel-text="إلغاء"
-      @confirm="handleDelete"
-      @cancel="deleteDialog = false"
-    />
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue';
+import { ref, computed } from 'vue';
 import { useSalesChannelStore } from '@/stores/salesChannel';
 import { usePermissions } from '@/composables/usePermissions';
-import ConfirmDialog from '@/components/ConfirmDialog.vue';
-import PaginationControls from '@/components/PaginationControls.vue';
+import api from '@/plugins/axios';
+import SmartTable from '@/components/common/SmartTable';
 import PageHeader from '@/components/PageHeader.vue';
 
 const channelStore = useSalesChannelStore();
 const { can } = usePermissions();
 
 const dialog = ref(false);
-const deleteDialog = ref(false);
 const form = ref(null);
 const saving = ref(false);
 const selectedChannel = ref(null);
@@ -216,10 +198,50 @@ const emptyForm = () => ({
 const formData = ref(emptyForm());
 
 const headers = [
-  { title: 'القناة', key: 'name' },
+  { title: 'القناة', key: 'name', minWidth: 200 },
   { title: 'الرمز', key: 'code' },
-  { title: 'الحالة', key: 'isActive' },
-  { title: 'إجراءات', key: 'actions', sortable: false },
+  { title: 'الحالة', key: 'isActive', exportValue: (r) => (r.isActive ? 'مفعّلة' : 'معطّلة') },
+];
+
+// Advanced filter — the backend supports an `isActive` filter, so surface it as
+// an auto-rendered SmartTable filter (control + chip handled by SmartTable).
+const filterDefs = [
+  {
+    key: 'isActive',
+    type: 'select',
+    label: 'الحالة',
+    options: [
+      { title: 'مفعّلة', value: 'true' },
+      { title: 'معطّلة', value: 'false' },
+    ],
+  },
+];
+
+const rowActions = [
+  {
+    key: 'edit',
+    icon: 'mdi-pencil',
+    title: 'تعديل',
+    primary: true,
+    permission: 'sales_channels:update',
+    handler: (item) => openDialog(item),
+  },
+  {
+    key: 'delete',
+    icon: 'mdi-delete',
+    title: 'حذف',
+    color: 'error',
+    danger: true,
+    permission: 'sales_channels:delete',
+    handler: (item) => handleDelete(item),
+    confirm: (item) => ({
+      title: 'تأكيد الحذف',
+      message: 'هل أنت متأكد من حذف قناة البيع؟',
+      details: `القناة: ${item.name}`,
+      type: 'error',
+      confirmText: 'حذف',
+    }),
+  },
 ];
 
 const codeRules = [
@@ -228,6 +250,44 @@ const codeRules = [
 ];
 
 const isEdit = computed(() => !!selectedChannel.value);
+
+// Last requested options, so the toolbar refresh button and the export-all
+// fetcher reuse the active page/search/filter instead of resetting them.
+const lastOptions = ref({
+  page: 1,
+  itemsPerPage: channelStore.pagination.limit,
+  search: '',
+  filters: {},
+});
+
+const loadChannels = (opts = {}) => {
+  lastOptions.value = { ...lastOptions.value, ...opts };
+  const { page, itemsPerPage, search, filters } = lastOptions.value;
+  const params = {
+    page: page || 1,
+    limit: itemsPerPage || channelStore.pagination.limit,
+  };
+  const term = (search || '').trim();
+  if (term) params.search = term;
+  const active = filters?.isActive;
+  if (active === 'true' || active === 'false') params.isActive = active;
+  return channelStore.fetchChannels(params);
+};
+
+const onRefresh = () => loadChannels();
+
+// Export "all results": fetch the full set without clobbering the visible page
+// (the store mutates its own list, so we query the API directly here).
+const fetchAllForExport = async () => {
+  const params = { page: 1, limit: 10000 };
+  const term = (lastOptions.value.search || '').trim();
+  if (term) params.search = term;
+  const active = lastOptions.value.filters?.isActive;
+  if (active === 'true' || active === 'false') params.isActive = active;
+  // The axios interceptor unwraps to the JSON body, so `res.data` is the array.
+  const res = await api.get('/sales-channels', { params });
+  return res?.data || [];
+};
 
 const openDialog = (channel = null) => {
   if (channel) {
@@ -277,36 +337,11 @@ const handleSubmit = async () => {
   }
 };
 
-const confirmDelete = (channel) => {
-  selectedChannel.value = channel;
-  deleteDialog.value = true;
-};
-
-const handleDelete = async () => {
+const handleDelete = async (channel) => {
   try {
-    await channelStore.deleteChannel(selectedChannel.value.id);
-    deleteDialog.value = false;
+    await channelStore.deleteChannel(channel.id);
   } catch {
     // Error surfaced via notification store
   }
 };
-
-const changePage = (page) => {
-  const pageNum = Number(page);
-  if (isNaN(pageNum) || pageNum < 1) return;
-  if (pageNum === channelStore.pagination.page) return;
-  channelStore.pagination.page = pageNum;
-  channelStore.fetchChannels({ page: pageNum, limit: channelStore.pagination.limit });
-};
-
-const changeItemsPerPage = (limit) => {
-  const limitNum = Number(limit);
-  channelStore.pagination.limit = limitNum;
-  channelStore.pagination.page = 1;
-  channelStore.fetchChannels({ page: 1, limit: limitNum });
-};
-
-onMounted(() => {
-  channelStore.fetchChannels({ page: 1, limit: channelStore.pagination.limit });
-});
 </script>
