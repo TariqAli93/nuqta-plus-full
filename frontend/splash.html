@@ -1,203 +1,320 @@
 <!doctype html>
-<html dir="rtl" lang="ar">
+<html lang="ar" dir="rtl">
   <head>
     <meta charset="UTF-8" />
-    <meta name="color-scheme" content="light dark" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline';"
+    />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>NuqtaPlus — Loading</title>
-
-    <!-- Google Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@200;300;400;500;600;700;800;900;1000&display=swap" rel="stylesheet">
+    <title>نقطة بلس</title>
 
     <style>
-      :root {
-        --left-bg-light: #000000;
-        --left-bg-dark: #0c0c0c;
-
-        --right-bg-light: #f0ece4;
-        --right-bg-dark: #1a1a1a;
-
-        --text-light: #ffffff;
-        --text-dark: #e5e5e5;
-
-        --progress-bg: rgba(255, 255, 255, 0.15);
-        --progress-fill: #f15a24; /* Adobe Orange accent */
-
-        --transition: 0.35s ease;
+      * {
+        box-sizing: border-box;
+        user-select: none;
       }
 
-      @media (prefers-color-scheme: light) {
-        .left-pane {
-          background: var(--left-bg-light);
-          color: var(--text-light);
-        }
-        .right-pane {
-          background: var(--right-bg-light);
-        }
+      .draggable {
+        -webkit-app-region: drag;
       }
 
-      @media (prefers-color-scheme: dark) {
-        .left-pane {
-          background: var(--left-bg-dark);
-          color: var(--text-dark);
-        }
-        .right-pane {
-          background: var(--right-bg-dark);
-        }
+      .no-drag {
+        -webkit-app-region: no-drag;
       }
 
       html,
       body {
         margin: 0;
-        padding: 0;
-        height: 100%;
-        width: 100%;
-        font-family: 'Cairo', sans-serif;
+        width: 100vw;
+        height: 100vh;
         overflow: hidden;
+        background: transparent;
+        font-family: 'Cairo', 'Tajawal', 'Segoe UI', Tahoma, Arial, sans-serif;
       }
 
-      .container {
+      html {
         display: flex;
-        width: 100%;
-        height: 100%;
-        border-radius: 14px;
-        overflow: hidden;
-      }
-
-      /* LEFT SIDE */
-      .left-pane {
-        width: 40%;
-        padding: 40px 48px;
-        box-sizing: border-box;
-        display: flex;
-        flex-direction: column;
         justify-content: center;
-        align-items: flex-start;
-        gap: 35px;
+        align-items: center;
       }
 
-      .branding-top {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
+      body {
+        color: #fff;
+        border-radius: 1rem;
+        width: 95vw;
+        height: 95vh;
+        margin: auto;
+        box-shadow: 0px 10px 10px rgba(0, 0, 0, 0.12);
       }
 
-      .app-name {
-        font-size: 34px;
-        font-weight: 700;
-        letter-spacing: -0.5px;
-      }
-
-      .copyright,
-      .artist,
-      .init {
-        font-size: 14px;
-        line-height: 1.6;
-        opacity: 0.8;
-      }
-
-      /* PROGRESS BAR (Adobe Style) */
-      .progress-wrapper {
-        width: 100%;
-        max-width: 260px;
-        height: 3px;
-        background: var(--progress-bg);
-        border-radius: 2px;
-        margin-top: 8px;
+      .splash {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
         overflow: hidden;
-        opacity: 0;
-        transition: opacity 0.4s ease;
-      }
-
-      .progress-bar {
-        width: 0%;
-        height: 100%;
-        background: var(--progress-fill);
-        transition: width 0.18s linear;
-      }
-
-      .version-box {
-        font-size: 13px;
-        opacity: 0.8;
-        margin-top: 10px;
-      }
-
-      /* RIGHT SIDE ARTWORK */
-      .right-pane {
-        width: 60%;
+        background-image: url('./build/splash.png');
         background-size: cover;
         background-position: center;
+        background-repeat: no-repeat;
+        display: grid;
+      }
+
+      .splash::before {
+        content: '';
+        position: absolute;
+        inset: 14px;
+        border-radius: 18px;
+        pointer-events: none;
+        z-index: 3;
+      }
+
+      .content {
+        position: relative;
+        z-index: 4;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 15px;
+      }
+
+      .logo {
+        width: 190px;
+        height: 190px;
+        object-fit: contain;
+        filter: drop-shadow(0 26px 44px rgba(82, 28, 190, 0.48));
+        margin-bottom: 26px;
+      }
+
+      .title {
+        display: flex;
+        align-items: baseline;
+        justify-content: center;
+        gap: 15px;
+        margin: 0;
+        font-size: 45px;
+        font-weight: 900;
+        line-height: 1.1;
+        letter-spacing: -2px;
+      }
+
+      .title-main {
+        color: #ffffff;
+        text-shadow: 0 8px 28px rgba(255, 255, 255, 0.08);
+      }
+
+      .title-plus {
+        color: #6c2df3;
+        text-shadow: 0 12px 34px rgba(110, 45, 243, 0.42);
+      }
+
+      .subtitle {
+        margin-top: 10px;
+        color: rgba(255, 255, 255, 1);
+        font-size: 18px;
+        font-weight: 500;
+      }
+
+      .features {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 26px;
+        margin-top: 42px;
+        margin-bottom: 36px;
+      }
+
+      .feature {
+        width: 98px;
+        display: grid;
+        place-items: center;
+        gap: 11px;
+        color: rgba(255, 255, 255, 0.76);
+        font-size: 18px;
+        font-weight: 500;
+        white-space: nowrap;
+      }
+
+      .feature img {
+        width: 50px;
+        height: 50px;
+        object-fit: cover;
+
+        opacity: 1;
+      }
+
+      .divider {
+        width: 1px;
+        height: 64px;
+        background: rgba(255, 255, 255, 0.14);
+      }
+
+      .loading-text {
+        margin-bottom: 5px;
+        color: rgba(255, 255, 255, 0.68);
+        font-size: 20px;
+        font-weight: 500;
+      }
+
+      .progress-row {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        direction: rtl;
+      }
+
+      .progress-track {
+        width: 520px;
+        height: 14px;
+        border-radius: 999px;
+        padding: 1px;
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.075);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        box-shadow:
+          inset 0 1px 4px rgba(0, 0, 0, 0.45),
+          0 0 0 1px rgba(0, 0, 0, 0.12);
+      }
+
+      .progress-fill {
+        width: 0%;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #6421e8, #b557ff);
+        box-shadow: 0 0 20px rgba(174, 82, 255, 0.65);
+        transition: width 220ms ease;
+      }
+
+      .progress-percent {
+        min-width: 46px;
+        color: rgba(255, 255, 255, 0.66);
+        font-size: 20px;
+        font-weight: 500;
+        text-align: left;
+      }
+
+      .footer {
+        position: relative;
+        text-align: center;
+        color: rgba(255, 255, 255, 0.46);
+        font-size: 17px;
+        font-weight: 500;
+        transform: translateY(-10px);
+      }
+
+      @media (max-width: 820px) {
+        .logo {
+          width: 150px;
+          height: 150px;
+        }
+
+        .title {
+          font-size: 46px;
+        }
+
+        .subtitle {
+          font-size: 20px;
+        }
+
+        .features {
+          gap: 14px;
+        }
+
+        .feature {
+          width: 78px;
+          font-size: 15px;
+        }
+
+        .feature img {
+          width: 50px;
+          height: 50px;
+        }
+
+        .progress-track {
+          width: 380px;
+        }
       }
     </style>
   </head>
 
-  <body>
-    <div class="container">
-      <!-- LEFT SECTION -->
-      <div class="left-pane">
-        <div class="branding-top">
-          <img
-            src="./icon.png"
-            alt="Logo"
-            width="70"
-            height="70"
-            style="border-radius: 12px"
-            onerror="this.style.display='none'"
-          />
+  <body class="draggable">
+    <section class="splash">
+      <main class="content">
+        <img class="logo" src="./build/just_dot_plus.png" alt="" />
 
-          <div class="app-name">نقطة بلس</div>
+        <h1 class="title">
+          <span class="title-main">نقطة</span>
+          <span class="title-plus">بلس</span>
+        </h1>
 
-          <div class="artist">تصميم وتطوير كودل للحلول البرمجية</div>
+        <div class="subtitle">نظام ادارة المبيعات و المخزون</div>
 
-          <div class="copyright">
-            . جميع الحقوق محفوظة.<br />
-            لمزيد من التفاصيل، راجع شاشة "حول النظام".
+        <section class="features" aria-hidden="true">
+          <div class="feature">
+            <img src="./build/icons/point-of-sale.png" alt="" />
+            <span>نقاط بيع</span>
           </div>
 
-          <div class="init">جارٍ التحميل، يرجى الانتظار...</div>
+          <div class="divider"></div>
 
-          <!-- Adobe-style Progress Bar -->
-          <div class="progress-wrapper" id="progressWrapper">
-            <div class="progress-bar" id="progressBar"></div>
+          <div class="feature">
+            <img src="./build/icons/in-stock.png" alt="" />
+            <span>المخزون</span>
           </div>
+
+          <div class="divider"></div>
+
+          <div class="feature">
+            <img src="./build/icons/report.png" alt="" />
+            <span>التقارير</span>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="feature">
+            <img src="./build/icons/branch.png" alt="" />
+            <span>الفروع</span>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="feature">
+            <img src="./build/icons/process.png" alt="" />
+            <span>الإعدادات</span>
+          </div>
+        </section>
+
+        <div class="loading-text" id="loadingText">جاري التحميل...</div>
+
+        <div class="progress-row">
+          <div class="progress-track">
+            <div class="progress-fill" id="progressFill"></div>
+          </div>
+          <div class="progress-percent" id="progressPercent">0%</div>
         </div>
+      </main>
 
-        <div class="version-box">Version <span id="appVersion">—</span></div>
-      </div>
-
-      <!-- RIGHT SECTION -->
-      <div class="right-pane" style="background-image: url('./assets/splash-mockup.png')"></div>
-    </div>
+      <footer class="footer">نقطة بلس © 2024 - جميع الحقوق محفوظة</footer>
+    </section>
 
     <script>
-      // Show progress after a short delay (Adobe behavior)
-      setTimeout(() => {
-        const wrapper = document.getElementById('progressWrapper');
-        wrapper.style.opacity = 1;
+      window.setSplashProgress = function (value, text) {
+        console.log('Splash progress:', value, text);
 
-        const bar = document.getElementById('progressBar');
-        let p = 0;
+        const fill = document.getElementById('progressFill');
+        const percent = document.getElementById('progressPercent');
+        const loadingText = document.getElementById('loadingText');
 
-        const totalDuration = 10000; // 10 seconds
-        const interval = 100; // update every 100ms
-        const target = 96; // stop early until app loads
-        const increment = target / (totalDuration / interval);
+        const safeValue = Math.max(0, Math.min(100, Number(value) || 0));
 
-        const timer = setInterval(() => {
-          p += increment;
-          if (p >= target) p = target;
-          bar.style.width = p + '%';
-        }, interval);
-      }, 800);
-
-      // Version from Electron
-      if (window.splashAPI?.getAppVersion) {
-        window.splashAPI.getAppVersion().then((v) => {
-          document.getElementById('appVersion').textContent = v || '';
-        });
-      }
+        if (fill) fill.style.width = safeValue + '%';
+        if (percent) percent.textContent = Math.round(safeValue) + '%';
+        if (loadingText && text) loadingText.textContent = text;
+      };
     </script>
   </body>
 </html>

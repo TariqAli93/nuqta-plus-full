@@ -191,7 +191,7 @@
         {{ company.invoiceTermsText }}
       </div>
       <div class="receipt-printed-at">طُبعت: {{ formatDateTime(meta.printedAt) }}</div>
-      <div class="receipt-printed-at">نقطة بلس للحسابات</div>
+      <div class="receipt-printed-at">نقطة بلس | نظام ادارة المبيعات و المخزون</div>
     </footer>
   </div>
 </template>

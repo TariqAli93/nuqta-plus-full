@@ -742,7 +742,7 @@ function createSplashWindow() {
 
   splashWindow = new BrowserWindow({
     width: 1200,
-    height: 650,
+    height: 730,
     resizable: false,
     frame: false,
     center: true,
@@ -766,8 +766,28 @@ function createSplashWindow() {
     }
   );
 
-  splashWindow.webContents.on('did-finish-load', () => {
+  splashWindow.webContents.on('did-finish-load', async () => {
     logger.info('Splash window finished loading');
+
+    splashReady = true;
+
+    if (splashReplayStarted) return;
+    splashReplayStarted = true;
+
+    const queue = splashProgressQueue.length
+      ? splashProgressQueue
+      : [{ value: 0, text: 'بدء التشغيل...' }];
+
+    splashProgressQueue = [];
+
+    for (const item of queue) {
+      sendSplashProgressNow(item.value, item.text);
+      await wait(350);
+    }
+
+    if (lastSplashProgress.value >= 100) {
+      sendSplashProgressNow(100, 'تم التحميل');
+    }
   });
 
   if (isDev) {
@@ -824,7 +844,49 @@ function createSplashWindow() {
     splashWindow.__shownAt = Date.now();
   });
 
-  splashWindow.on('closed', () => (splashWindow = null));
+  splashWindow.on('closed', () => {
+    splashWindow = null;
+    splashReady = false;
+    splashProgressQueue = [];
+    splashReplayStarted = false;
+    lastSplashProgress = { value: 0, text: 'بدء التشغيل...' };
+  });
+}
+
+let splashReady = false;
+let splashProgressQueue = [];
+let splashReplayStarted = false;
+let lastSplashProgress = { value: 0, text: 'بدء التشغيل...' };
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function sendSplashProgressNow(value, text = 'جاري التحميل...') {
+  if (!splashWindow || splashWindow.isDestroyed()) return;
+
+  const safeValue = Math.max(0, Math.min(100, Number(value) || 0));
+  const safeText = String(text);
+
+  splashWindow.webContents
+    .executeJavaScript(`window.setSplashProgress(${safeValue}, ${JSON.stringify(safeText)});`, true)
+    .catch((err) => {
+      logger.warn(`sendSplashProgressNow failed: ${err.message}`);
+    });
+}
+
+function setSplashProgress(value, text = 'جاري التحميل...') {
+  const safeValue = Math.max(0, Math.min(100, Number(value) || 0));
+  const safeText = String(text);
+
+  lastSplashProgress = { value: safeValue, text: safeText };
+
+  if (!splashReady) {
+    splashProgressQueue.push(lastSplashProgress);
+    return;
+  }
+
+  sendSplashProgressNow(safeValue, safeText);
 }
 
 function tryToShowMainWindowAfterSplash() {
@@ -855,7 +917,7 @@ function tryToShowMainWindowAfterSplash() {
   };
 
   if (splashWindow && splashWindow.__shownAt) {
-    const minSplashTime = 7000;
+    const minSplashTime = 5000;
     const timeSinceShown = Date.now() - splashWindow.__shownAt;
     const timeLeft = minSplashTime - timeSinceShown;
 
@@ -873,42 +935,93 @@ function tryToShowMainWindowAfterSplash() {
 }
 
 // --- تشغيل التطبيق الرئيسي بعد التحقق من الترخيص ---
+// async function startNormalApp() {
+//   createSplashWindow();
+//   createWindow();
+
+//   if (isServerMode) {
+//     // Server mode: the backend is hosted by the NuqtaPlusBackend Windows
+//     // Service. ensureBackendRunning verifies service-installed/running/health/
+//     // version (req #10) and starts the service if it is merely stopped.
+//     let result = await ensureBackendRunning(backendManager, logger);
+
+//     // Self-heal (req #11): if the backend is in error because the Windows
+//     // Service is genuinely MISSING (e.g. removed by an older buggy update),
+//     // offer a one-click elevated repair instead of stranding the customer.
+//     // Packaged builds only — in dev the backend is a child process, not a
+//     // service, so there is nothing to repair.
+//     if (result.status === 'error' && !isDev) {
+//       const healed = await attemptServiceSelfHeal(result);
+//       if (healed) result = healed;
+//     }
+
+//     backendStatus = result.status;
+//     broadcastBackendStatus({ reason: 'startup', version: result.version, error: result.error });
+
+//     if (result.status === 'ready') {
+//       logger.info(`Backend ready — version: ${result.version}`);
+//     } else {
+//       logger.error(`Backend failed to start: ${result.error}`);
+//     }
+//   } else {
+//     // Client mode: no local backend — mark as ready immediately.
+//     // The Vue frontend handles server connection via the setup screen.
+//     logger.info('Client mode — skipping local backend startup');
+//     backendStatus = 'ready';
+//     broadcastBackendStatus({ reason: 'client-mode' });
+//   }
+
+//   backendReady = true;
+//   tryToShowMainWindowAfterSplash();
+// }
+
 async function startNormalApp() {
   createSplashWindow();
+
+  setSplashProgress(5, 'تهيئة التطبيق...');
+
   createWindow();
 
-  if (isServerMode) {
-    // Server mode: the backend is hosted by the NuqtaPlusBackend Windows
-    // Service. ensureBackendRunning verifies service-installed/running/health/
-    // version (req #10) and starts the service if it is merely stopped.
-    let result = await ensureBackendRunning(backendManager, logger);
+  setSplashProgress(15, 'تحميل واجهة البرنامج...');
 
-    // Self-heal (req #11): if the backend is in error because the Windows
-    // Service is genuinely MISSING (e.g. removed by an older buggy update),
-    // offer a one-click elevated repair instead of stranding the customer.
-    // Packaged builds only — in dev the backend is a child process, not a
-    // service, so there is nothing to repair.
+  if (isServerMode) {
+    setSplashProgress(30, 'فحص خدمة الخادم...');
+
+    // let result = await ensureBackendRunning(backendManager, logger);
+    let result = await ensureBackendRunning(backendManager, logger, {
+      onProgress: (value, text) => {
+        setSplashProgress(value, text);
+      },
+    });
+
     if (result.status === 'error' && !isDev) {
+      setSplashProgress(70, 'محاولة إصلاح خدمة الخادم...');
       const healed = await attemptServiceSelfHeal(result);
       if (healed) result = healed;
     }
 
     backendStatus = result.status;
-    broadcastBackendStatus({ reason: 'startup', version: result.version, error: result.error });
+    broadcastBackendStatus({
+      reason: 'startup',
+      version: result.version,
+      error: result.error,
+    });
 
     if (result.status === 'ready') {
+      setSplashProgress(90, 'الخادم جاهز...');
       logger.info(`Backend ready — version: ${result.version}`);
     } else {
+      setSplashProgress(90, 'تعذر تشغيل الخادم...');
       logger.error(`Backend failed to start: ${result.error}`);
     }
   } else {
-    // Client mode: no local backend — mark as ready immediately.
-    // The Vue frontend handles server connection via the setup screen.
+    setSplashProgress(75, 'تشغيل وضع العميل...');
     logger.info('Client mode — skipping local backend startup');
     backendStatus = 'ready';
     broadcastBackendStatus({ reason: 'client-mode' });
   }
 
+  setSplashProgress(100, 'تم التحميل');
   backendReady = true;
   tryToShowMainWindowAfterSplash();
 }

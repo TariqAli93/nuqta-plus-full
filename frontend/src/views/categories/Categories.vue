@@ -1,10 +1,6 @@
 <template>
   <div class="page-shell">
-    <PageHeader
-      title="إدارة التصنيفات"
-      subtitle="تنظيم منتجاتك ضمن تصنيفات"
-      icon="mdi-shape"
-    >
+    <PageHeader title="إدارة الفئات" subtitle="تنظيم منتجاتك ضمن فئات" icon="mdi-shape">
       <v-btn
         v-if="canCreate"
         data-testid="category-new-btn"
@@ -12,7 +8,8 @@
         variant="flat"
         prepend-icon="mdi-plus"
         @click="openDialog()"
-        >تصنيف جديد
+      >
+        اضافة فئة
       </v-btn>
     </PageHeader>
 
@@ -32,14 +29,16 @@
       :row-actions="rowActions"
       show-export
       show-print
-      print-title="قائمة التصنيفات"
+      print-title="قائمة الفئات"
       export-file-base="categories"
       :export-fetcher="fetchAllForExport"
-      search-placeholder="ابحث باسم التصنيف..."
-      empty-title="لا توجد تصنيفات"
+      search-placeholder="ابحث باسم الفئة..."
+      empty-title="لا توجد فئات"
       empty-description="ابدأ بإضافة تصنيف جديد لتنظيم منتجاتك"
       empty-icon="mdi-shape"
-      :empty-actions="canCreate ? [{ text: 'تصنيف جديد', icon: 'mdi-plus', onClick: () => openDialog() }] : []"
+      :empty-actions="
+        canCreate ? [{ text: 'تصنيف جديد', icon: 'mdi-plus', onClick: () => openDialog() }] : []
+      "
       @update:options="loadCategories"
       @refresh="onRefresh"
     />
@@ -55,7 +54,7 @@
           <v-form ref="form">
             <v-text-field
               v-model="formData.name"
-              label="اسم التصنيف"
+              label="اسم الفئة"
               variant="outlined"
               density="comfortable"
             ></v-text-field>
@@ -133,8 +132,8 @@ const rowActions = [
     handler: (item) => handleDelete(item),
     confirm: (item) => ({
       title: 'تأكيد الحذف',
-      message: 'هل أنت متأكد من حذف التصنيف؟',
-      details: `التصنيف: ${item.name}`,
+      message: 'هل أنت متأكد من حذف الفئة؟',
+      details: `الفئة: ${item.name}`,
       type: 'error',
       confirmText: 'حذف',
     }),

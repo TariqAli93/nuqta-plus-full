@@ -92,7 +92,8 @@ async function fetchJsonWithTimeout(url, timeoutMs) {
   } catch (err) {
     return {
       ok: false,
-      reason: err && err.name === 'AbortError' ? 'timeout' : `fetch-error:${err?.message ?? 'unknown'}`,
+      reason:
+        err && err.name === 'AbortError' ? 'timeout' : `fetch-error:${err?.message ?? 'unknown'}`,
     };
   } finally {
     clearTimeout(timer);
@@ -289,14 +290,107 @@ async function reconcileServiceVersion(backendManager, logger, reportedVersion) 
  * @param {Logger}         logger
  * @returns {{ status: 'ready'|'error', version: string|null, error?: string }}
  */
-export async function ensureBackendRunning(backendManager, logger) {
+// export async function ensureBackendRunning(backendManager, logger) {
+//   logger.info(`Checking backend on ${BACKEND_HOST}:${BACKEND_PORT}...`);
+
+//   // Startup service diagnostics (req #10): record "service installed" and
+//   // "service state" up front so the logs always carry all four checks
+//   // (installed → running → /health → /version). /health and /version are
+//   // logged below by waitUntilHealthy / verifyVersion.
+//   if (isServiceMode) {
+//     try {
+//       const svcState = await queryServiceState();
+//       logger.info(
+//         `[startup] service NuqtaPlusBackend: installed=${svcState !== 'not-installed'} state=${svcState}`
+//       );
+//     } catch (err) {
+//       logger.warn(`[startup] could not query service state: ${err.message}`);
+//     }
+//   }
+
+//   // (a) Already healthy — validate ownership via /version and we're done.
+//   if (await checkHealth()) {
+//     logger.info('Backend already running — verifying ownership');
+//     const { ok, version, error } = await verifyVersion(logger);
+//     if (ok) {
+//       if (isServiceMode) backendManager._serviceRunningCached = true;
+//       return { status: 'ready', version };
+//     }
+//     // Version mismatch on an already-running backend. In service mode this is
+//     // almost always either a stale service (files upgraded, old process still
+//     // in memory) or a foreign/orphan process squatting the port. Reconcile
+//     // instead of returning the bare warning.
+//     if (isServiceMode) {
+//       return await reconcileServiceVersion(backendManager, logger, version);
+//     }
+//     return { status: 'error', version, error };
+//   }
+
+//   // (b) Port occupied but /health failed → foreign process holding our port.
+//   if (await isPortOccupied()) {
+//     const msg =
+//       `Port ${BACKEND_PORT} is occupied by a foreign process ` +
+//       `(non-nuqtaplus or incompatible). Close the conflicting app and retry.`;
+//     logger.error(msg);
+//     return { status: 'error', version: null, error: msg };
+//   }
+
+//   // (c) Bring the backend up.
+//   //     SERVICE mode → ask the SCM to start NuqtaPlusBackend.
+//   //     DEV mode     → spawn the child via BackendManager (legacy).
+//   if (isServiceMode) {
+//     try {
+//       logger.info('[svc] backend not responding — requesting SCM start');
+//       await backendManager.StartBackend(); // delegates to serviceController
+//     } catch (err) {
+//       const msg = `Failed to start NuqtaPlusBackend service: ${err.message}`;
+//       logger.error(err, { phase: 'svc-start' });
+//       return { status: 'error', version: null, error: msg };
+//     }
+//   } else if (!backendManager.isRunning()) {
+//     try {
+//       logger.info('Spawning backend process...');
+//       await backendManager.StartBackend();
+//     } catch (err) {
+//       const msg = `Failed to spawn backend: ${err.message}`;
+//       logger.error(err, { phase: 'spawn' });
+//       return { status: 'error', version: null, error: msg };
+//     }
+//   } else {
+//     logger.info('Backend process is running but not yet healthy — waiting...');
+//   }
+
+//   // (d) Wait for healthy
+//   if (!(await waitUntilHealthy(logger))) {
+//     const msg = `Backend startup timeout — /health failed after ${HEALTH_POLL_MAX_RETRIES}s`;
+//     logger.error(msg);
+//     return { status: 'error', version: null, error: msg };
+//   }
+
+//   // (e) Version check
+//   const { ok, version, error } = await verifyVersion(logger);
+//   if (!ok) return { status: 'error', version, error };
+
+//   if (isServiceMode) backendManager._serviceRunningCached = true;
+//   return { status: 'ready', version };
+// }
+
+export async function ensureBackendRunning(backendManager, logger, options = {}) {
+  const onProgress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
+
+  const progress = (value, text) => {
+    try {
+      onProgress(value, text);
+    } catch {
+      // ignore splash progress errors
+    }
+  };
+
+  progress(25, 'فحص الخادم...');
   logger.info(`Checking backend on ${BACKEND_HOST}:${BACKEND_PORT}...`);
 
-  // Startup service diagnostics (req #10): record "service installed" and
-  // "service state" up front so the logs always carry all four checks
-  // (installed → running → /health → /version). /health and /version are
-  // logged below by waitUntilHealthy / verifyVersion.
   if (isServiceMode) {
+    progress(30, 'فحص خدمة الخادم...');
     try {
       const svcState = await queryServiceState();
       logger.info(
@@ -307,69 +401,90 @@ export async function ensureBackendRunning(backendManager, logger) {
     }
   }
 
-  // (a) Already healthy — validate ownership via /version and we're done.
+  progress(35, 'التحقق من حالة الخادم...');
+
   if (await checkHealth()) {
+    progress(45, 'الخادم يعمل، جاري التحقق من الإصدار...');
     logger.info('Backend already running — verifying ownership');
+
     const { ok, version, error } = await verifyVersion(logger);
+
     if (ok) {
+      progress(85, 'الخادم جاهز...');
       if (isServiceMode) backendManager._serviceRunningCached = true;
       return { status: 'ready', version };
     }
-    // Version mismatch on an already-running backend. In service mode this is
-    // almost always either a stale service (files upgraded, old process still
-    // in memory) or a foreign/orphan process squatting the port. Reconcile
-    // instead of returning the bare warning.
+
     if (isServiceMode) {
+      progress(55, 'معالجة اختلاف إصدار الخدمة...');
       return await reconcileServiceVersion(backendManager, logger, version);
     }
+
+    progress(90, 'حدث خطأ في إصدار الخادم...');
     return { status: 'error', version, error };
   }
 
-  // (b) Port occupied but /health failed → foreign process holding our port.
+  progress(42, 'فحص منفذ الخادم...');
+
   if (await isPortOccupied()) {
     const msg =
       `Port ${BACKEND_PORT} is occupied by a foreign process ` +
       `(non-nuqtaplus or incompatible). Close the conflicting app and retry.`;
     logger.error(msg);
+    progress(90, 'منفذ الخادم مستخدم من برنامج آخر...');
     return { status: 'error', version: null, error: msg };
   }
 
-  // (c) Bring the backend up.
-  //     SERVICE mode → ask the SCM to start NuqtaPlusBackend.
-  //     DEV mode     → spawn the child via BackendManager (legacy).
+  progress(50, 'تشغيل الخادم...');
+
   if (isServiceMode) {
     try {
       logger.info('[svc] backend not responding — requesting SCM start');
-      await backendManager.StartBackend(); // delegates to serviceController
+      progress(55, 'تشغيل خدمة الخادم...');
+      await backendManager.StartBackend();
     } catch (err) {
       const msg = `Failed to start NuqtaPlusBackend service: ${err.message}`;
       logger.error(err, { phase: 'svc-start' });
+      progress(90, 'فشل تشغيل خدمة الخادم...');
       return { status: 'error', version: null, error: msg };
     }
   } else if (!backendManager.isRunning()) {
     try {
       logger.info('Spawning backend process...');
+      progress(55, 'تشغيل عملية الخادم...');
       await backendManager.StartBackend();
     } catch (err) {
       const msg = `Failed to spawn backend: ${err.message}`;
       logger.error(err, { phase: 'spawn' });
+      progress(90, 'فشل تشغيل عملية الخادم...');
       return { status: 'error', version: null, error: msg };
     }
   } else {
     logger.info('Backend process is running but not yet healthy — waiting...');
+    progress(60, 'بانتظار جاهزية الخادم...');
   }
 
-  // (d) Wait for healthy
+  progress(68, 'انتظار استجابة الخادم...');
+
   if (!(await waitUntilHealthy(logger))) {
     const msg = `Backend startup timeout — /health failed after ${HEALTH_POLL_MAX_RETRIES}s`;
     logger.error(msg);
+    progress(90, 'انتهت مهلة تشغيل الخادم...');
     return { status: 'error', version: null, error: msg };
   }
 
-  // (e) Version check
+  progress(80, 'التحقق من إصدار الخادم...');
+
   const { ok, version, error } = await verifyVersion(logger);
-  if (!ok) return { status: 'error', version, error };
+
+  if (!ok) {
+    progress(90, 'فشل التحقق من إصدار الخادم...');
+    return { status: 'error', version, error };
+  }
 
   if (isServiceMode) backendManager._serviceRunningCached = true;
+
+  progress(95, 'الخادم جاهز...');
+
   return { status: 'ready', version };
 }

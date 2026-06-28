@@ -60,7 +60,7 @@ export const navigationRegistry = [
     children: [
       {
         id: 'sell-pos',
-        label: 'بيع جديد',
+        label: 'نقطة البيع',
         icon: 'mdi-cash-register',
         route: '/sales/pos',
         permission: 'sales:create',
@@ -69,14 +69,8 @@ export const navigationRegistry = [
         keywords: ['pos', 'sell', 'نقطة بيع', 'كاشير', 'بيع'],
       },
       {
-        // Unified "فاتورة بيع جديدة": a full sale invoice supporting cash OR
-        // installment (cash default). Gated ONLY by `sales:create` — NOT by the
-        // installments feature — so the cash invoice (and the page itself) stay
-        // reachable when installments are off; only the installment OPTION inside
-        // the page is feature-gated. `id` is kept stable so existing pins/recents
-        // and the derived `nav.sell-installment` command id don't break.
         id: 'sell-installment',
-        label: 'فاتورة بيع جديدة',
+        label: 'فاتورة مبيعات',
         icon: 'mdi-cart-plus',
         route: '/sales/new',
         permission: 'sales:create',
@@ -194,7 +188,7 @@ export const navigationRegistry = [
       },
       {
         id: 'categories',
-        label: 'التصنيفات',
+        label: 'الفئات',
         icon: 'mdi-shape-outline',
         route: '/categories',
         permission: 'view:categories',
@@ -430,14 +424,14 @@ export const navigationRegistry = [
     icon: 'mdi-chart-box-outline',
     order: 70,
     children: [
-      {
-        id: 'reports-detailed',
-        label: 'تقارير مفصّلة',
-        icon: 'mdi-file-chart-outline',
-        route: '/reports',
-        permission: 'view:reports',
-        keywords: ['reports', 'تقارير', 'مفصلة'],
-      },
+      // {
+      //   id: 'reports-detailed',
+      //   label: 'تقارير مفصّلة',
+      //   icon: 'mdi-file-chart-outline',
+      //   route: '/reports',
+      //   permission: 'view:reports',
+      //   keywords: ['reports', 'تقارير', 'مفصلة'],
+      // },
       {
         id: 'reports-financial',
         label: 'الربح والخسارة والوضع المالي',

@@ -55,14 +55,14 @@ export const pageCommands = [
     execute: (ctx) => ctx.app.navigate('/sales/pos'),
   },
 
-  // ── Generic page action available on any route ───────────────────────────
-  {
-    id: 'page.print',
-    title: 'طباعة',
-    icon: 'mdi-printer',
-    group: 'إجراءات',
-    scope: 'route', // no `routes` ⇒ matches every route
-    keywords: ['print', 'طباعة'],
-    execute: (ctx) => ctx.app.print(),
-  },
+  // // ── Generic page action available on any route ───────────────────────────
+  // {
+  //   id: 'page.print',
+  //   title: 'طباعة',
+  //   icon: 'mdi-printer',
+  //   group: 'إجراءات',
+  //   scope: 'route', // no `routes` ⇒ matches every route
+  //   keywords: ['print', 'طباعة'],
+  //   execute: (ctx) => ctx.app.print(),
+  // },
 ];

@@ -12,7 +12,7 @@
 
     <!-- Balances summary cards (kept above the table; show the true current
          balances regardless of the date window applied to the ledger). -->
-    <div v-if="ledger" class="summary-grid page-section">
+    <div v-if="ledger" class="summary-grid page-section mb-4">
       <StatCard
         v-for="(amount, currency) in ledger.balances"
         :key="currency"
@@ -136,10 +136,20 @@ const filters = reactive({ dateFrom: '', dateTo: '' });
 const headers = [
   { title: 'التاريخ', key: 'date', format: 'date' },
   { title: 'الرقم', key: 'number', ltr: true },
-  { title: 'الاتجاه', key: 'direction', exportValue: (r) => (r.direction === 'in' ? 'داخل' : 'خارج') },
+  {
+    title: 'الاتجاه',
+    key: 'direction',
+    exportValue: (r) => (r.direction === 'in' ? 'داخل' : 'خارج'),
+  },
   { title: 'المبلغ', key: 'amount', format: 'currency', align: 'end' },
   // Running balance is order-dependent — disable sorting so the total isn't scrambled.
-  { title: 'الرصيد بعد الحركة', key: 'runningBalance', format: 'currency', align: 'end', sortable: false },
+  {
+    title: 'الرصيد بعد الحركة',
+    key: 'runningBalance',
+    format: 'currency',
+    align: 'end',
+    sortable: false,
+  },
   { title: 'المصدر', key: 'sourceType', exportValue: (r) => sourceLabel(r.sourceType) },
   { title: 'البيان', key: 'description' },
 ];
