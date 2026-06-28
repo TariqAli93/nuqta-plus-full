@@ -66,10 +66,10 @@
                 <tr v-for="(row, rowIndex) in rows" :key="rowKey(row, rowIndex)">
                   <td v-for="col in columns" :key="col.key" :class="alignClass(col)">
                     <span
-                      :dir="col.numeric ? 'ltr' : undefined"
-                      :class="{ 'st-ltr-value': col.numeric }"
+                      :dir="col.numeric || col.ltr ? 'ltr' : undefined"
+                      :class="{ 'st-ltr-value': col.numeric || col.ltr }"
                     >
-                      {{ displayValue(row[col.key]) }}
+                      {{ getCellDisplayValue(row, col) }}
                     </span>
                   </td>
                 </tr>
@@ -86,8 +86,8 @@
                   <td v-for="(col, columnIndex) in columns" :key="col.key" :class="alignClass(col)">
                     <span
                       v-if="totals[col.key] != null"
-                      :dir="col.numeric ? 'ltr' : undefined"
-                      :class="{ 'st-ltr-value': col.numeric }"
+                      :dir="col.numeric || col.ltr ? 'ltr' : undefined"
+                      :class="{ 'st-ltr-value': col.numeric || col.ltr }"
                     >
                       {{ displayValue(totals[col.key]) }}
                     </span>
@@ -140,7 +140,8 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { formatCell } from './formatters.js';
 
 const props = defineProps({
   modelValue: {
@@ -234,6 +235,7 @@ const alignClass = (col) => {
   return 'st-start';
 };
 
+// Used for the totals row, whose values arrive already formatted as strings.
 const displayValue = (value) => {
   if (value === null || value === undefined || value === '') {
     return '—';
@@ -241,6 +243,88 @@ const displayValue = (value) => {
 
   return value;
 };
+
+const isBlank = (value) => value === null || value === undefined || value === '';
+
+/**
+ * Read a value off a row, supporting both a flat key ("debit") and a nested
+ * path ("customer.name"). A literal matching key wins over path traversal so a
+ * column whose key genuinely contains a dot still resolves.
+ */
+const readPath = (row, key) => {
+  if (row == null || typeof key !== 'string' || key === '') {
+    return undefined;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(row, key)) {
+    return row[key];
+  }
+
+  if (key.indexOf('.') === -1) {
+    return undefined;
+  }
+
+  return key
+    .split('.')
+    .reduce((acc, part) => (acc == null ? undefined : acc[part]), row);
+};
+
+/**
+ * The RAW (unformatted) value for a cell — the same resolution order the live
+ * SmartTable uses, with an `exportValue`/`printValue` fallback for columns that
+ * only render via a slot (so print still has something to show). Never coerces
+ * the value; returning the original lets the formatter decide presentation.
+ */
+const getCellRawValue = (row, column) => {
+  if (!row || !column) {
+    return undefined;
+  }
+
+  if (typeof column.printValue === 'function') {
+    return column.printValue(row);
+  }
+
+  if (typeof column.value === 'function') {
+    return column.value(row);
+  }
+
+  if (typeof column.exportValue === 'function') {
+    return column.exportValue(row);
+  }
+
+  return readPath(row, column.key);
+};
+
+/**
+ * Turn a raw value into its printable string using the column's formatter
+ * (function or named format like currency/number/date). Empty values render as
+ * "—" and are NEVER turned into 0 — only genuine numbers run through the
+ * numeric formatter.
+ */
+const formatPrintableValue = (value, column, row) => {
+  if (isBlank(value)) {
+    return '—';
+  }
+
+  const format = column?.printFormat ?? column?.format;
+
+  if (column && format) {
+    const formatted = formatCell({ ...column, format }, value, row);
+    if (!isBlank(formatted)) {
+      return formatted;
+    }
+  }
+
+  return value;
+};
+
+/**
+ * Final display string for a print cell: raw value → formatted display value.
+ * This is what the template binds to, so print mirrors the live table instead
+ * of doing a raw `row[key]` read (which lost type and rendered money as 0).
+ */
+const getCellDisplayValue = (row, column) =>
+  formatPrintableValue(getCellRawValue(row, column), column, row);
 
 const rowKey = (row, index) => {
   if (

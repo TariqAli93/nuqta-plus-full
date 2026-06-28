@@ -394,6 +394,192 @@ export class InstallmentActionService {
       },
     };
   }
+
+  /**
+   * Unified installments list for the collections workspace (READ-ONLY).
+   * Mirrors listOverdue's joins/scope/pagination but the WHERE comes from a
+   * `filter` bucket instead of the hard-coded overdue clause.
+   *   filter: all | due_today | overdue | due_7d | paid | unpaid
+   *   optional: search (customer name / invoice # / installment #),
+   *             branchId, startDate, endDate, page, limit
+   */
+  async listInstallments(query, user) {
+    const db = await getDb();
+    const branchIds = branchFilterFor(user);
+
+    const page = Math.max(1, Number(query?.page) || 1);
+    const limit = Math.min(200, Math.max(1, Number(query?.limit) || 25));
+    const offset = (page - 1) * limit;
+
+    const conditions = [];
+
+    if (branchIds && branchIds.length > 0) {
+      conditions.push(inArray(sales.branchId, branchIds));
+    } else if (branchIds && branchIds.length === 0) {
+      return { data: [], meta: { page, limit, total: 0, totalPages: 0 } };
+    }
+
+    const filter = String(query?.filter || 'all');
+    if (filter === 'due_today') {
+      conditions.push(eq(installments.status, 'pending'));
+      conditions.push(sql`${installments.dueDate}::date = CURRENT_DATE`);
+    } else if (filter === 'overdue') {
+      conditions.push(eq(installments.status, 'pending'));
+      conditions.push(sql`${installments.dueDate}::date < CURRENT_DATE`);
+    } else if (filter === 'due_7d') {
+      conditions.push(eq(installments.status, 'pending'));
+      conditions.push(sql`${installments.dueDate}::date BETWEEN CURRENT_DATE AND CURRENT_DATE + 7`);
+    } else if (filter === 'paid') {
+      conditions.push(eq(installments.status, 'paid'));
+    } else if (filter === 'unpaid') {
+      conditions.push(eq(installments.status, 'pending'));
+    } else {
+      conditions.push(sql`${installments.status} <> 'cancelled'`);
+    }
+
+    if (query?.branchId) {
+      conditions.push(eq(sales.branchId, Number(query.branchId)));
+    }
+    if (query?.startDate) {
+      conditions.push(gte(installments.dueDate, query.startDate));
+    }
+    if (query?.endDate) {
+      conditions.push(lte(installments.dueDate, query.endDate));
+    }
+
+    const search = String(query?.search || '').trim();
+    if (search) {
+      const like = `%${search}%`;
+      const numeric = /^\d+$/.test(search) ? Number(search) : null;
+      conditions.push(
+        numeric != null
+          ? sql`(${customers.name} ILIKE ${like} OR ${sales.invoiceNumber} ILIKE ${like} OR ${installments.installmentNumber} = ${numeric})`
+          : sql`(${customers.name} ILIKE ${like} OR ${sales.invoiceNumber} ILIKE ${like})`
+      );
+    }
+
+    const where = and(...conditions);
+    const overdueDaysSql = sql`CASE
+        WHEN ${installments.status} = 'pending' AND ${installments.dueDate}::date < CURRENT_DATE
+          THEN (CURRENT_DATE - ${installments.dueDate}::date)
+        ELSE 0
+      END`;
+
+    const data = await db
+      .select({
+        id: installments.id,
+        saleId: installments.saleId,
+        customerId: installments.customerId,
+        customerName: customers.name,
+        customerPhone: customers.phone,
+        invoiceNumber: sales.invoiceNumber,
+        branchId: sales.branchId,
+        branchName: branches.name,
+        installmentNumber: installments.installmentNumber,
+        dueDate: installments.dueDate,
+        dueAmount: installments.dueAmount,
+        paidAmount: installments.paidAmount,
+        remainingAmount: installments.remainingAmount,
+        currency: installments.currency,
+        status: installments.status,
+        overdueDays: overdueDaysSql.as('overdueDays'),
+      })
+      .from(installments)
+      .leftJoin(sales, eq(installments.saleId, sales.id))
+      .leftJoin(customers, eq(installments.customerId, customers.id))
+      .leftJoin(branches, eq(sales.branchId, branches.id))
+      .where(where)
+      .orderBy(asc(installments.dueDate))
+      .limit(limit)
+      .offset(offset);
+
+    const [{ count }] = await db
+      .select({ count: sql`COUNT(*)::int` })
+      .from(installments)
+      .leftJoin(sales, eq(installments.saleId, sales.id))
+      .leftJoin(customers, eq(installments.customerId, customers.id))
+      .where(where);
+
+    const total = Number(count || 0);
+
+    return {
+      data: data.map((r) => ({
+        ...r,
+        dueAmount: Number(r.dueAmount || 0),
+        paidAmount: Number(r.paidAmount || 0),
+        remainingAmount: Number(r.remainingAmount || 0),
+        overdueDays: Number(r.overdueDays || 0),
+      })),
+      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
+  /**
+   * Summary stats for the collections dashboard cards (READ-ONLY). Counts are
+   * currency-agnostic; the due/overdue money totals are grouped by currency
+   * (no conversion — mirrors the dashboard convention).
+   */
+  async getCollectionStats(query, user) {
+    const db = await getDb();
+    const branchIds = branchFilterFor(user);
+
+    const scope = [];
+    if (branchIds && branchIds.length > 0) {
+      scope.push(inArray(sales.branchId, branchIds));
+    } else if (branchIds && branchIds.length === 0) {
+      return {
+        dueTodayCount: 0,
+        overdueCount: 0,
+        customersWithUnpaid: 0,
+        dueByCurrency: [],
+        overdueByCurrency: [],
+      };
+    }
+    if (query?.branchId) {
+      scope.push(eq(sales.branchId, Number(query.branchId)));
+    }
+    const scopeWhere = scope.length ? and(...scope) : undefined;
+    const withScope = (...extra) => and(...extra, ...(scopeWhere ? [scopeWhere] : []));
+
+    const [counts] = await db
+      .select({
+        dueTodayCount: sql`COALESCE(SUM(CASE WHEN ${installments.status}='pending' AND ${installments.dueDate}::date = CURRENT_DATE THEN 1 ELSE 0 END),0)::int`,
+        overdueCount: sql`COALESCE(SUM(CASE WHEN ${installments.status}='pending' AND ${installments.dueDate}::date < CURRENT_DATE THEN 1 ELSE 0 END),0)::int`,
+        customersWithUnpaid: sql`COUNT(DISTINCT CASE WHEN ${installments.status}='pending' THEN ${installments.customerId} END)::int`,
+      })
+      .from(installments)
+      .leftJoin(sales, eq(installments.saleId, sales.id))
+      .where(scopeWhere);
+
+    const sumByCurrency = (whereClause) =>
+      db
+        .select({
+          currency: installments.currency,
+          amount: sql`COALESCE(SUM(${installments.remainingAmount}::numeric),0)`,
+        })
+        .from(installments)
+        .leftJoin(sales, eq(installments.saleId, sales.id))
+        .where(whereClause)
+        .groupBy(installments.currency);
+
+    const dueByCurrency = await sumByCurrency(withScope(eq(installments.status, 'pending')));
+    const overdueByCurrency = await sumByCurrency(
+      withScope(eq(installments.status, 'pending'), sql`${installments.dueDate}::date < CURRENT_DATE`)
+    );
+
+    const mapCur = (rows) =>
+      rows
+        .map((r) => ({ currency: r.currency || 'IQD', amount: Number(r.amount || 0) }))
+        .filter((r) => r.amount > 0);
+
+    return {
+      dueTodayCount: Number(counts?.dueTodayCount || 0),
+      overdueCount: Number(counts?.overdueCount || 0),
+      customersWithUnpaid: Number(counts?.customersWithUnpaid || 0),
+      dueByCurrency: mapCur(dueByCurrency),
+      overdueByCurrency: mapCur(overdueByCurrency),
+    };
+  }
 }
 
 export default new InstallmentActionService();

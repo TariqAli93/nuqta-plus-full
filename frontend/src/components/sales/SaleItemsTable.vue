@@ -9,11 +9,12 @@
 
     <template v-else>
       <!-- Header -->
-      <div class="items-row items-row--head">
+      <div class="items-row items-row--head" :class="{ 'items-row--with-interest': showInterest }">
         <div>المنتج</div>
         <div class="ta-center">الكمية</div>
         <div class="ta-end">السعر</div>
         <div class="ta-end">الخصم</div>
+        <div v-if="showInterest" class="ta-end">فائدة الوحدة</div>
         <div class="ta-end">الإجمالي</div>
         <div></div>
       </div>
@@ -22,7 +23,10 @@
         v-for="(item, index) in items"
         :key="index"
         class="items-row"
-        :class="{ 'items-row--error': getQuantityError(item).length > 0 }"
+        :class="{
+          'items-row--error': getQuantityError(item).length > 0,
+          'items-row--with-interest': showInterest,
+        }"
       >
         <!-- Product (name + sku + unit) -->
         <div class="cell-product" data-label="المنتج">
@@ -85,9 +89,20 @@
             variant="outlined"
             hide-details
             class="cell-num"
-            @input="(e) => (item.unitPrice = parseAmount(e.target.value))"
+            @input="(e) => onPriceInput(item, e.target.value)"
           />
           <span v-else class="cell-readonly">{{ formatCurrency(item.unitPrice, currency) }}</span>
+          <v-chip
+            v-if="item.isCustomPrice"
+            size="x-small"
+            color="info"
+            variant="tonal"
+            label
+            class="mt-1"
+            :title="`السعر الأصلي: ${formatCurrency(item.unitPriceOriginal, currency)}`"
+          >
+            سعر مخصص
+          </v-chip>
         </div>
 
         <!-- Discount -->
@@ -100,6 +115,19 @@
             placeholder="0"
             class="cell-num"
             @input="(e) => (item.discount = parseAmount(e.target.value))"
+          />
+        </div>
+
+        <!-- Per-unit installment interest (فائدة الوحدة) — installment only -->
+        <div v-if="showInterest" class="ta-end" data-label="فائدة الوحدة">
+          <v-text-field
+            :model-value="groupNumber(item.interestPerUnit)"
+            density="compact"
+            variant="outlined"
+            hide-details
+            placeholder="0"
+            class="cell-num"
+            @input="(e) => (item.interestPerUnit = parseAmount(e.target.value))"
           />
         </div>
 
@@ -156,18 +184,30 @@
 import { formatCurrency } from '@/utils/formatters';
 import { groupNumber, parseAmount } from '@/composables/sales/moneyInput';
 
-defineProps({
+const props = defineProps({
   items: { type: Array, default: () => [] },
   currency: { type: String, default: 'IQD' },
   unitOptionsFor: { type: Function, required: true },
   getQuantityError: { type: Function, required: true },
   canEditPrice: { type: Boolean, default: false },
+  // Show the per-unit installment interest column (installment invoices only).
+  showInterest: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['remove', 'unit-change']);
 
+// Apply a hand-edited unit price and flag the line as custom-priced when it
+// diverges from the catalog/tier price (per-invoice only — never the product).
+const onPriceInput = (item, raw) => {
+  item.unitPrice = parseAmount(raw);
+  item.isCustomPrice = Number(item.unitPrice) !== Number(item.unitPriceOriginal);
+};
+
+// Line net = qty·price − qty·discount (+ qty·interestPerUnit on installments).
 const netOf = (item) =>
-  item.quantity * item.unitPrice - (item.discount || 0) * item.quantity;
+  item.quantity * item.unitPrice -
+  (item.discount || 0) * item.quantity +
+  (props.showInterest ? (item.interestPerUnit || 0) * item.quantity : 0);
 
 const step = (item, delta) => {
   const next = Number(item.quantity || 0) + delta;
@@ -209,6 +249,13 @@ const onUnit = (item, unitId) => {
   padding: 6px 4px;
   min-height: 52px;
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.06);
+
+  // 7-column variant: adds the «فائدة الوحدة» column for installment invoices.
+  // Cash invoices keep the default 6-column layout untouched.
+  &--with-interest {
+    grid-template-columns:
+      minmax(0, 2.4fr) 120px minmax(0, 1fr) minmax(0, 0.9fr) minmax(0, 0.9fr) minmax(0, 1fr) 56px;
+  }
 
   &--head {
     position: sticky;

@@ -6,6 +6,16 @@ export class CollectionsController {
     return reply.send({ success: true, data: result.data, meta: result.meta });
   }
 
+  async installments(request, reply) {
+    const result = await installmentActionService.listInstallments(request.query, request.user);
+    return reply.send({ success: true, data: result.data, meta: result.meta });
+  }
+
+  async stats(request, reply) {
+    const data = await installmentActionService.getCollectionStats(request.query, request.user);
+    return reply.send({ success: true, data });
+  }
+
   async customerHistory(request, reply) {
     const data = await installmentActionService.listForCustomer(
       Number(request.params.customerId),

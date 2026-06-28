@@ -37,7 +37,7 @@ rows expose `data-sale-item-id`.
 | `pos-pay-method-cash` / `pos-pay-method-card` | payment-method toggle buttons |
 | `pos-card-ref` | card reference field (card only) |
 | `pos-sale-notes` | invoice-level note (inside the "خيارات" panel) |
-| `pos-pay-full` | "المبلغ كامل" tender button |
+| `pos-line-price-<productId>` | per-line editable unit price (goods; with `sales:edit_price`) |
 | `pos-checkout` | "دفع وإتمام" (F9) |
 
 ### Shift dialogs — `src/components/cashSession/`

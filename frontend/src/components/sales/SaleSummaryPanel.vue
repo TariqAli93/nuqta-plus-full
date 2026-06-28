@@ -41,7 +41,7 @@
         <span>الخصم الإضافي</span>
         <span>− {{ formatCurrency(discountAmount, currency) }}</span>
       </div>
-      <div v-if="paymentType === 'installment'" class="totals__row">
+      <div v-if="paymentType === 'installment' && interestValue > 0" class="totals__row">
         <span>الفائدة المضافة</span>
         <span>{{ formatCurrency(interestValue, currency) }}</span>
       </div>

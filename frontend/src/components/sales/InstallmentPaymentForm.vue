@@ -24,29 +24,8 @@
         @update:model-value="(v) => set('installmentCount', Number(v))"
       />
 
-      <!-- Interest rate -->
-      <v-text-field
-        :model-value="sale.interestRate"
-        label="نسبة الفائدة (%)"
-        type="number"
-        min="0"
-        max="100"
-        density="comfortable"
-        variant="outlined"
-        hide-details="auto"
-        @update:model-value="setInterestRate"
-      />
-
-      <!-- Interest amount -->
-      <v-text-field
-        :model-value="groupNumber(sale.interestAmount)"
-        label="مبلغ الفائدة"
-        :suffix="currency"
-        density="comfortable"
-        variant="outlined"
-        hide-details="auto"
-        @input="(e) => setInterestAmount(parseAmount(e.target.value))"
-      />
+      <!-- Interest is now entered per product line («فائدة الوحدة») in the
+           items table — there is no invoice-level interest input here. -->
 
       <!-- First due date -->
       <v-text-field
@@ -143,8 +122,6 @@ defineProps({
   actualInterestRate: { type: Number, default: 0 },
   remainingAmount: { type: Number, default: 0 },
   schedule: { type: Array, default: () => [] },
-  setInterestRate: { type: Function, required: true },
-  setInterestAmount: { type: Function, required: true },
 });
 
 const emit = defineEmits(['update']);

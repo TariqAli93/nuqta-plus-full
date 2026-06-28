@@ -84,6 +84,9 @@ export function useSaleSubmission(deps) {
         baseQuantity: toBaseQuantity(it.quantity, {
           conversionFactor: Number(it.unitConversionFactor) || 1,
         }),
+        // Per-unit installment interest («فائدة الوحدة»). Only meaningful on
+        // installment invoices; the backend ignores it for cash sales.
+        interestPerUnit: isInstallment ? Math.max(0, Number(it.interestPerUnit) || 0) : 0,
         notes: it.notes && String(it.notes).trim() ? String(it.notes).trim() : undefined,
       })),
     };
@@ -91,8 +94,8 @@ export function useSaleSubmission(deps) {
     if (isInstallment) {
       payload.paidAmount = sale.value.paidAmount || 0;
       payload.installmentCount = sale.value.installmentCount;
-      payload.interestRate = sale.value.interestRate || 0;
-      payload.interestAmount = sale.value.interestAmount || 0;
+      // interestRate/interestAmount are deprecated at the invoice level — the
+      // backend now derives interest from each item's interestPerUnit.
       payload.firstInstallmentDate = sale.value.firstInstallmentDate;
       payload.installmentPeriod = sale.value.installmentPeriod || 'monthly';
     } else {

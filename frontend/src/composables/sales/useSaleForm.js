@@ -122,6 +122,7 @@ export function useSaleForm() {
       item.unitPriceOriginal = perUnit;
       item.originalCurrency = p.currency || 'USD';
       item.unitPrice = convertPrice(perUnit, item.originalCurrency, sale.value.currency);
+      item.isCustomPrice = false;
     }
   };
 
@@ -170,6 +171,7 @@ export function useSaleForm() {
     item.unitPriceOriginal = perUnit;
     item.originalCurrency = p.currency || 'USD';
     item.unitPrice = convertPrice(perUnit, item.originalCurrency, sale.value.currency);
+    item.isCustomPrice = false;
     const cap = availableInUnit(item);
     if (Number.isFinite(cap) && cap > 0 && item.quantity > cap) {
       item.quantity = cap;
@@ -197,7 +199,13 @@ export function useSaleForm() {
       unitPriceOriginal: perUnit,
       originalCurrency: product.currency || 'USD',
       unitPrice: convertPrice(perUnit, product.currency || 'USD', sale.value.currency),
+      // True once the user edits this line's price away from the catalog/tier
+      // price (per-invoice only). Reset when the unit re-prices the line.
+      isCustomPrice: false,
       discount: 0,
+      // Per-unit installment interest («فائدة الوحدة»). Starts at 0; the user
+      // types it manually on installment invoices only (hidden for cash).
+      interestPerUnit: 0,
       availableStock: cap,
       baseAvailableStock: baseAvailable,
       notes: '',
@@ -385,35 +393,9 @@ export function useSaleForm() {
     }
   );
 
-  // Interest rate → amount.
-  watch(
-    () => [calc.total.value, sale.value.interestRate],
-    () => {
-      if (
-        sale.value.paymentType === 'installment' &&
-        sale.value.interestInputType === 'rate' &&
-        calc.total.value > 0
-      ) {
-        const rate = sale.value.interestRate || 0;
-        sale.value.interestAmount = r2(calc.total.value * (rate / 100));
-      }
-    }
-  );
-
-  // Interest amount → rate.
-  watch(
-    () => [calc.total.value, sale.value.interestAmount],
-    () => {
-      if (
-        sale.value.paymentType === 'installment' &&
-        sale.value.interestInputType === 'amount' &&
-        calc.total.value > 0
-      ) {
-        const interest = sale.value.interestAmount || 0;
-        sale.value.interestRate = r2((interest / calc.total.value) * 100);
-      }
-    }
-  );
+  // Invoice-level interest is deprecated — interest is now entered per product
+  // line as a per-unit amount (item.interestPerUnit) and summed in
+  // useSaleCalculations. The old rate↔amount sync watchers were removed.
 
   // ── Input handlers exposed to forms ──────────────────────────────────────────
   // Received is bounded to [0, total]: no negatives, and never above the invoice
@@ -426,24 +408,6 @@ export function useSaleForm() {
     if (v > t) v = t;
     sale.value.receivedAmount = v;
   };
-  const setInterestRate = (value) => {
-    if (value === null || value === undefined || isNaN(value)) {
-      sale.value.interestRate = 0;
-    } else {
-      sale.value.interestRate = Number(value);
-    }
-    sale.value.interestInputType = 'rate';
-    if (calc.total.value > 0) {
-      sale.value.interestAmount = calc.total.value * ((Number(value) || 0) / 100);
-    }
-  };
-  const setInterestAmount = (amount) => {
-    const num = Number(amount) || 0;
-    sale.value.interestAmount = num;
-    sale.value.interestInputType = 'amount';
-    if (calc.total.value > 0) sale.value.interestRate = (num / calc.total.value) * 100;
-  };
-
   // ── Data loading ──────────────────────────────────────────────────────────────
   const loadProducts = async () => {
     const p = await productStore.fetch({
@@ -485,9 +449,13 @@ export function useSaleForm() {
             unitConversionFactor: Number(item.unitConversionFactor) || 1,
             unitPrice: item.unitPrice,
             discount: item.discount || 0,
+            interestPerUnit: Number(item.interestPerUnit) || 0,
             notes: item.notes || '',
             _notesOpen: false,
             unitPriceOriginal: product?.sellingPrice || item.unitPrice,
+            isCustomPrice:
+              product?.sellingPrice != null &&
+              Number(item.unitPrice) !== Number(product.sellingPrice),
             originalCurrency: product?.currency || sale.value.currency,
             availableStock: availableStockOf(product),
           };
@@ -583,8 +551,6 @@ export function useSaleForm() {
     onCustomerSelected,
     onPriceTypeChange,
     setReceivedAmount,
-    setInterestRate,
-    setInterestAmount,
     // data
     loadProducts,
     saveDraft,

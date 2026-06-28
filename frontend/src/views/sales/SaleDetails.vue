@@ -37,7 +37,7 @@
         subtitle="عرض الفاتورة والمدفوعات والإرجاع"
         icon="mdi-receipt-text"
       >
-        <v-btn
+        <!-- <v-btn
           color="primary"
           prepend-icon="mdi-printer"
           :loading="printing"
@@ -46,7 +46,7 @@
           @click="handlePrint"
         >
           طباعة
-        </v-btn>
+        </v-btn> -->
 
         <v-btn
           color="primary"
@@ -56,7 +56,7 @@
           :title="isFullyReturned ? 'المعاينة معطلة — تم إرجاع جميع المنتجات' : ''"
           @click="previewPrint"
         >
-          معاينة الطباعة
+          المعاينة و الطباعة
         </v-btn>
 
         <v-btn
@@ -1198,6 +1198,10 @@ const buildSaleForPrint = () => {
         quantity: netQty,
         subtotal: netUnitPrice * netQty,
         discount: perUnitDiscount * netQty,
+        // Scale the per-line installment interest to the net (un-returned) qty so
+        // the printed line total stays consistent. unitPriceAfterInterest is
+        // per-unit, so it carries over unchanged via the spread above.
+        lineInterestAmount: sold > 0 ? Number(item.lineInterestAmount || 0) * (netQty / sold) : 0,
       };
     })
     .filter(Boolean);

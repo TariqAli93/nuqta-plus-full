@@ -132,6 +132,11 @@ export const products = pgTable('products', {
   // Per-unit overrides live on product_units; these are the product-level default.
   wholesalePrice: numeric('wholesale_price', { precision: 18, scale: 4 }),
   agentPrice: numeric('agent_price', { precision: 18, scale: 4 }),
+  // Default installment interest rate (%) for this product. Reserved/dormant:
+  // added for forward-compatibility but NOT yet read or seeded into invoices —
+  // line-level interest is entered manually as a per-unit amount at sale time.
+  // NULL/0 on every existing product so behaviour is unchanged.
+  installmentInterestRate: numeric('installment_interest_rate', { precision: 8, scale: 4 }).default('0'),
   tracksExpiry: boolean('tracks_expiry').notNull().default(false),
   status: text('status').notNull().default('available'),
   // Inventory: per-warehouse low-stock threshold. Falls back to minStock when null.
@@ -492,6 +497,17 @@ export const saleItems = pgTable('sale_items', {
   unitPrice: numeric('unit_price', { precision: 18, scale: 4 }).notNull(),
   discount: numeric('discount', { precision: 18, scale: 4 }).default('0'),
   subtotal: numeric('subtotal', { precision: 18, scale: 4 }).notNull(),
+  // ── Per-line installment interest snapshot (frozen at sale time) ───────────
+  // Interest is now set PER PRODUCT LINE as a per-unit amount, not at the
+  // invoice level. These are NULL/0 on every legacy row; `unitPriceAfterInterest`
+  // being non-NULL is the "new-style" flag that print/details use to render the
+  // final price (interest embedded) and suppress the old invoice-level footer.
+  // `subtotal` above stays the BASE line total (qty*unitPrice - qty*discount);
+  // the line's final total is `subtotal + interestAmount`.
+  unitPriceBeforeInterest: numeric('unit_price_before_interest', { precision: 18, scale: 4 }),
+  interestPerUnit: numeric('interest_per_unit', { precision: 18, scale: 4 }).default('0'),
+  interestAmount: numeric('interest_amount', { precision: 18, scale: 4 }).default('0'),
+  unitPriceAfterInterest: numeric('unit_price_after_interest', { precision: 18, scale: 4 }),
   unitId: integer('unit_id').references(() => productUnits.id, { onDelete: 'set null' }),
   unitName: text('unit_name'),
   unitConversionFactor: numeric('unit_conversion_factor', { precision: 18, scale: 6 })

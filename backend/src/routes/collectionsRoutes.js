@@ -32,6 +32,48 @@ export default async function collectionsRoutes(fastify) {
     },
   });
 
+  fastify.get('/installments', {
+    onRequest: [fastify.authenticate, fastify.authorize('sales:read')],
+    handler: collectionsController.installments,
+    schema: {
+      description: 'Unified installments list for the collections workspace (read-only)',
+      tags: ['collections'],
+      security: [{ bearerAuth: [] }],
+      querystring: {
+        type: 'object',
+        properties: {
+          filter: {
+            type: 'string',
+            enum: ['all', 'due_today', 'overdue', 'due_7d', 'paid', 'unpaid'],
+            default: 'all',
+          },
+          search: { type: 'string' },
+          branchId: { type: 'number' },
+          startDate: { type: 'string' },
+          endDate: { type: 'string' },
+          page: { type: 'number', default: 1 },
+          limit: { type: 'number', default: 25 },
+        },
+      },
+    },
+  });
+
+  fastify.get('/stats', {
+    onRequest: [fastify.authenticate, fastify.authorize('sales:read')],
+    handler: collectionsController.stats,
+    schema: {
+      description: 'Collections summary stats (counts + per-currency totals)',
+      tags: ['collections'],
+      security: [{ bearerAuth: [] }],
+      querystring: {
+        type: 'object',
+        properties: {
+          branchId: { type: 'number' },
+        },
+      },
+    },
+  });
+
   fastify.get('/customer/:customerId', {
     onRequest: [fastify.authenticate, fastify.authorize('sales:read')],
     handler: collectionsController.customerHistory,

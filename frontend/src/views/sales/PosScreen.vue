@@ -375,9 +375,6 @@
             :key="item.id"
             class="line"
             :class="{ 'line--flash': flashItemId === item.id }"
-            rounded="lg"
-            variant="tonal"
-            color="surface"
           >
             <!-- Row 1: name + per-line actions -->
             <div class="line__top">
@@ -447,6 +444,16 @@
               <v-chip v-if="item.discount > 0" size="x-small" color="warning" variant="tonal" label>
                 <v-icon start size="11">mdi-tag-outline</v-icon>خصم
               </v-chip>
+              <v-chip
+                v-if="item.isCustomPrice"
+                size="x-small"
+                color="info"
+                variant="tonal"
+                label
+                :title="`السعر الأصلي: ${formatMoney(item.originalPrice, currency)}`"
+              >
+                <v-icon start size="11">mdi-cash-edit</v-icon>سعر مخصص
+              </v-chip>
               <v-chip v-if="item.note" size="x-small" variant="tonal" label :title="item.note">
                 <v-icon start size="11">mdi-note-text-outline</v-icon>{{ truncate(item.note, 14) }}
               </v-chip>
@@ -466,6 +473,23 @@
                 label="السعر المستلم"
                 :error="!(Number(item.price) > 0)"
                 prepend-inner-icon="mdi-cash-edit"
+                @update:model-value="(v) => updatePrice(item.id, v)"
+              />
+            </div>
+
+            <!-- Goods line: editable unit price (per-invoice only; gated by
+                 sales:edit_price). Never changes the catalog price. -->
+            <div v-else-if="canEditPrice" @click.stop>
+              <v-text-field
+                :model-value="item.price"
+                :data-testid="`pos-line-price-${item.productId}`"
+                type="number"
+                min="0"
+                variant="outlined"
+                hide-details
+                hide-spin-buttons
+                label="سعر الوحدة"
+                :prepend-inner-icon="item.isCustomPrice ? 'mdi-pencil' : 'mdi-cash-edit'"
                 @update:model-value="(v) => updatePrice(item.id, v)"
               />
             </div>
@@ -711,19 +735,10 @@
           </v-expansion-panel>
         </v-expansion-panels>
 
-        <!-- Tender utilities -->
+        <!-- Tender utilities. The paid amount auto-fills with the cart total
+             (see usePosCart), so there's no «المبلغ كامل» button to press — just
+             tender a different amount via the numpad when needed. -->
         <div class="pay__utils">
-          <v-btn
-            data-testid="pos-pay-full"
-            color="success"
-            variant="elevated"
-            prepend-icon="mdi-cash-multiple"
-            :disabled="items.length === 0 || fullAmountDisabled"
-            :title="fullAmountDisabled ? 'غير متاح لفواتير الخدمات — تدفع بالسعر المستلم' : undefined"
-            @click="onFullPayment"
-          >
-            المبلغ كامل
-          </v-btn>
           <v-btn
             variant="text"
             color="error"
@@ -1037,6 +1052,7 @@ import { useAccountingPeriodStore } from '@/stores/accountingPeriod';
 import { useAuthStore } from '@/stores/auth';
 import { usePosCart } from '@/composables/usePosCart';
 import { useFeatureGate } from '@/composables/useFeatureGate';
+import { usePermissions } from '@/composables/usePermissions';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import EmptyState from '@/components/EmptyState.vue';
 import api from '@/plugins/axios';
@@ -1168,7 +1184,6 @@ const {
   change,
   remaining,
   itemCount,
-  fullAmountDisabled,
   canSubmit,
   lineSubtotal,
   priceType,
@@ -1194,6 +1209,11 @@ const {
   holdAsDraft,
   loadDraft,
 } = usePosCart();
+
+// Manual per-line price editing is gated by the same permission NewSale uses,
+// so a cashier without it sees read-only prices and can't undercharge.
+const { can } = usePermissions();
+const canEditPrice = computed(() => can('sales:edit_price'));
 
 // ── Local UI state ─────────────────────────────────────────────────────────
 const searchInput = ref('');
@@ -1340,11 +1360,6 @@ const onNumpad = (key) => {
   // Digit
   paidInput.value = (paidInput.value || '') + key;
   setPaid(parseFloat(paidInput.value) || 0);
-};
-
-const onFullPayment = () => {
-  applyExact();
-  // The watcher on payment.paidAmount syncs paidInput automatically.
 };
 
 // Card sales are normally paid in full at point of swipe — auto-fill exact

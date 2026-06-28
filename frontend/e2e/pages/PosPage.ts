@@ -83,9 +83,13 @@ export class PosPage extends BasePage {
     await this.tid(TID.pos.payMethod(method)).click();
   }
 
-  /** Tender the exact total. */
+  /**
+   * Tender the exact total. The paid amount now auto-fills with the cart total
+   * (the old «المبلغ كامل» button was removed), so this is a no-op kept for
+   * backward-compatible test flows.
+   */
   async payFull() {
-    await this.tid(TID.pos.payFull).click();
+    /* paid auto-fills with the total — nothing to click */
   }
 
   /**

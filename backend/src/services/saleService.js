@@ -623,16 +623,28 @@ export class SaleService {
     }
     // ───────────────────────────────────────────────────────────────────────
 
-    let interestAmount = 0;
-    let finalTotal = totals.total;
-
-    if (isInstallmentSale && saleData.interestRate > 0) {
-      interestAmount = (totals.total * saleData.interestRate) / 100;
-      finalTotal = totals.total + interestAmount;
-    }
-
     const currency = saleData.currency || currencySettings.defaultCurrency;
-    finalTotal = roundByCurrency(finalTotal, currency);
+
+    // ── Per-line installment interest ─────────────────────────────────────────
+    // Interest is now set PER PRODUCT LINE as a per-unit amount (فائدة الوحدة),
+    // entered manually on installment invoices only (cash lines send 0 → no-op).
+    // We aggregate it here so the invoice keeps a single interest total
+    // (sales.interest_amount) for GL/reporting, while each sale_item stores its
+    // own snapshot below. Round each line so the aggregate equals the sum of the
+    // stored line snapshots (keeps the GL interest credit balanced to the fil).
+    let interestTotal = 0;
+    for (const item of saleData.items) {
+      const ipu = isInstallmentSale ? Math.max(0, parseFloat(item.interestPerUnit) || 0) : 0;
+      interestTotal += roundByCurrency(ipu * (parseInt(item.quantity, 10) || 0), currency);
+    }
+    interestTotal = roundByCurrency(interestTotal, currency);
+
+    const interestAmount = interestTotal;
+    // Deprecated invoice-level rate, kept only as an informational blended value.
+    const blendedInterestRate =
+      totals.subtotal > 0 ? Number(((interestTotal / totals.subtotal) * 100).toFixed(4)) : 0;
+
+    let finalTotal = roundByCurrency(totals.total + interestTotal, currency);
 
     let paidAmount = roundByCurrency(parseFloat(saleData.paidAmount) || 0, currency);
     let remainingAmount = Math.max(0, finalTotal - paidAmount);
@@ -759,7 +771,9 @@ export class SaleService {
           status: remainingAmount <= 0 ? 'completed' : 'pending',
           notes: saleData.notes || null,
           createdBy: userId,
-          interestRate: String(parseFloat(saleData.interestRate) || 0),
+          // interestRate is deprecated (interest is now per-line); store the
+          // blended effective rate so legacy readers stay consistent.
+          interestRate: String(blendedInterestRate),
           interestAmount: String(roundByCurrency(interestAmount, currency)),
         })
         .returning();
@@ -787,6 +801,16 @@ export class SaleService {
         const itemDiscountTotal = (item.discount || 0) * item.quantity;
         const itemSubtotal = item.quantity * item.unitPrice - itemDiscountTotal;
 
+        // Per-line installment interest snapshot. Only set the before/after-price
+        // columns when this line actually carries interest, so cash and
+        // zero-interest lines stay NULL (indistinguishable from legacy rows and
+        // rendered identically). `subtotal` above stays the BASE line total.
+        const lineInterestPerUnit = isInstallmentSale
+          ? Math.max(0, parseFloat(item.interestPerUnit) || 0)
+          : 0;
+        const lineInterestAmount = roundByCurrency(lineInterestPerUnit * item.quantity, currency);
+        const hasLineInterest = lineInterestPerUnit > 0;
+
         // Snapshot the per-unit cost so reports stay correct after the
         // catalog's unit cost changes. Override → that override; otherwise
         // base cost × factor.
@@ -805,6 +829,11 @@ export class SaleService {
           unitPrice: String(item.unitPrice),
           discount: String(itemDiscountTotal),
           subtotal: String(parseFloat(itemSubtotal.toFixed(2))),
+          // Per-line installment interest snapshot (NULL/0 = no interest).
+          unitPriceBeforeInterest: hasLineInterest ? String(item.unitPrice) : null,
+          interestPerUnit: String(lineInterestPerUnit),
+          interestAmount: String(lineInterestAmount),
+          unitPriceAfterInterest: hasLineInterest ? String(item.unitPrice + lineInterestPerUnit) : null,
           unitId: unit.id,
           unitName: unit.name,
           unitConversionFactor: String(unit.conversionFactor),
@@ -1131,6 +1160,13 @@ export class SaleService {
         unitPrice: saleItems.unitPrice,
         discount: saleItems.discount,
         subtotal: saleItems.subtotal,
+        // Per-line installment interest snapshot. `unitPriceAfterInterest` non-null
+        // is the "new-style" flag the UI/print use. `interestAmount` is aliased to
+        // `lineInterestAmount` so it never collides with the sale-level field.
+        unitPriceBeforeInterest: saleItems.unitPriceBeforeInterest,
+        interestPerUnit: saleItems.interestPerUnit,
+        lineInterestAmount: saleItems.interestAmount,
+        unitPriceAfterInterest: saleItems.unitPriceAfterInterest,
         unitId: saleItems.unitId,
         unitName: saleItems.unitName,
         unitConversionFactor: saleItems.unitConversionFactor,
@@ -1186,6 +1222,14 @@ export class SaleService {
         unitPrice: n(item.unitPrice),
         discount: n(item.discount),
         subtotal: n(item.subtotal),
+        // Keep before/after-interest NULL on legacy/zero-interest rows so the
+        // "new-style" detection (after != null) stays meaningful; coerce the rest.
+        unitPriceBeforeInterest:
+          item.unitPriceBeforeInterest == null ? null : n(item.unitPriceBeforeInterest),
+        interestPerUnit: n(item.interestPerUnit),
+        lineInterestAmount: n(item.lineInterestAmount),
+        unitPriceAfterInterest:
+          item.unitPriceAfterInterest == null ? null : n(item.unitPriceAfterInterest),
         unitConversionFactor: factor,
         baseQuantity: baseQty,
         unitCostPrice: unitCost,
@@ -2518,6 +2562,9 @@ export class SaleService {
           unitPrice: String(item.unitPrice || 0),
           discount: String(itemDiscountTotal),
           subtotal: String(parseFloat(itemSubtotal.toFixed(2))),
+          // Carry the typed per-unit interest on the draft so reopening it
+          // restores it (the final snapshot is computed when the draft completes).
+          interestPerUnit: String(Math.max(0, parseFloat(item.interestPerUnit) || 0)),
           priceType,
           // Per-line note (ملاحظة المنتج) — carried on the draft so completing it
           // later preserves what the cashier typed. Blank/whitespace → NULL.
@@ -2569,18 +2616,25 @@ export class SaleService {
       saleData.paymentType === 'mixed' ||
       saleData.saleType === SALE_TYPE_INSTALLMENT;
 
-    let interestAmount = 0;
-    let finalTotal = totals.total;
-
-    if (completingInstallment && saleData.interestRate > 0) {
-      interestAmount = (totals.total * saleData.interestRate) / 100;
-      finalTotal = totals.total + interestAmount;
-    }
-
     const currencySettings = await settingsService.getCurrencySettings();
     const currency = saleData.currency || draft.currency || currencySettings.defaultCurrency;
 
-    finalTotal = roundByCurrency(finalTotal, currency);
+    // Per-line installment interest (mirrors create()): a per-unit amount entered
+    // on installment invoices only; cash lines send 0 → no-op. Aggregated here so
+    // the invoice keeps a single interest total for GL/reporting; each sale_item
+    // stores its own snapshot below. Round per line to keep the aggregate exact.
+    let interestTotal = 0;
+    for (const item of saleData.items) {
+      const ipu = completingInstallment ? Math.max(0, parseFloat(item.interestPerUnit) || 0) : 0;
+      interestTotal += roundByCurrency(ipu * (parseInt(item.quantity, 10) || 0), currency);
+    }
+    interestTotal = roundByCurrency(interestTotal, currency);
+
+    const interestAmount = interestTotal;
+    const blendedInterestRate =
+      totals.subtotal > 0 ? Number(((interestTotal / totals.subtotal) * 100).toFixed(4)) : 0;
+
+    let finalTotal = roundByCurrency(totals.total + interestTotal, currency);
 
     let paidAmount = roundByCurrency(parseFloat(saleData.paidAmount) || 0, currency);
     let remainingAmount = Math.max(0, finalTotal - paidAmount);
@@ -2665,7 +2719,8 @@ export class SaleService {
           remainingAmount: String(remainingAmount),
           status: remainingAmount <= 0 ? 'completed' : 'pending',
           notes: saleData.notes || draft.notes,
-          interestRate: String(parseFloat(saleData.interestRate) || 0),
+          // Deprecated invoice-level rate → store the blended effective rate.
+          interestRate: String(blendedInterestRate),
           interestAmount: String(roundByCurrency(interestAmount, currency)),
           updatedAt: new Date(),
         })
@@ -2693,6 +2748,13 @@ export class SaleService {
         const itemDiscountTotal = (item.discount || 0) * item.quantity;
         const itemSubtotal = item.quantity * item.unitPrice - itemDiscountTotal;
 
+        // Per-line installment interest snapshot (see create()).
+        const lineInterestPerUnit = completingInstallment
+          ? Math.max(0, parseFloat(item.interestPerUnit) || 0)
+          : 0;
+        const lineInterestAmount = roundByCurrency(lineInterestPerUnit * item.quantity, currency);
+        const hasLineInterest = lineInterestPerUnit > 0;
+
         // Snapshot per-unit cost so completed-draft sales record the same
         // information a normal create() flow does — keeps profit reports
         // accurate and immune to later catalog edits.
@@ -2710,6 +2772,11 @@ export class SaleService {
           unitPrice: String(item.unitPrice),
           discount: String(itemDiscountTotal),
           subtotal: String(parseFloat(itemSubtotal.toFixed(2))),
+          // Per-line installment interest snapshot (NULL/0 = no interest).
+          unitPriceBeforeInterest: hasLineInterest ? String(item.unitPrice) : null,
+          interestPerUnit: String(lineInterestPerUnit),
+          interestAmount: String(lineInterestAmount),
+          unitPriceAfterInterest: hasLineInterest ? String(item.unitPrice + lineInterestPerUnit) : null,
           unitId: unit.id,
           unitName: unit.name,
           unitConversionFactor: String(unit.conversionFactor),

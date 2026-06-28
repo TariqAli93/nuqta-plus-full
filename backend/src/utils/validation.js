@@ -438,6 +438,10 @@ export const saleItemSchema = z.object({
   serviceReceivedAmount: z.coerce.number().nonnegative('Received price cannot be negative').optional(),
   discount: z.coerce.number().nonnegative('Discount cannot be negative').optional(),
   unitId: z.number().int().positive().nullable().optional(),
+  // Per-unit installment interest amount (فائدة الوحدة) for this line. Entered
+  // manually on installment invoices only; cash lines send 0 (the default) and
+  // it becomes a no-op. The line's interest = quantity * interestPerUnit.
+  interestPerUnit: z.coerce.number().nonnegative('الفائدة لا يمكن أن تكون سالبة').optional().default(0),
   // Per-line note (ملاحظة المنتج) — independent of the invoice-level note.
   notes: z.string().trim().max(1000, 'ملاحظة المنتج طويلة جداً (الحد الأقصى 1000 حرف)').nullable().optional(),
 });

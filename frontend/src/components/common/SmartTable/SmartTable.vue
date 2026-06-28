@@ -349,8 +349,7 @@ import SmartTableBulkActions from './SmartTableBulkActions.vue';
 import SmartTableSavedViews from './SmartTableSavedViews.vue';
 import { useSmartTable } from './useSmartTable.js';
 import { useSmartTableExport } from './useSmartTableExport.js';
-import { formatCell, exportValue, LTR_FORMATS, NUMERIC_FORMATS } from './formatters.js';
-import { displayCell } from '@/utils/reportExport.js';
+import { formatCell, LTR_FORMATS, NUMERIC_FORMATS } from './formatters.js';
 
 /**
  * SmartTable — one unified, Fluent-styled desktop table for the whole app.
@@ -1092,19 +1091,18 @@ const printScope = ref('all');
 const printColumns = computed(() =>
   visibleColumns.value
     .filter((c) => c.key !== 'actions' && c.printable !== false)
-    .map((c) => ({ key: c.key, title: c.title, align: c.align, numeric: isNumericColumn(c) }))
+    // Carry the FULL column definition (format, value, exportValue, currencyKey,
+    // decimals…) plus the numeric/ltr flags so the print view can format each
+    // cell with the SAME logic the live table uses. Passing pre-stringified
+    // values here used to double-format currency/number cells (string → reparse
+    // as number → NaN → 0), so financial columns printed as 0.
+    .map((c) => ({ ...c, numeric: isNumericColumn(c), ltr: isLtrColumn(c) }))
 );
 const printSourceRows = computed(() => (props.serverSide ? props.items : filteredItems.value));
-const printRows = computed(() =>
-  printSourceRows.value.map((row) => {
-    const o = {};
-    for (const c of printColumns.value) {
-      const raw = exportValue(visibleColumns.value.find((vc) => vc.key === c.key) || {}, row);
-      o[c.key] = displayCell(raw, c.numeric ? 'number' : 'text');
-    }
-    return o;
-  })
-);
+// Hand the print view the RAW rows; it derives raw → display → formatted itself
+// (see getCellDisplayValue in SmartTablePrintView.vue) so values are formatted
+// exactly once and undefined/null never collapses to 0.
+const printRows = computed(() => printSourceRows.value);
 const printTotals = computed(() => (hasFooterTotals.value ? footerTotals.value : null));
 const printScopeLabel = computed(() => (props.serverSide ? 'الصفحة الحالية' : 'كل النتائج'));
 const filtersText = computed(() => chips.value.map((c) => c.label).join('  •  '));

@@ -42,6 +42,7 @@
               :unit-options-for="unitOptionsFor"
               :get-quantity-error="getQuantityError"
               :can-edit-price="canEditPrice"
+              :show-interest="sale.paymentType === 'installment'"
               @remove="removeItem"
               @unit-change="onItemUnitChange"
             />
@@ -96,8 +97,6 @@
               :actual-interest-rate="actualInterestRate"
               :remaining-amount="remainingAmount"
               :schedule="installmentSchedule"
-              :set-interest-rate="setInterestRate"
-              :set-interest-amount="setInterestAmount"
               @update="patchSale"
             />
 
@@ -234,8 +233,6 @@ const {
   onCustomerSelected,
   onPriceTypeChange,
   setReceivedAmount,
-  setInterestRate,
-  setInterestAmount,
   saveDraft,
   inventoryStore,
 } = saleForm;

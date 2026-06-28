@@ -27,7 +27,8 @@ export const TID = {
     product: 'pos-product',
     cartEmpty: 'pos-cart-empty',
     total: 'pos-total',
-    payFull: 'pos-pay-full',
+    /** Per-line editable unit price (goods), shown with sales:edit_price. */
+    linePrice: (productId: number | string) => `pos-line-price-${productId}`,
     cardRef: 'pos-card-ref',
     /** Invoice-level note (ملاحظة الفاتورة), inside the cart "خيارات" panel. */
     saleNotes: 'pos-sale-notes',

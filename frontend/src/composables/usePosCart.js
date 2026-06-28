@@ -77,6 +77,10 @@ export function usePosCart() {
     notes: '',
     saveAsInstallment: false,
   });
+  // The paid amount auto-tracks the cart total (so the cashier never has to
+  // press a "full amount" button). Once the cashier types an amount manually,
+  // `paidTouched` latches so their value is respected; it resets on cart clear.
+  const paidTouched = ref(false);
 
   // ── Rounding by currency ────────────────────────────────────────────────
   const roundCurrency = (n, cur = currency.value) => {
@@ -184,6 +188,10 @@ export function usePosCart() {
       // Per-selected-unit numbers. Recomputed by updateLineUnit().
       price: unitPrice,
       originalPrice: unitPrice,
+      // True once the cashier hand-edits this line's price away from the
+      // canonical catalog/tier price (per-invoice only — never touches the
+      // product). Reset whenever the line is re-priced (unit/tier switch).
+      isCustomPrice: false,
       originalCurrency: product.currency || currency.value,
       qty: Math.min(qty, unitAvailable > 0 ? unitAvailable : qty),
       discount: 0,
@@ -226,6 +234,8 @@ export function usePosCart() {
     // the conversion error. Honour the active tier (مفرد/جملة/وكيل).
     row.price = resolveTierUnitPrice(rowProductLike(row), newUnit, priceType.value);
     row.originalPrice = row.price;
+    // The unit switch re-establishes the catalog price for the new unit.
+    row.isCustomPrice = false;
     // Reset any per-unit discount: a discount that made sense for قطعة is
     // almost never the right number for درزن, and silently re-applying it
     // overcharges or undercharges the customer.
@@ -255,6 +265,7 @@ export function usePosCart() {
       const unit = (row.units || []).find((u) => u.id === row.unitId) || null;
       row.price = resolveTierUnitPrice(rowProductLike(row), unit, value);
       row.originalPrice = row.price;
+      row.isCustomPrice = false;
     }
   };
 
@@ -298,7 +309,10 @@ export function usePosCart() {
 
   const updatePrice = (id, price) => {
     const row = findItem(id);
-    if (row) row.price = Math.max(0, Number(price) || 0);
+    if (!row) return;
+    row.price = Math.max(0, Number(price) || 0);
+    // Flag the line as custom-priced when it diverges from the canonical price.
+    row.isCustomPrice = Number(row.price) !== Number(row.originalPrice);
   };
 
   const updateLineDiscount = (id, discount) => {
@@ -320,6 +334,7 @@ export function usePosCart() {
     tax.enabled = false;
     payment.method = 'cash';
     payment.paidAmount = 0;
+    paidTouched.value = false;
     payment.reference = '';
     payment.notes = '';
     payment.saveAsInstallment = false;
@@ -370,6 +385,18 @@ export function usePosCart() {
     if (isSvc) payment.paidAmount = t;
   });
 
+  // Auto-fill the paid amount with the running total for an ordinary (non-
+  // service) invoice until the cashier types their own amount. This replaces
+  // the old «المبلغ كامل» button: every item added flows straight into the
+  // total AND the paid amount, so checkout needs no extra click.
+  watch(
+    total,
+    (t) => {
+      if (!isServiceInvoice.value && !paidTouched.value) payment.paidAmount = t;
+    },
+    { immediate: true }
+  );
+
   const paidAmount = computed(() => Math.max(0, Number(payment.paidAmount) || 0));
   const change = computed(() => Math.max(0, paidAmount.value - total.value));
   const remaining = computed(() => Math.max(0, total.value - paidAmount.value));
@@ -418,22 +445,29 @@ export function usePosCart() {
   const canSubmit = computed(() => blockingReason.value === null);
 
   // ── Quick payment actions ────────────────────────────────────────────────
+  // Each explicit payment action latches `paidTouched` so the auto-fill watcher
+  // stops overriding the cashier's entered amount.
   const applyExact = () => {
+    paidTouched.value = true;
     payment.paidAmount = total.value;
   };
 
   const addToPaid = (amount) => {
+    paidTouched.value = true;
     payment.paidAmount = roundCurrency(
       Math.max(0, (Number(payment.paidAmount) || 0) + Number(amount || 0))
     );
   };
 
   const setPaid = (value) => {
+    paidTouched.value = true;
     payment.paidAmount = roundCurrency(Math.max(0, Number(value) || 0));
   };
 
+  // Revert to the auto-tracked full amount (used by the numpad "clear").
   const resetPaid = () => {
-    payment.paidAmount = 0;
+    paidTouched.value = false;
+    payment.paidAmount = total.value;
   };
 
   // ── Submit ───────────────────────────────────────────────────────────────

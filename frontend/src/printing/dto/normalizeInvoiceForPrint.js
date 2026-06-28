@@ -53,19 +53,34 @@ function pickCustomerName(sale) {
   return name;
 }
 
+/** True when a line carries new-style per-unit installment interest. */
+function lineHasInterest(item) {
+  return item.unitPriceAfterInterest !== null && item.unitPriceAfterInterest !== undefined;
+}
+
 function buildItems(sale) {
-  return (sale.items || []).map((item) => ({
-    name: item.productName || item.name || 'منتج',
-    sku: item.sku || item.productSku || item.barcode || null,
-    barcode: item.barcode || null,
-    unit: item.unitName || item.unit || null,
-    quantity: num(item.quantity),
-    price: num(item.unitPrice ?? item.price),
-    // Per-line discount is stored as a TOTAL for the line in SaleDetails' snapshot.
-    discount: num(item.discount),
-    total: num(item.subtotal ?? item.total ?? item.netSubtotal),
-    notes: item.notes || null,
-  }));
+  return (sale.items || []).map((item) => {
+    // New-style line interest: the per-unit price after interest is set only
+    // when the line actually carries interest. The receipt shows ONLY the final
+    // numbers (price with interest embedded + final line total) — never the
+    // rate, the interest amount, or the price-before-interest (spec §ثامناً).
+    // Legacy lines (interest was invoice-level) fall back to the base price.
+    const newInterest = lineHasInterest(item);
+    const baseTotal = num(item.subtotal ?? item.total ?? item.netSubtotal);
+    const lineInterest = num(item.lineInterestAmount ?? item.interestAmount);
+    return {
+      name: item.productName || item.name || 'منتج',
+      sku: item.sku || item.productSku || item.barcode || null,
+      barcode: item.barcode || null,
+      unit: item.unitName || item.unit || null,
+      quantity: num(item.quantity),
+      price: newInterest ? num(item.unitPriceAfterInterest) : num(item.unitPrice ?? item.price),
+      // Per-line discount is stored as a TOTAL for the line in SaleDetails' snapshot.
+      discount: num(item.discount),
+      total: newInterest ? baseTotal + lineInterest : baseTotal,
+      notes: item.notes || null,
+    };
+  });
 }
 
 function buildInstallments(sale) {
@@ -117,6 +132,15 @@ export function normalizeInvoiceForPrint({ sale, companyInfo } = {}) {
   const itemsDiscount = (sale.items || []).reduce((sum, it) => sum + num(it.discount), 0);
   const invoiceDiscount = num(sale.discount);
 
+  const items = buildItems(sale);
+  // New-style invoices embed per-line interest in each line's price/total, so the
+  // receipt must NOT show a separate interest line (spec §ثامناً). The subtotal
+  // becomes the gross of the (interest-inclusive) unit prices, which keeps the
+  // footer balanced: subtotal − discount + tax = total. Legacy invoices keep the
+  // previous behaviour (base subtotal + an invoice-level interest line).
+  const hasLineInterest = (sale.items || []).some(lineHasInterest);
+  const grossSubtotal = items.reduce((s, it) => s + it.price * it.quantity, 0);
+
   const dto = {
     company: {
       name: company.name || '',
@@ -153,13 +177,15 @@ export function normalizeInvoiceForPrint({ sale, companyInfo } = {}) {
           address: formatEntityAddress(sale.customer || {}) || null,
         }
       : null,
-    items: buildItems(sale),
+    items,
     totals: {
       currency,
-      subtotal: num(sale.subtotal) || (sale.items || []).reduce((s, it) => s + num(it.subtotal ?? it.total) + num(it.discount), 0),
+      subtotal: hasLineInterest
+        ? grossSubtotal
+        : num(sale.subtotal) || (sale.items || []).reduce((s, it) => s + num(it.subtotal ?? it.total) + num(it.discount), 0),
       discount: itemsDiscount + invoiceDiscount,
       tax: num(sale.tax),
-      interest: isInstallment ? num(sale.interestAmount) : 0,
+      interest: hasLineInterest ? 0 : isInstallment ? num(sale.interestAmount) : 0,
       total: num(sale.total),
       paid: num(sale.paidAmount),
       remaining: num(sale.remainingAmount),

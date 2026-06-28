@@ -35,24 +35,23 @@ export function useSaleCalculations(sale) {
   // Total after the invoice-level discount (never negative).
   const total = computed(() => Math.max(0, subtotal.value - (sale.value.discount || 0)));
 
-  // ── Installment interest (simple) ────────────────────────────────────────
+  // ── Installment interest (per product line) ──────────────────────────────
+  // Interest is set per line as a per-unit amount («فائدة الوحدة») and summed
+  // across lines. Installment invoices only; cash invoices never add interest.
   const interestValue = computed(() => {
     if (!isInstallment.value) return 0;
-    if (sale.value.interestInputType === 'amount') {
-      return Math.max(0, sale.value.interestAmount || 0);
-    }
-    const rate = sale.value.interestRate || 0;
-    return total.value * (rate / 100);
+    return sale.value.items.reduce(
+      (s, i) => s + (i.quantity || 0) * Math.max(0, i.interestPerUnit || 0),
+      0
+    );
   });
 
   const totalWithInterest = computed(() => r2(total.value + interestValue.value));
 
+  // Blended effective rate (informational only — interest is amount-driven now).
   const actualInterestRate = computed(() => {
     if (!isInstallment.value || total.value === 0) return 0;
-    if (sale.value.interestInputType === 'amount') {
-      return (interestValue.value / total.value) * 100;
-    }
-    return sale.value.interestRate || 0;
+    return (interestValue.value / total.value) * 100;
   });
 
   // ── Payment-derived figures ──────────────────────────────────────────────
