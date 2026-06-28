@@ -15,77 +15,51 @@
       </v-btn>
     </PageHeader>
 
-    <v-card class="page-section">
-      <v-card-text v-if="!loading && accounts.length === 0">
-        <EmptyState
-          title="لا توجد حسابات بعد"
-          description="اختر قالب شجرة الحسابات من إعدادات النمط الكامل، أو أنشئ الحسابات يدوياً."
-          icon="mdi-file-tree-outline"
-        />
-      </v-card-text>
-
-      <v-table v-else density="comfortable">
-        <thead>
-          <tr>
-            <th class="text-start">الرمز</th>
-            <th class="text-start">اسم الحساب</th>
-            <th class="text-start">النوع</th>
-            <th class="text-end">الرصيد (د.ع)</th>
-            <th class="text-end" style="width: 120px">إجراءات</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="acc in flatTree" :key="acc.id" :class="{ 'opacity-60': acc.isActive === false }">
-            <td>
-              <span :style="{ paddingInlineStart: `${(acc.depth || 0) * 18}px` }" class="font-mono">
-                {{ acc.code }}
-              </span>
-            </td>
-            <td>
-              <v-icon v-if="!acc.isPostable" size="16" class="me-1" color="grey">mdi-folder-outline</v-icon>
-              <v-icon v-else size="16" class="me-1" :color="typeColor(acc.accountType)">mdi-circle-small</v-icon>
-              {{ acc.name }}
-              <v-chip v-if="acc.isSystem" size="x-small" variant="tonal" color="info" class="ms-2">نظامي</v-chip>
-            </td>
-            <td>
-              <v-chip size="x-small" variant="tonal" :color="typeColor(acc.accountType)">
-                {{ typeLabel(acc.accountType) }}
-              </v-chip>
-            </td>
-            <td class="text-end font-mono" :class="acc.balanceBase < 0 ? 'text-error' : ''">
-              {{ acc.isPostable ? formatCurrency(acc.balanceBase, 'IQD') : '—' }}
-            </td>
-            <td class="text-end">
-              <v-btn
-                v-if="canManage"
-                size="x-small"
-                variant="text"
-                icon="mdi-plus"
-                title="حساب فرعي"
-                @click="openCreate(acc)"
-              />
-              <v-btn
-                v-if="canManage"
-                size="x-small"
-                variant="text"
-                icon="mdi-pencil"
-                title="تعديل"
-                @click="openEdit(acc)"
-              />
-              <v-btn
-                v-if="canManage && !acc.isSystem"
-                size="x-small"
-                variant="text"
-                icon="mdi-delete-outline"
-                title="حذف"
-                color="error"
-                @click="remove(acc)"
-              />
-            </td>
-          </tr>
-        </tbody>
-      </v-table>
-    </v-card>
+    <!-- Unified SmartTable (client-side: the store loads the whole chart, the
+         `flatTree` computed nests + indents it). Column sorting is off so the
+         indented tree order is preserved; row actions replace the per-row
+         buttons (delete uses the action's built-in confirm). -->
+    <SmartTable
+      table-key="chart-of-accounts-table"
+      :headers="headers"
+      :items="flatTree"
+      :loading="loading"
+      :row-actions="rowActions"
+      :row-class="rowClass"
+      :open-on-row-click="false"
+      :page-size="100"
+      :page-size-options="[50, 100, 200]"
+      show-export
+      show-print
+      print-title="ترتيب الحسابات"
+      export-file-base="chart-of-accounts"
+      search-placeholder="ابحث بالرمز أو اسم الحساب..."
+      empty-title="لا توجد حسابات بعد"
+      empty-description="اختر قالب شجرة الحسابات من إعدادات النمط الكامل، أو أنشئ الحسابات يدوياً."
+      empty-icon="mdi-file-tree-outline"
+    >
+      <template #[`item.code`]="{ item }">
+        <span :style="{ paddingInlineStart: `${(item.depth || 0) * 18}px` }" class="font-mono">
+          {{ item.code }}
+        </span>
+      </template>
+      <template #[`item.name`]="{ item }">
+        <v-icon v-if="!item.isPostable" size="16" class="me-1" color="grey">mdi-folder-outline</v-icon>
+        <v-icon v-else size="16" class="me-1" :color="typeColor(item.accountType)">mdi-circle-small</v-icon>
+        {{ item.name }}
+        <v-chip v-if="item.isSystem" size="x-small" variant="tonal" color="info" class="ms-2">نظامي</v-chip>
+      </template>
+      <template #[`item.accountType`]="{ item }">
+        <v-chip size="x-small" variant="tonal" :color="typeColor(item.accountType)">
+          {{ typeLabel(item.accountType) }}
+        </v-chip>
+      </template>
+      <template #[`item.balanceBase`]="{ item }">
+        <span class="font-mono" :class="item.balanceBase < 0 ? 'text-error' : ''">
+          {{ item.isPostable ? formatCurrency(item.balanceBase, 'IQD') : '—' }}
+        </span>
+      </template>
+    </SmartTable>
 
     <!-- Create / Edit dialog -->
     <v-dialog v-model="dialog" max-width="520">
@@ -165,8 +139,8 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useGlStore } from '@/stores/gl';
 import { useAuthStore } from '@/stores/auth';
+import SmartTable from '@/components/common/SmartTable';
 import PageHeader from '@/components/PageHeader.vue';
-import EmptyState from '@/components/EmptyState.vue';
 import { formatCurrency } from '@/utils/formatters';
 
 const glStore = useGlStore();
@@ -186,6 +160,57 @@ const TYPE_META = {
 const typeOptions = Object.entries(TYPE_META).map(([value, m]) => ({ value, label: m.label }));
 const typeLabel = (t) => TYPE_META[t]?.label || t;
 const typeColor = (t) => TYPE_META[t]?.color || 'grey';
+
+// SmartTable column config. Every cell is templated above; sorting is disabled
+// so the indented tree order survives, and `exportValue` feeds the export/print.
+const headers = [
+  { title: 'الرمز', key: 'code', ltr: true, sortable: false, minWidth: 140 },
+  { title: 'اسم الحساب', key: 'name', sortable: false, minWidth: 220 },
+  {
+    title: 'النوع',
+    key: 'accountType',
+    sortable: false,
+    exportValue: (r) => typeLabel(r.accountType),
+  },
+  {
+    title: 'الرصيد (د.ع)',
+    key: 'balanceBase',
+    align: 'end',
+    format: 'number',
+    sortable: false,
+    searchable: false,
+    exportValue: (r) => (r.isPostable ? r.balanceBase : ''),
+  },
+];
+
+// Write affordances are gated by canManage; delete is hidden on system accounts
+// and confirms inline via the action's `confirm`.
+const rowActions = computed(() => {
+  if (!canManage.value) return [];
+  return [
+    { key: 'add-sub', icon: 'mdi-plus', title: 'حساب فرعي', primary: true, handler: (i) => openCreate(i) },
+    { key: 'edit', icon: 'mdi-pencil', title: 'تعديل', primary: true, handler: (i) => openEdit(i) },
+    {
+      key: 'delete',
+      icon: 'mdi-delete-outline',
+      title: 'حذف',
+      color: 'error',
+      danger: true,
+      hidden: (i) => i.isSystem,
+      handler: (i) => remove(i),
+      confirm: (i) => ({
+        title: 'تأكيد الحذف',
+        message: 'هل أنت متأكد من حذف الحساب؟',
+        details: `الحساب: ${i.code} — ${i.name}`,
+        type: 'error',
+        confirmText: 'حذف',
+      }),
+    },
+  ];
+});
+
+// Dim inactive accounts, matching the old opacity-60 row styling.
+const rowClass = (row) => (row.isActive === false ? 'opacity-60' : '');
 
 // Flat list arrives ordered by code; nest by parentId then flatten with depth
 // so we can indent without a recursive component.
@@ -292,7 +317,6 @@ async function save() {
 }
 
 async function remove(acc) {
-  if (!confirm(`حذف الحساب «${acc.name}»؟`)) return;
   try {
     await glStore.deleteAccount(acc.id);
     await glStore.fetchAccounts({ includeInactive: true });

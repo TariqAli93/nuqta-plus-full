@@ -15,106 +15,56 @@
       </v-btn>
     </PageHeader>
 
-    <!-- Filters -->
-    <v-card class="page-section">
-      <v-card-text class="d-flex flex-wrap gap-3 align-center">
-        <v-select
-          v-model="filters.sourceType"
-          :items="sourceOptions"
-          item-title="label"
-          item-value="value"
-          label="نوع المصدر"
-          variant="outlined"
-          density="compact"
-          clearable
-          hide-details
-          style="max-width: 220px"
-          @update:model-value="reload"
-        />
-        <v-select
-          v-model="filters.status"
-          :items="[{ label: 'مُرحّل', value: 'posted' }, { label: 'معكوس', value: 'reversed' }]"
-          item-title="label"
-          item-value="value"
-          label="الحالة"
-          variant="outlined"
-          density="compact"
-          clearable
-          hide-details
-          style="max-width: 160px"
-          @update:model-value="reload"
-        />
-        <v-text-field
-          v-model="filters.dateFrom"
-          type="date"
-          label="من"
-          variant="outlined"
-          density="compact"
-          hide-details
-          style="max-width: 170px"
-          @update:model-value="reload"
-        />
-        <v-text-field
-          v-model="filters.dateTo"
-          type="date"
-          label="إلى"
-          variant="outlined"
-          density="compact"
-          hide-details
-          style="max-width: 170px"
-          @update:model-value="reload"
-        />
-      </v-card-text>
-    </v-card>
-
-    <v-card class="page-section">
-      <v-card-text v-if="!loading && entries.length === 0">
-        <EmptyState title="لا توجد تسجيلات بعد" description="ستظهر التسجيلات المالية هنا تلقائياً بعد كل عملية بيع أو شراء أو قبض أو دفع." icon="mdi-book-outline" />
-      </v-card-text>
-      <v-table v-else density="comfortable">
-        <thead>
-          <tr>
-            <th class="text-start">رقم التسجيل</th>
-            <th class="text-start">التاريخ</th>
-            <th class="text-start">المصدر</th>
-            <th class="text-start">البيان</th>
-            <th class="text-end">المبلغ (د.ع)</th>
-            <th class="text-center">الحالة</th>
-            <th class="text-end"></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="e in entries" :key="e.id" class="cursor-pointer" @click="openDetail(e.id)">
-            <td class="font-mono">{{ e.entryNumber }}</td>
-            <td>{{ e.entryDate }}</td>
-            <td>
-              <v-chip size="x-small" variant="tonal" :color="sourceColor(e.sourceType)">
-                {{ sourceLabel(e.sourceType) }}
-              </v-chip>
-            </td>
-            <td class="text-truncate" style="max-width: 280px">{{ e.description }}</td>
-            <td class="text-end font-mono">{{ formatCurrency(e.totalDebitBase, 'IQD') }}</td>
-            <td class="text-center">
-              <v-chip size="x-small" :color="e.status === 'reversed' ? 'grey' : 'success'" variant="tonal">
-                {{ e.status === 'reversed' ? 'ملغى' : 'مُسجّل' }}
-              </v-chip>
-            </td>
-            <td class="text-end">
-              <v-icon size="18" color="grey">mdi-chevron-left</v-icon>
-            </td>
-          </tr>
-        </tbody>
-      </v-table>
-
-      <div v-if="pagination.totalPages > 1" class="d-flex justify-center pa-3">
-        <v-pagination
-          v-model="filters.page"
-          :length="pagination.totalPages"
-          density="comfortable"
-          @update:model-value="reload"
-        />
-      </div>
-    </v-card>
+    <!-- Unified SmartTable (Recipe A: SmartTable owns pagination + filters and
+         drives fetching via @update:options). The journal API has no text
+         search, so search is off; source/status/date filters live in the
+         advanced-filter popover. Row click opens the read-only detail dialog. -->
+    <SmartTable
+      v-model:filter-values="filterValues"
+      table-key="journal-entries-table"
+      :headers="headers"
+      :items="entries"
+      :loading="loading"
+      :total-items="pagination.total"
+      server-side
+      :show-search="false"
+      :page="pagination.page"
+      :page-size="pagination.limit"
+      :filters="filterDefs"
+      :open-on-row-click="false"
+      show-export
+      show-print
+      print-title="التسجيلات المالية"
+      export-file-base="journal-entries"
+      :export-fetcher="fetchAllForExport"
+      empty-title="لا توجد تسجيلات بعد"
+      empty-description="ستظهر التسجيلات المالية هنا تلقائياً بعد كل عملية بيع أو شراء أو قبض أو دفع."
+      empty-icon="mdi-book-outline"
+      @update:options="loadEntries"
+      @refresh="loadEntries"
+      @row-click="openDetail($event.id)"
+    >
+      <template #[`item.entryNumber`]="{ item }">
+        <span class="font-mono">{{ item.entryNumber }}</span>
+      </template>
+      <template #[`item.sourceType`]="{ item }">
+        <v-chip size="x-small" variant="tonal" :color="sourceColor(item.sourceType)">
+          {{ sourceLabel(item.sourceType) }}
+        </v-chip>
+      </template>
+      <template #[`item.totalDebitBase`]="{ item }">
+        <span class="font-mono">{{ formatCurrency(item.totalDebitBase, 'IQD') }}</span>
+      </template>
+      <template #[`item.status`]="{ item }">
+        <v-chip
+          size="x-small"
+          :color="item.status === 'reversed' ? 'grey' : 'success'"
+          variant="tonal"
+        >
+          {{ item.status === 'reversed' ? 'ملغى' : 'مُسجّل' }}
+        </v-chip>
+      </template>
+    </SmartTable>
 
     <!-- Detail dialog -->
     <v-dialog v-model="detailDialog" max-width="760">
@@ -188,11 +138,12 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useGlStore } from '@/stores/gl';
 import { useAuthStore } from '@/stores/auth';
+import api from '@/plugins/axios';
+import SmartTable from '@/components/common/SmartTable';
 import PageHeader from '@/components/PageHeader.vue';
-import EmptyState from '@/components/EmptyState.vue';
 import ManualJournalForm from '@/views/gl/ManualJournalForm.vue';
 import { formatCurrency } from '@/utils/formatters';
 
@@ -221,22 +172,92 @@ const SOURCE_META = {
 };
 const sourceLabel = (t) => SOURCE_META[t]?.label || t;
 const sourceColor = (t) => SOURCE_META[t]?.color || 'grey';
-const sourceOptions = Object.entries(SOURCE_META).map(([value, m]) => ({ value, label: m.label }));
+const sourceOptions = Object.entries(SOURCE_META).map(([value, m]) => ({ value, title: m.label }));
 
-const filters = reactive({ page: 1, sourceType: null, status: null, dateFrom: '', dateTo: '' });
+// SmartTable column config. Source/amount/status cells are templated above; the
+// `format`/`exportValue` here drive the export + print typing.
+const headers = [
+  { title: 'رقم التسجيل', key: 'entryNumber', ltr: true, sortable: false, minWidth: 130 },
+  { title: 'التاريخ', key: 'entryDate', format: 'date', sortable: false },
+  {
+    title: 'المصدر',
+    key: 'sourceType',
+    sortable: false,
+    exportValue: (r) => sourceLabel(r.sourceType),
+  },
+  { title: 'البيان', key: 'description', format: 'longtext', sortable: false, maxWidth: 320 },
+  {
+    title: 'المبلغ (د.ع)',
+    key: 'totalDebitBase',
+    align: 'end',
+    format: 'number',
+    sortable: false,
+    exportTotal: true,
+  },
+  {
+    title: 'الحالة',
+    key: 'status',
+    align: 'center',
+    sortable: false,
+    exportValue: (r) => (r.status === 'reversed' ? 'ملغى' : 'مُسجّل'),
+  },
+];
+
+// Advanced-filter definitions (source type, status, date range) → built into
+// the popover + chips by SmartTable, surfaced back through @update:options.
+const filterDefs = [
+  { key: 'sourceType', type: 'select', label: 'نوع المصدر', options: sourceOptions },
+  {
+    key: 'status',
+    type: 'select',
+    label: 'الحالة',
+    options: [
+      { title: 'مُرحّل', value: 'posted' },
+      { title: 'معكوس', value: 'reversed' },
+    ],
+  },
+  {
+    type: 'date-range',
+    label: 'التاريخ',
+    fromKey: 'dateFrom',
+    toKey: 'dateTo',
+    field: 'entryDate',
+  },
+];
+const filterValues = ref({});
 
 const detailDialog = ref(false);
 const detail = ref(null);
 const manualDialog = ref(false);
 
-async function reload() {
-  await glStore.fetchEntries({
-    page: filters.page,
-    sourceType: filters.sourceType || undefined,
-    status: filters.status || undefined,
-    dateFrom: filters.dateFrom || undefined,
-    dateTo: filters.dateTo || undefined,
-  });
+// Last requested options, so refresh and the export-all fetcher reuse the
+// active page/filters instead of resetting them.
+const lastOptions = ref({ page: 1, itemsPerPage: pagination.value.limit, filters: {} });
+
+function buildParams({ forExport = false } = {}) {
+  const { page, itemsPerPage, filters } = lastOptions.value;
+  const f = filters || {};
+  const params = {
+    page: forExport ? 1 : page || 1,
+    limit: forExport ? 10000 : itemsPerPage || pagination.value.limit,
+  };
+  if (f.sourceType) params.sourceType = f.sourceType;
+  if (f.status) params.status = f.status;
+  if (f.dateFrom) params.dateFrom = f.dateFrom;
+  if (f.dateTo) params.dateTo = f.dateTo;
+  return params;
+}
+
+function loadEntries(opts = {}) {
+  lastOptions.value = { ...lastOptions.value, ...opts };
+  return glStore.fetchEntries(buildParams());
+}
+
+// Export "all results": query the API directly so the visible page isn't
+// clobbered by the store mutating its own list.
+async function fetchAllForExport() {
+  const res = await api.get('/gl/journal', { params: buildParams({ forExport: true }) });
+  return res?.data || [];
 }
 
 async function openDetail(id) {
@@ -250,8 +271,8 @@ function openManual() {
 
 async function onManualSaved() {
   manualDialog.value = false;
-  filters.page = 1;
-  await reload();
+  lastOptions.value.page = 1;
+  await loadEntries({ page: 1 });
 }
 
 async function reverse(entry) {
@@ -259,7 +280,7 @@ async function reverse(entry) {
   try {
     await glStore.reverseEntry(entry.id, reason);
     detailDialog.value = false;
-    await reload();
+    await loadEntries();
   } catch (err) {
     console.error('Failed to reverse entry', err);
   }
@@ -274,7 +295,7 @@ onMounted(async () => {
       /* ignore */
     }
   }
-  await reload();
+  await loadEntries();
 });
 </script>
 
