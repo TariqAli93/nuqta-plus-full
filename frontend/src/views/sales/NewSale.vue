@@ -128,7 +128,12 @@
             :currency="sale.currency"
             :subtotal="subtotal"
             :items-discount="itemsDiscount"
-            :discount-amount="sale.discount"
+            :item-discount-unapplied="itemDiscountUnapplied"
+            :item-discount-capped="itemDiscountCapped"
+            :discount-amount="appliedDiscount"
+            :requested-discount="sale.discount"
+            :unapplied-discount="unappliedDiscount"
+            :discount-capped="discountCapped"
             :total="total"
             :interest-value="interestValue"
             :total-with-interest="totalWithInterest"
@@ -240,6 +245,11 @@ const {
 const {
   subtotal,
   itemsDiscount,
+  itemDiscountUnapplied,
+  itemDiscountCapped,
+  appliedDiscount,
+  unappliedDiscount,
+  discountCapped,
   total,
   interestValue,
   totalWithInterest,

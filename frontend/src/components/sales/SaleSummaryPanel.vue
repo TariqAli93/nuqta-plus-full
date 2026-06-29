@@ -25,6 +25,34 @@
       />
     </div>
 
+    <!-- Cost-floor warning for a LINE's own discount («خصم المنتج»). -->
+    <v-alert
+      v-if="itemDiscountCapped"
+      type="warning"
+      variant="tonal"
+      density="compact"
+      class="mt-2 discount-warning"
+      icon="mdi-alert"
+    >
+      لا يمكن تطبيق خصم المنتج بالكامل لأن ذلك سيجعل سعر البيع أقل من سعر التكلفة.
+      تم تطبيق أقصى خصم مسموح، وبقي {{ formatCurrency(itemDiscountUnapplied, currency) }} غير مطبق.
+    </v-alert>
+
+    <!-- Cost-floor warning: the requested INVOICE discount would sell a product
+         below its cost, so it was capped at the safe maximum. -->
+    <v-alert
+      v-if="discountCapped"
+      type="warning"
+      variant="tonal"
+      density="compact"
+      class="mt-2 discount-warning"
+      icon="mdi-alert"
+    >
+      لا يمكن تطبيق الخصم بالكامل لأن ذلك سيجعل سعر البيع أقل من سعر التكلفة.
+      تم تطبيق أقصى خصم مسموح وهو {{ formatCurrency(discountAmount, currency) }}،
+      وبقي {{ formatCurrency(unappliedDiscount, currency) }} غير مطبق.
+    </v-alert>
+
     <v-divider class="my-2" />
 
     <!-- Totals -->
@@ -95,6 +123,14 @@ const props = defineProps({
   paymentType: { type: String, default: 'cash' },
   discountType: { type: String, default: 'amount' },
   discountValue: { type: Number, default: 0 },
+  // Invoice-discount cost-floor feedback. `discountAmount` is the amount actually
+  // applied; `unappliedDiscount` is what was dropped to keep every line ≥ cost.
+  requestedDiscount: { type: Number, default: 0 },
+  unappliedDiscount: { type: Number, default: 0 },
+  discountCapped: { type: Boolean, default: false },
+  // Item-level («خصم المنتج») cost-floor feedback.
+  itemDiscountUnapplied: { type: Number, default: 0 },
+  itemDiscountCapped: { type: Boolean, default: false },
 });
 
 defineEmits(['update:discountType', 'update:discountValue']);

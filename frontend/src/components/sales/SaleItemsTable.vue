@@ -183,6 +183,7 @@
 <script setup>
 import { formatCurrency } from '@/utils/formatters';
 import { groupNumber, parseAmount } from '@/composables/sales/moneyInput';
+import { clampItemDiscountPerUnit } from '@/utils/discountAllocation';
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
@@ -203,10 +204,14 @@ const onPriceInput = (item, raw) => {
   item.isCustomPrice = Number(item.unitPrice) !== Number(item.unitPriceOriginal);
 };
 
-// Line net = qty·price − qty·discount (+ qty·interestPerUnit on installments).
+// Line net = qty·price − qty·(applied discount) (+ qty·interestPerUnit on
+// installments). The item discount is clamped to the cost floor so the line net
+// can never display below cost — matches the totals + the backend guard.
+const appliedDiscountOf = (item) =>
+  clampItemDiscountPerUnit(item.unitPrice, item.unitCostPrice || 0, item.discount || 0).applied;
 const netOf = (item) =>
   item.quantity * item.unitPrice -
-  (item.discount || 0) * item.quantity +
+  appliedDiscountOf(item) * item.quantity +
   (props.showInterest ? (item.interestPerUnit || 0) * item.quantity : 0);
 
 const step = (item, delta) => {

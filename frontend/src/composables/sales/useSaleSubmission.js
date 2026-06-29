@@ -63,7 +63,9 @@ export function useSaleSubmission(deps) {
     const payload = {
       customerId: sale.value.customerId || null,
       currency: sale.value.currency,
-      discount: sale.value.discount || 0,
+      // Send the discount actually applied after the «never below cost» floor —
+      // matches what the summary panel showed. The backend re-clamps defensively.
+      discount: calc.appliedDiscount.value,
       tax: sale.value.tax || 0,
       notes: sale.value.notes || null,
       saleSource: SALE_SOURCE_NEW_SALE,
@@ -73,11 +75,13 @@ export function useSaleSubmission(deps) {
       priceType: selectedCustomerType.value,
       branchId: inventoryStore.selectedBranchId || undefined,
       warehouseId: inventoryStore.selectedWarehouseId || undefined,
-      items: sale.value.items.map((it) => ({
+      items: sale.value.items.map((it, idx) => ({
         productId: it.productId,
         quantity: it.quantity,
         unitPrice: it.unitPrice,
-        discount: it.discount || 0,
+        // Per-unit item discount clamped to the cost floor (matches what the
+        // table/summary showed). The backend re-clamps defensively.
+        discount: calc.lineMeta.value[idx]?.appliedPerUnit ?? (it.discount || 0),
         unitId: it.unitId || null,
         unitName: it.unitName || null,
         unitConversionFactor: Number(it.unitConversionFactor) || 1,

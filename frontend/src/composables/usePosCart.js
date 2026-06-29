@@ -3,11 +3,7 @@ import { useSaleStore } from '@/stores/sale';
 import { useInventoryStore } from '@/stores/inventory';
 import { useSettingsStore } from '@/stores/settings';
 import { useNotificationStore } from '@/stores/notification';
-import {
-  SALE_SOURCE_POS,
-  SALE_TYPE_CASH,
-  PAYMENT_METHOD_CARD,
-} from '@/constants/sales';
+import { SALE_SOURCE_POS, SALE_TYPE_CASH, PAYMENT_METHOD_CARD } from '@/constants/sales';
 import {
   getProductUnits,
   getDefaultSaleUnit,
@@ -17,6 +13,7 @@ import {
   calculateUnitProfit,
   resolveTierUnitPrice,
 } from '@/utils/productUnits';
+import { allocateInvoiceDiscount, clampItemDiscountPerUnit } from '@/utils/discountAllocation';
 import {
   isServiceProduct,
   isServiceLine,
@@ -90,8 +87,7 @@ export function usePosCart() {
   };
 
   // ── Helpers ──────────────────────────────────────────────────────────────
-  const resolveStock = (p) =>
-    Number(p?.warehouseStock ?? p?.totalStock ?? p?.stock ?? 0) || 0;
+  const resolveStock = (p) => Number(p?.warehouseStock ?? p?.totalStock ?? p?.stock ?? 0) || 0;
 
   const findItem = (id) => items.find((i) => i.id === id);
 
@@ -344,13 +340,53 @@ export function usePosCart() {
   };
 
   // ── Totals ───────────────────────────────────────────────────────────────
+  // Per-unit cost for the cost floor (no per-unit cost override on cart lines —
+  // base cost × the selected unit's factor, same basis the backend falls back to).
+  const unitCostOf = (item) =>
+    (Number(item.baseCostPrice) || 0) * (Number(item.unitConversionFactor) || 1);
+  // A line's own discount clamped so its net never drops below cost. Runs before
+  // the invoice discount; the backend re-clamps authoritatively.
+  const appliedLineDiscount = (item) =>
+    clampItemDiscountPerUnit(item.price, unitCostOf(item), item.discount || 0).applied;
+
   const lineSubtotal = (item) =>
-    Math.max(
-      0,
-      (Number(item.price) - Number(item.discount || 0)) * Number(item.qty || 0)
-    );
+    Math.max(0, (Number(item.price) - appliedLineDiscount(item)) * Number(item.qty || 0));
 
   const subtotal = computed(() => items.reduce((s, it) => s + lineSubtotal(it), 0));
+
+  // Item-discount cost-floor feedback (for the cart warning).
+  const itemDiscountUnapplied = computed(() =>
+    roundCurrency(
+      items.reduce((s, it) => {
+        const qty = Number(it.qty || 0);
+        const requested = Math.max(0, Number(it.discount) || 0);
+        const applied = appliedLineDiscount(it);
+
+        return s + Math.max(0, requested - applied) * qty;
+      }, 0)
+    )
+  );
+
+  const itemDiscountApplied = computed(() =>
+    roundCurrency(
+      items.reduce((s, it) => {
+        return s + appliedLineDiscount(it) * Number(it.qty || 0);
+      }, 0)
+    )
+  );
+  const itemDiscountCapped = computed(() =>
+    items.some((it) => clampItemDiscountPerUnit(it.price, unitCostOf(it), it.discount || 0).capped)
+  );
+
+  const isLineDiscountCapped = (item) => {
+    const requested = Math.max(0, Number(item.discount) || 0);
+    return requested > appliedLineDiscount(item);
+  };
+
+  const lineUnappliedDiscount = (item) => {
+    const requested = Math.max(0, Number(item.discount) || 0);
+    return roundCurrency(Math.max(0, requested - appliedLineDiscount(item)));
+  };
 
   const discountValue = computed(() => {
     if (saleDiscount.type === 'percent') {
@@ -359,7 +395,26 @@ export function usePosCart() {
     return Math.max(0, Number(saleDiscount.value) || 0);
   });
 
-  const afterDiscount = computed(() => Math.max(0, subtotal.value - discountValue.value));
+  // Spread the invoice discount across the cart lines with the «never below
+  // cost» floor (a single line takes the whole discount). The per-base cost ×
+  // factor mirrors the backend's cost basis when no per-unit cost override
+  // exists. `appliedDiscount` is the safe amount; `unappliedDiscount` is what
+  // had to be dropped (surfaced as a warning + capped on the payload).
+  const discountAllocation = computed(() => {
+    const lines = items.map((it) => ({
+      value: lineSubtotal(it),
+      cost:
+        (Number(it.baseCostPrice) || 0) *
+        (Number(it.unitConversionFactor) || 1) *
+        Number(it.qty || 0),
+    }));
+    return allocateInvoiceDiscount(lines, discountValue.value);
+  });
+  const appliedDiscount = computed(() => roundCurrency(discountAllocation.value.applied));
+  const unappliedDiscount = computed(() => roundCurrency(discountAllocation.value.unapplied));
+  const discountCapped = computed(() => discountAllocation.value.capped);
+
+  const afterDiscount = computed(() => Math.max(0, subtotal.value - appliedDiscount.value));
 
   const taxValue = computed(() => {
     if (!tax.enabled) return 0;
@@ -424,9 +479,13 @@ export function usePosCart() {
       sellingPrice: Number(item.basePrice) || 0,
       costPrice: Number(item.baseCostPrice) || 0,
     };
-    return calculateUnitProfit(item.qty, unitLike, productLike, item.discount);
+    return calculateUnitProfit(item.qty, unitLike, productLike, appliedLineDiscount(item));
   };
-  const totalProfit = computed(() => items.reduce((s, it) => s + lineProfit(it), 0));
+  // Net of the invoice-level discount actually applied (the floor keeps every
+  // line ≥ cost, so this preview never goes negative because of the discount).
+  const totalProfit = computed(
+    () => items.reduce((s, it) => s + lineProfit(it), 0) - appliedDiscount.value
+  );
 
   /** Reason the checkout button is disabled (null when submittable). */
   const blockingReason = computed(() => {
@@ -477,7 +536,7 @@ export function usePosCart() {
     return {
       // ── v2 source / type ──────────────────────────────────────────────────
       saleSource: SALE_SOURCE_POS,
-      saleType:   SALE_TYPE_CASH,
+      saleType: SALE_TYPE_CASH,
       // ── legacy field (kept for backend backward-compat) ───────────────────
       paymentType: 'cash',
       // ─────────────────────────────────────────────────────────────────────
@@ -492,7 +551,8 @@ export function usePosCart() {
         // السعر المستلم — sent only for service lines so the backend uses the
         // amount the cashier actually entered (not the stored service price).
         serviceReceivedAmount: isServiceLine(i) ? Number(i.price) || 0 : undefined,
-        discount: Number(i.discount) || 0,
+        // Per-unit item discount clamped to the cost floor (matches the cart).
+        discount: appliedLineDiscount(i),
         unitId: i.unitId || null,
         // Snapshot fields — the backend re-validates the conversionFactor
         // from the DB, but sending them lets the API surface render the
@@ -507,14 +567,14 @@ export function usePosCart() {
         // the backend stores NULL.
         notes: i.note && String(i.note).trim() ? String(i.note).trim() : undefined,
       })),
-      discount: discountValue.value,
+      // Discount actually applied after the cost floor (matches the displayed
+      // total). The backend re-clamps defensively.
+      discount: appliedDiscount.value,
       tax: taxPercent,
       paidAmount: Math.min(paidAmount.value, total.value),
       paymentMethod: payment.method,
       paymentReference:
-        payment.method === PAYMENT_METHOD_CARD
-          ? (payment.reference?.trim() || null)
-          : null,
+        payment.method === PAYMENT_METHOD_CARD ? payment.reference?.trim() || null : null,
       interestRate: 0,
       // Invoice-level note (ملاحظة الفاتورة). Trim so a whitespace-only value is
       // omitted (the backend stores `notes || null`).
@@ -587,9 +647,7 @@ export function usePosCart() {
       // id / name). Falls back to the product's default sale unit when
       // the originally chosen unit no longer exists.
       const productUnits = getProductUnits(product);
-      const draftUnit =
-        productUnits.find((u) => u.id === it.unitId) ||
-        getDefaultSaleUnit(product);
+      const draftUnit = productUnits.find((u) => u.id === it.unitId) || getDefaultSaleUnit(product);
       const factor = getUnitConversionFactor(draftUnit);
       const unitAvailable = product ? getUnitAvailableStock(baseAvailable, draftUnit) : qty;
 
@@ -650,6 +708,15 @@ export function usePosCart() {
     // computed
     subtotal,
     discountValue,
+    appliedDiscount,
+    unappliedDiscount,
+    discountCapped,
+    itemDiscountUnapplied,
+    itemDiscountApplied,
+    itemDiscountCapped,
+    appliedLineDiscount,
+    isLineDiscountCapped,
+    lineUnappliedDiscount,
     afterDiscount,
     taxValue,
     total,

@@ -445,6 +445,17 @@
                 <v-icon start size="11">mdi-tag-outline</v-icon>خصم
               </v-chip>
               <v-chip
+                v-if="isLineDiscountCapped(item)"
+                :key="item.id + '-line-discount-capped'"
+                size="x-small"
+                color="warning"
+                variant="tonal"
+                label
+              >
+                <span>اقصى خصم ممكن: </span>
+                <b>{{ formatMoney(appliedLineDiscount(item), currency) }}</b>
+              </v-chip>
+              <v-chip
                 v-if="item.isCustomPrice"
                 size="x-small"
                 color="info"
@@ -548,20 +559,44 @@
       <!-- ── Pay / footer ── -->
       <div class="cart__pay">
         <!-- Total breakdown (only when a discount or tax applies) -->
-        <div v-if="discountValue > 0 || taxValue > 0" class="pay__breakdown">
+        <div v-if="appliedDiscount > 0 || taxValue > 0" class="pay__breakdown">
           <div class="pay__row">
             <span>المجموع الفرعي</span>
             <span>{{ formatMoney(subtotal, currency) }}</span>
           </div>
-          <div v-if="discountValue > 0" class="pay__row pay__row--warning">
+          <div v-if="appliedDiscount > 0" class="pay__row pay__row--warning">
             <span>الخصم</span>
-            <span>− {{ formatMoney(discountValue, currency) }}</span>
+            <span>− {{ formatMoney(appliedDiscount, currency) }}</span>
           </div>
           <div v-if="taxValue > 0" class="pay__row">
             <span>الضريبة (%{{ tax.value }})</span>
             <span>{{ formatMoney(taxValue, currency) }}</span>
           </div>
         </div>
+
+        <!-- Cost-floor warning: the requested invoice discount would sell a
+             product below its cost, so it was capped at the safe maximum. -->
+        <v-alert
+          v-if="discountCapped"
+          type="warning"
+          variant="tonal"
+          density="compact"
+          class="mb-2"
+          icon="mdi-alert"
+        >
+          <div class="text-center">
+            <p class="text-h6 font-weight-bold text-error mb-2">لا يمكن تطبيق هذا الخصم</p>
+
+            <p class="text-body-2 mb-3">لأن قيمة الخصم ستجعل الفاتورة تحقق خسارة.</p>
+
+            <p class="text-body-1">
+              <strong>أقصى خصم مسموح به:</strong><br />
+              <span class="text-success font-weight-bold text-h5">
+                {{ formatMoney(appliedDiscount, currency) }}
+              </span>
+            </p>
+          </div>
+        </v-alert>
 
         <div class="pay__total">
           <span class="pay__total-label">الإجمالي</span>
@@ -776,7 +811,7 @@
             color="primary"
             class="pay__checkout"
             :loading="submitting"
-            :disabled="!canSubmit || !hasActivePeriod"
+            :disabled="!canSubmit || !hasActivePeriod || discountCapped || itemDiscountCapped"
             @click="checkout"
           >
             <v-icon start>mdi-check-circle-outline</v-icon>
@@ -1178,7 +1213,12 @@ const {
   submitting,
 
   subtotal,
-  discountValue,
+  appliedDiscount,
+  discountCapped,
+  isLineDiscountCapped,
+  appliedLineDiscount,
+  itemDiscountApplied,
+  itemDiscountCapped,
   taxValue,
   total,
   change,

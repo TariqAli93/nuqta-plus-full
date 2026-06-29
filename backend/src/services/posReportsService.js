@@ -91,6 +91,20 @@ const LINE_COGS = `
        ELSE COALESCE(p.cost_price::numeric, 0) * COALESCE(NULLIF(si.base_quantity,0), si.quantity)
   END`;
 
+/**
+ * Per-line net sales — the line's value AFTER its proportional share of the
+ * invoice-level discount («خصم الفاتورة») is removed, so product profit reflects
+ * the discount instead of ignoring it. s.subtotal is the invoice subtotal after
+ * item-level discounts (= Σ si.subtotal), so the share is
+ * s.discount × si.subtotal / s.subtotal. The invoice discount is clamped at sale
+ * time to never push a line below cost, so this proportional split stays ≥ 0 and
+ * Σ(line net sales) reconciles to the report summary's net sales.
+ */
+const LINE_NET_SALES = `
+  (si.subtotal::numeric
+     - COALESCE(s.discount::numeric, 0) * si.subtotal::numeric
+       / NULLIF(s.subtotal::numeric, 0))`;
+
 class PosReportsService {
   // ── 1) شكد بعت؟ — Sales report ─────────────────────────────────────────────
   async sales(filters, user) {
@@ -248,7 +262,7 @@ class PosReportsService {
               SUM(si.base_quantity) qty,
               SUM(si.subtotal) sales,
               SUM(${LINE_COGS}) cogs,
-              SUM(si.subtotal) - SUM(${LINE_COGS}) profit
+              SUM(${LINE_NET_SALES}) - SUM(${LINE_COGS}) profit
        FROM sale_items si JOIN sales s ON s.id = si.sale_id
        LEFT JOIN products p ON p.id = si.product_id
        WHERE ${SW}
@@ -304,7 +318,7 @@ class PosReportsService {
               SUM(si.base_quantity) qty_sold,
               COUNT(DISTINCT si.sale_id) invoices,
               SUM(si.subtotal) total_sales,
-              SUM(si.subtotal) - SUM(${LINE_COGS}) total_profit
+              SUM(${LINE_NET_SALES}) - SUM(${LINE_COGS}) total_profit
        FROM sale_items si JOIN sales s ON s.id = si.sale_id
        LEFT JOIN products p ON p.id = si.product_id
        WHERE ${W}

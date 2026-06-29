@@ -11,6 +11,7 @@ import {
   getProductUnits,
   getDefaultSaleUnit,
   getUnitConversionFactor,
+  getUnitCostPrice,
   getUnitAvailableStock,
   resolveTierUnitPrice as resolveTierPriceFor,
 } from '@/utils/productUnits';
@@ -89,7 +90,14 @@ export function useSaleForm() {
     sale.value.items = sale.value.items.map((i) => {
       const original = i.unitPriceOriginal ?? i.unitPrice;
       const originalCur = i.originalCurrency ?? sale.value.currency;
-      return { ...i, unitPrice: convertPrice(original, originalCur, sale.value.currency) };
+      const originalCost = i.unitCostOriginal ?? 0;
+      return {
+        ...i,
+        unitPrice: convertPrice(original, originalCur, sale.value.currency),
+        // Keep the per-unit cost (used for the invoice-discount cost floor) in
+        // the same currency as the price so the two are comparable.
+        unitCostPrice: convertPrice(originalCost, originalCur, sale.value.currency),
+      };
     });
   };
 
@@ -122,6 +130,9 @@ export function useSaleForm() {
       item.unitPriceOriginal = perUnit;
       item.originalCurrency = p.currency || 'USD';
       item.unitPrice = convertPrice(perUnit, item.originalCurrency, sale.value.currency);
+      const perUnitCost = getUnitCostPrice(p, unit);
+      item.unitCostOriginal = perUnitCost;
+      item.unitCostPrice = convertPrice(perUnitCost, item.originalCurrency, sale.value.currency);
       item.isCustomPrice = false;
     }
   };
@@ -171,6 +182,9 @@ export function useSaleForm() {
     item.unitPriceOriginal = perUnit;
     item.originalCurrency = p.currency || 'USD';
     item.unitPrice = convertPrice(perUnit, item.originalCurrency, sale.value.currency);
+    const perUnitCost = getUnitCostPrice(p, unit);
+    item.unitCostOriginal = perUnitCost;
+    item.unitCostPrice = convertPrice(perUnitCost, item.originalCurrency, sale.value.currency);
     item.isCustomPrice = false;
     const cap = availableInUnit(item);
     if (Number.isFinite(cap) && cap > 0 && item.quantity > cap) {
@@ -184,6 +198,7 @@ export function useSaleForm() {
   // ── Adding products ────────────────────────────────────────────────────────────
   const buildLine = (product, unit, quantity = 1) => {
     const perUnit = resolveTierUnitPrice(product, unit);
+    const perUnitCost = getUnitCostPrice(product, unit);
     const service = isServiceProduct(product);
     const baseAvailable = availableStockOf(product);
     const cap = service ? Infinity : getUnitAvailableStock(baseAvailable, unit);
@@ -199,6 +214,10 @@ export function useSaleForm() {
       unitPriceOriginal: perUnit,
       originalCurrency: product.currency || 'USD',
       unitPrice: convertPrice(perUnit, product.currency || 'USD', sale.value.currency),
+      // Per-unit cost (catalog → product base cost × factor), kept in the sale
+      // currency. Drives the invoice-discount «never below cost» floor.
+      unitCostOriginal: perUnitCost,
+      unitCostPrice: convertPrice(perUnitCost, product.currency || 'USD', sale.value.currency),
       // True once the user edits this line's price away from the catalog/tier
       // price (per-invoice only). Reset when the unit re-prices the line.
       isCustomPrice: false,
@@ -438,6 +457,9 @@ export function useSaleForm() {
           const product = Array.isArray(products.value)
             ? products.value.find((p) => p.id === item.productId)
             : null;
+          const factor = Number(item.unitConversionFactor) || 1;
+          const perUnitCost = (Number(product?.costPrice) || 0) * factor;
+          const costCurrency = product?.currency || sale.value.currency;
           return {
             productId: item.productId,
             productName: product?.name || item.productName || '',
@@ -446,8 +468,10 @@ export function useSaleForm() {
             quantity: item.quantity,
             unitId: item.unitId || null,
             unitName: item.unitName || null,
-            unitConversionFactor: Number(item.unitConversionFactor) || 1,
+            unitConversionFactor: factor,
             unitPrice: item.unitPrice,
+            unitCostOriginal: perUnitCost,
+            unitCostPrice: convertPrice(perUnitCost, costCurrency, sale.value.currency),
             discount: item.discount || 0,
             interestPerUnit: Number(item.interestPerUnit) || 0,
             notes: item.notes || '',

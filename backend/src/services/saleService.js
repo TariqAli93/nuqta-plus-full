@@ -23,6 +23,7 @@ import {
 import * as schema from '../models/index.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 import { generateDraftInvoicePlaceholder, calculateSaleTotals } from '../utils/helpers.js';
+import { allocateInvoiceDiscount, clampItemDiscountPerUnit } from '../utils/discountAllocation.js';
 import { eq, desc, and, gte, lte, sql, inArray, lt, count as countFn } from 'drizzle-orm';
 import { buildSearch, ncol, RANK } from '../utils/searchBuilder.js';
 import { normalizeIraqPhone } from '../utils/phone.js';
@@ -562,6 +563,73 @@ async function validateAndNormaliseItemTypes(items) {
   return { hasService, hasPhysical };
 }
 
+/**
+ * Resolve each item's per-unit cost, using the SAME basis the persisted snapshot
+ * + profit use (unit cost override → product base cost × conversion factor).
+ * Read-only; runs before the write transaction. Returns a number[] aligned to
+ * `items` (0 for items without a productId).
+ *
+ * @param {object} handle drizzle db/tx handle
+ * @param {Array} items sale items (productId, unitId)
+ * @returns {Promise<number[]>} per-unit cost per line
+ */
+async function resolveLineUnitCosts(handle, items) {
+  const out = [];
+  for (const item of items) {
+    if (!item.productId) {
+      out.push(0);
+      continue;
+    }
+    const [product] = await handle
+      .select({ costPrice: products.costPrice })
+      .from(products)
+      .where(eq(products.id, item.productId))
+      .limit(1);
+    const unit = await resolveUnitSnapshot(handle, item.productId, item.unitId || null);
+    const baseCost = Number(product?.costPrice) || 0;
+    const perUnitCost =
+      unit.costPrice != null ? Number(unit.costPrice) : baseCost * unit.conversionFactor;
+    out.push(perUnitCost);
+  }
+  return out;
+}
+
+/**
+ * Authoritative discount guard for a sale, applied in two ordered steps so a
+ * product can never be sold below its cost:
+ *   1. Clamp each line's OWN discount («خصم المنتج») in place to at most
+ *      unitPrice − unitCost (per unit) — mutates `items[i].discount`.
+ *   2. Distribute the invoice discount («خصم الفاتورة») over the resulting safe
+ *      line nets, never pushing a line below cost (a line already AT cost from
+ *      step 1 has zero capacity and gets no invoice-discount share).
+ *
+ * @returns {{safeDiscount:number}} the invoice discount actually applicable.
+ */
+async function clampSaleDiscounts(handle, items, requestedInvoiceDiscount) {
+  const perUnitCosts = await resolveLineUnitCosts(handle, items);
+
+  // Step 1 — clamp each line's own discount to the cost floor.
+  for (let i = 0; i < items.length; i++) {
+    const { applied } = clampItemDiscountPerUnit(
+      items[i].unitPrice,
+      perUnitCosts[i],
+      items[i].discount || 0
+    );
+    items[i].discount = applied;
+  }
+
+  // Step 2 — clamp the invoice discount over the (now safe) line nets.
+  const req = Math.max(0, parseFloat(requestedInvoiceDiscount) || 0);
+  if (req <= 0) return { safeDiscount: req };
+  const lines = items.map((item, i) => {
+    const qty = Number(item.quantity) || 0;
+    const value = qty * (Number(item.unitPrice) || 0) - (Number(item.discount) || 0) * qty;
+    return { value, cost: (Number(perUnitCosts[i]) || 0) * qty };
+  });
+  const { applied } = allocateInvoiceDiscount(lines, req);
+  return { safeDiscount: applied };
+}
+
 export class SaleService {
   async create(saleData, user) {
     // Backward-compat: callers previously passed userId (number). Normalise.
@@ -578,7 +646,20 @@ export class SaleService {
     // clear Arabic error on a mixed invoice or a service with no received price.
     await validateAndNormaliseItemTypes(saleData.items);
 
-    const totals = calculateSaleTotals(saleData.items, saleData.discount || 0, saleData.tax || 0);
+    // Authoritative discount guard so a product is never sold below cost: clamp
+    // each line's own discount first, then the invoice discount over the safe
+    // line nets. Mutates item.discount to the applied amount. The frontend
+    // already clamps + warns; this guarantees it even for a direct API call.
+    // Skipped entirely when there is no discount of any kind (no cost lookup).
+    let safeDiscount = parseFloat(saleData.discount) || 0;
+    const hasAnyDiscount =
+      safeDiscount > 0 || saleData.items.some((it) => (Number(it.discount) || 0) > 0);
+    if (hasAnyDiscount) {
+      const db = await getDb();
+      ({ safeDiscount } = await clampSaleDiscounts(db, saleData.items, saleData.discount || 0));
+    }
+
+    const totals = calculateSaleTotals(saleData.items, safeDiscount, saleData.tax || 0);
 
     // ── Normalise saleSource / saleType / paymentType ──────────────────────
     // New callers send `saleSource` + `saleType`; legacy callers only send
@@ -1205,18 +1286,40 @@ export class SaleService {
     // correct even if the catalog's unit cost is changed later). Falls back
     // to the product's current base cost × baseQuantity for legacy rows
     // recorded before the unit-cost snapshot column existed.
-    const enrichedItems = items.map((item) => {
+    //
+    // The invoice-level discount («خصم الفاتورة») is distributed across the
+    // lines in proportion to each line's value (with a per-line cost floor)
+    // BEFORE profit is computed, so a single-line invoice carries its full
+    // discount and no line's net sale price ever drops below its cost (profit
+    // floored at 0). See utils/discountAllocation.js. A sale stored before this
+    // change keeps its discount; if it exceeds the lines' capacity the floor
+    // simply caps each line at 0 profit on display.
+    const lineMeta = items.map((item) => {
       const baseCost = item.costPrice == null ? null : Number(item.costPrice);
       const qty = Number(item.quantity) || 0;
       const factor = Number(item.unitConversionFactor) || 1;
       const baseQty = Number(item.baseQuantity) || qty * factor;
       const unitCost = item.unitCostPrice == null ? null : Number(item.unitCostPrice);
-      let profit = null;
-      if (unitCost != null) {
-        profit = Number(item.unitPrice) * qty - n(item.discount) - unitCost * qty;
-      } else if (baseCost != null) {
-        profit = Number(item.unitPrice) * qty - n(item.discount) - baseCost * baseQty;
-      }
+      const value = Number(item.unitPrice) * qty - n(item.discount);
+      let cost = null;
+      if (unitCost != null) cost = unitCost * qty;
+      else if (baseCost != null) cost = baseCost * baseQty;
+      return { baseCost, qty, factor, baseQty, unitCost, value, cost };
+    });
+
+    const saleDiscount = n(sale.discount);
+    const { allocations } = allocateInvoiceDiscount(
+      // A null cost (deleted product) can't be floored — treat it as 0 so it
+      // still draws its proportional share; that line's profit stays null below.
+      lineMeta.map((m) => ({ value: m.value, cost: m.cost == null ? 0 : m.cost })),
+      saleDiscount
+    );
+
+    const enrichedItems = items.map((item, i) => {
+      const m = lineMeta[i];
+      const invoiceDiscountShare = roundByCurrency(allocations[i] || 0, sale.currency);
+      const netSaleAmount = roundByCurrency(m.value - invoiceDiscountShare, sale.currency);
+      const profit = m.cost == null ? null : roundByCurrency(netSaleAmount - m.cost, sale.currency);
       return {
         ...item,
         unitPrice: n(item.unitPrice),
@@ -1230,10 +1333,13 @@ export class SaleService {
         lineInterestAmount: n(item.lineInterestAmount),
         unitPriceAfterInterest:
           item.unitPriceAfterInterest == null ? null : n(item.unitPriceAfterInterest),
-        unitConversionFactor: factor,
-        baseQuantity: baseQty,
-        unitCostPrice: unitCost,
-        costPrice: baseCost,
+        unitConversionFactor: m.factor,
+        baseQuantity: m.baseQty,
+        unitCostPrice: m.unitCost,
+        costPrice: m.baseCost,
+        // This line's share of the invoice discount + its net sale after it.
+        invoiceDiscountShare,
+        netSaleAmount,
         profit,
       };
     });
@@ -2608,7 +2714,17 @@ export class SaleService {
     // guards and received-price normalisation as a direct sale.
     await validateAndNormaliseItemTypes(saleData.items);
 
-    const totals = calculateSaleTotals(saleData.items, saleData.discount || 0, saleData.tax || 0);
+    // Clamp item + invoice discounts to the per-line «never below cost» floor —
+    // same authoritative guard as create().
+    let safeDiscount = parseFloat(saleData.discount) || 0;
+    const hasAnyDiscount =
+      safeDiscount > 0 || saleData.items.some((it) => (Number(it.discount) || 0) > 0);
+    if (hasAnyDiscount) {
+      const db = await getDb();
+      ({ safeDiscount } = await clampSaleDiscounts(db, saleData.items, saleData.discount || 0));
+    }
+
+    const totals = calculateSaleTotals(saleData.items, safeDiscount, saleData.tax || 0);
 
     // Cash vs installment for the completed invoice (same rule as create()).
     const completingInstallment =
