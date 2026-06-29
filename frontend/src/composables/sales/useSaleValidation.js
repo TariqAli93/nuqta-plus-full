@@ -33,6 +33,15 @@ export function useSaleValidation({ sale, calc, getQuantityError }) {
       reasons.push('راجع كميات المنتجات — بعضها يتجاوز المخزون أو غير صالح');
     }
 
+    // A capped discount means the requested discount would push a line below its
+    // cost; the cashier must lower it before the invoice can be created.
+    if (calc.itemDiscountCapped.value) {
+      reasons.push('خصم المنتج يتجاوز الحد — لا يمكن البيع بأقل من الكلفة. خفّض خصم المنتج');
+    }
+    if (calc.discountCapped.value) {
+      reasons.push('خصم الفاتورة يتجاوز الحد — لا يمكن البيع بأقل من الكلفة. خفّض خصم الفاتورة');
+    }
+
     if (sale.value.paymentType === 'installment') {
       if (!sale.value.customerId) reasons.push('اختر العميل لإتمام البيع بالأقساط');
       if (!sale.value.installmentCount || sale.value.installmentCount < 1) {
