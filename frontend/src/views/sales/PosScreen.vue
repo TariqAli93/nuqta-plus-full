@@ -105,6 +105,16 @@
             label="إخفاء المنتهي"
             class="pos__expired"
           />
+
+          <v-switch
+            v-model="hideNotAvailable"
+            color="warning"
+            density="compact"
+            hide-details
+            inset
+            label="إخفاء غير المتوفر"
+            class="pos__stock"
+          />
         </div>
       </div>
 
@@ -147,7 +157,7 @@
         </div>
 
         <!-- Product cards (one page at a time: see paginatedProducts) -->
-        <v-card
+        <!-- <v-card
           v-for="p in paginatedProducts"
           v-else
           :key="p.id"
@@ -174,7 +184,7 @@
           @keydown.enter.prevent="isSellable(p) && expiryStatusOf(p) !== 'منتهي' && addProduct(p)"
           @keydown.space.prevent="isSellable(p) && expiryStatusOf(p) !== 'منتهي' && addProduct(p)"
         >
-          <!-- ── Media: real image or a clean, deterministic placeholder ── -->
+          
           <div class="pos-tile__media">
             <div class="pos-tile__placeholder" :style="placeholderStyle(p)">
               <v-icon class="pos-tile__placeholder-icon" size="40"
@@ -182,14 +192,12 @@
               >
             </div>
 
-            <!-- Stock-status badge (متوفر / منخفض / نفذ / خدمة) -->
             <div class="pos-tile__status flex align-center justify-space-between ga-1">
               <v-chip size="x-small" :color="stockStatusOf(p).color" variant="flat" label>
                 <v-icon start size="11">{{ stockStatusOf(p).icon }}</v-icon>
                 {{ stockStatusOf(p).label }}
               </v-chip>
 
-              <!-- :title="nearestExpiryOf(p) ? `${p.name} — أقرب انتهاء: ${nearestExpiryOf(p)}` : p.name" -->
 
               <v-chip
                 v-if="nearestExpiryOf(p)"
@@ -202,12 +210,12 @@
                 {{ nearestExpiryOf(p) }}
               </v-chip>
             </div>
-            <!-- Featured star -->
+         
             <v-icon v-if="isFeatured(p)" class="pos-tile__star" size="15" aria-label="مميّز">
               mdi-star
             </v-icon>
 
-            <!-- Near/expired flag -->
+  
             <v-chip
               v-if="expiryStatusOf(p) === 'ينتهي قريباً' || expiryStatusOf(p) === 'منتهي'"
               class="pos-tile__expiry"
@@ -219,7 +227,7 @@
               {{ expiryStatusOf(p) }}
             </v-chip>
 
-            <!-- Quick add (+) -->
+
             <v-btn
               v-if="isSellable(p) && expiryStatusOf(p) !== 'منتهي'"
               class="pos-tile__add"
@@ -232,15 +240,20 @@
             />
           </div>
 
-          <!-- ── Body: name + SKU + price ── -->
+  
           <div class="pos-tile__body">
             <div class="pos-tile__name" :title="p.name">{{ p.name }}</div>
             <div class="pos-tile__sku">
               <v-icon size="12">mdi-pound</v-icon>
               <span>{{ p.sku || p.barcode || p.id }}</span>
             </div>
-            <div class="pos-tile__foot">
-              <span class="pos-tile__price">{{ formatMoney(p.sellingPrice, p.currency) }}</span>
+            <div class="pos-tile__foot align-center">
+              <div class="flex flex-col">
+                <span class="pos-tile__price__org">
+                  {{ formatMoney(p.costPrice, p.currency) }}
+                </span>
+                <span class="pos-tile__price">{{ formatMoney(p.sellingPrice, p.currency) }}</span>
+              </div>
               <span
                 v-if="!isService(p)"
                 class="pos-tile__count"
@@ -250,10 +263,86 @@
               </span>
             </div>
           </div>
+        </v-card> -->
+
+        <v-card
+          v-for="p in paginatedProducts"
+          v-else
+          :key="p.id"
+          class="product-glass-card"
+          :class="{
+            'product-glass-card--disabled': !isSellable(p) || expiryStatusOf(p) === 'منتهي',
+          }"
+          :ripple="isSellable(p) && expiryStatusOf(p) !== 'منتهي'"
+          @click="isSellable(p) && expiryStatusOf(p) !== 'منتهي' && addProduct(p)"
+        >
+          <div class="product-glass-card__header">
+            <div class="product-glass-card__icon" :style="placeholderStyle(p)">
+              <v-icon size="34">mdi-package-variant</v-icon>
+            </div>
+
+            <v-btn
+              v-if="isSellable(p) && expiryStatusOf(p) !== 'منتهي'"
+              icon="mdi-plus"
+              size="small"
+              color="primary"
+              variant="flat"
+              class="product-glass-card__add"
+              @click.stop="addProduct(p)"
+            />
+          </div>
+
+          <div class="product-glass-card__content">
+            <div class="product-glass-card__name" :title="p.name">
+              {{ p.name }}
+            </div>
+
+            <div v-if="!isService(p)" class="product-glass-card__qty">
+              <v-icon size="15">mdi-cube-outline</v-icon>
+              {{ availableOf(p) }}
+            </div>
+
+            <div class="product-glass-card__code">
+              <v-icon size="13">mdi-barcode-scan</v-icon>
+              {{ p.sku || p.barcode || p.id }}
+            </div>
+
+            <div class="product-glass-card__badges">
+              <v-chip size="x-small" :color="stockStatusOf(p).color" variant="tonal" label>
+                <v-icon start size="12">{{ stockStatusOf(p).icon }}</v-icon>
+                {{ stockStatusOf(p).label }}
+              </v-chip>
+
+              <v-chip
+                v-if="expiryStatusOf(p) === 'ينتهي قريباً' || expiryStatusOf(p) === 'منتهي'"
+                size="x-small"
+                :color="expiryColor(expiryStatusOf(p))"
+                variant="tonal"
+                label
+              >
+                {{ expiryStatusOf(p) }}
+              </v-chip>
+            </div>
+
+            <div class="product-glass-card__bottom">
+              <div class="product-glass-card__prices">
+                <div class="product-glass-card__cost">
+                  <span>سعر التكلفة</span>
+                  <strong>{{ formatMoney(p.costPrice, p.currency) }}</strong>
+                </div>
+
+                <v-divider />
+
+                <div class="product-glass-card__sale">
+                  <span>سعر البيع</span>
+                  <strong>{{ formatMoney(p.sellingPrice, p.currency) }}</strong>
+                </div>
+              </div>
+            </div>
+          </div>
         </v-card>
       </div>
 
-      <!-- ── Pagination bar (products area only; stays out of the scroll) ── -->
       <div
         v-if="!loadingProducts && filteredProducts.length > 0"
         class="pos__pager"
@@ -558,60 +647,96 @@
 
       <!-- ── Pay / footer ── -->
       <div class="cart__pay">
-        <!-- Total breakdown (only when a discount or tax applies) -->
-        <div v-if="appliedDiscount > 0 || taxValue > 0" class="pay__breakdown">
+        <div class="pay__total pay__total--compact">
+          <span class="pay__total-label">الإجمالي</span>
+          <span class="pay__total-value" data-testid="pos-total">
+            {{ formatMoney(total, currency) }}
+          </span>
+        </div>
+
+        <div
+          v-if="appliedDiscount > 0 || taxValue > 0"
+          class="pay__breakdown pay__breakdown--compact"
+        >
           <div class="pay__row">
-            <span>المجموع الفرعي</span>
+            <span>الفرعي</span>
             <span>{{ formatMoney(subtotal, currency) }}</span>
           </div>
+
           <div v-if="appliedDiscount > 0" class="pay__row pay__row--warning">
             <span>الخصم</span>
             <span>− {{ formatMoney(appliedDiscount, currency) }}</span>
           </div>
+
           <div v-if="taxValue > 0" class="pay__row">
-            <span>الضريبة (%{{ tax.value }})</span>
+            <span>الضريبة</span>
             <span>{{ formatMoney(taxValue, currency) }}</span>
           </div>
         </div>
 
-        <!-- Cost-floor warning: the requested invoice discount would sell a
-             product below its cost, so it was capped at the safe maximum. -->
         <v-alert
           v-if="discountCapped"
           type="warning"
           variant="tonal"
           density="compact"
-          class="mb-2"
+          class="pay__alert"
           icon="mdi-alert"
         >
-          <div class="text-center">
-            <p class="text-h6 font-weight-bold text-error mb-2">لا يمكن تطبيق هذا الخصم</p>
-
-            <p class="text-body-2 mb-3">لأن قيمة الخصم ستجعل الفاتورة تحقق خسارة.</p>
-
-            <p class="text-body-1">
-              <strong>أقصى خصم مسموح به:</strong><br />
-              <span class="text-success font-weight-bold text-h5">
-                {{ formatMoney(appliedDiscount, currency) }}
-              </span>
-            </p>
-          </div>
+          أقصى خصم مسموح: <strong>{{ formatMoney(appliedDiscount, currency) }}</strong>
         </v-alert>
 
-        <div class="pay__total">
-          <span class="pay__total-label">الإجمالي</span>
-          <span class="pay__total-value" data-testid="pos-total">{{
-            formatMoney(total, currency)
-          }}</span>
+        <div class="pay__methods-row">
+          <v-btn-toggle
+            :model-value="payment.method"
+            class="pay__methods"
+            color="primary"
+            mandatory
+            @update:model-value="onMethodChange"
+          >
+            <v-btn
+              v-for="m in paymentMethods"
+              :key="m.value"
+              :value="m.value"
+              :prepend-icon="m.icon"
+              size="small"
+              variant="elevated"
+            >
+              {{ m.label }}
+            </v-btn>
+          </v-btn-toggle>
         </div>
 
-        <!-- Collapsible discount / tax -->
-        <v-expansion-panels variant="accordion" class="pay__expander">
+        <v-text-field
+          v-if="payment.method === 'card'"
+          v-model="payment.reference"
+          data-testid="pos-card-ref"
+          variant="outlined"
+          density="compact"
+          hide-details="auto"
+          label="مرجع البطاقة *"
+          autocomplete="off"
+          prepend-inner-icon="mdi-credit-card-outline"
+        />
+
+        <div class="pay__readout pay__readout--compact" :class="changeStateClass">
+          <div class="pay__readout-row">
+            <span>المستلم</span>
+            <strong>{{ formatMoney(payment.paidAmount || 0, currency) }}</strong>
+          </div>
+
+          <div class="pay__readout-row">
+            <span>{{ changeLabel }}</span>
+            <strong>{{ formatMoney(changeAmount, currency) }}</strong>
+          </div>
+        </div>
+
+        <v-expansion-panels variant="accordion" class="pay__expander pay__expander--dense">
           <v-expansion-panel rounded="lg">
             <v-expansion-panel-title>
-              <v-icon size="18" start>mdi-tag-multiple-outline</v-icon>
-              خيارات — خصم / ضريبة / ملاحظة
+              <v-icon size="16" start>mdi-tune-variant</v-icon>
+              خصم / ضريبة / ملاحظة
             </v-expansion-panel-title>
+
             <v-expansion-panel-text>
               <div class="pay__adjust">
                 <v-number-input
@@ -659,17 +784,13 @@
                   </template>
                 </v-number-input>
 
-                <!-- Invoice-level note: saved with the sale and shown on the
-                     sale-details page. Capped at 1000 chars (counter + backend
-                     schema). -->
                 <v-textarea
                   v-model="saleNotes"
                   data-testid="pos-sale-notes"
-                  label="ملاحظة الفاتورة (اختياري)"
-                  placeholder="تُحفظ مع الفاتورة وتظهر في تفاصيل البيع"
+                  label="ملاحظة الفاتورة"
                   variant="outlined"
                   density="compact"
-                  rows="2"
+                  rows="1"
                   auto-grow
                   no-resize
                   counter="1000"
@@ -679,66 +800,13 @@
               </div>
             </v-expansion-panel-text>
           </v-expansion-panel>
-        </v-expansion-panels>
 
-        <!-- Payment method -->
-        <v-btn-toggle
-          :model-value="payment.method"
-          class="pay__methods"
-          color="primary"
-          aria-label="طريقة الدفع"
-          @update:model-value="onMethodChange"
-        >
-          <v-btn
-            v-for="m in paymentMethods"
-            :key="m.value"
-            :value="m.value"
-            :data-testid="`pos-pay-method-${m.value}`"
-            :prepend-icon="m.icon"
-            variant="elevated"
-          >
-            {{ m.label }}
-          </v-btn>
-        </v-btn-toggle>
-
-        <!-- Card reference (card only) -->
-        <v-text-field
-          v-if="payment.method === 'card'"
-          v-model="payment.reference"
-          data-testid="pos-card-ref"
-          variant="outlined"
-          density="compact"
-          hide-details="auto"
-          label="مرجع البطاقة *"
-          placeholder="رقم العملية أو الوصل"
-          autocomplete="off"
-          prepend-inner-icon="mdi-credit-card-outline"
-          class="mt-2"
-        />
-
-        <!-- Paid + change readout -->
-        <div class="pay__readout" :class="changeStateClass">
-          <div class="pay__readout-row">
-            <span class="pay__readout-label">المستلم</span>
-            <span v-if="paidInput" class="pay__readout-typed">{{ paidInput }}</span>
-            <span class="pay__readout-amount">{{
-              formatMoney(payment.paidAmount || 0, currency)
-            }}</span>
-          </div>
-          <div class="pay__readout-row pay__readout-row--delta">
-            <v-icon size="15">{{ changeIcon }}</v-icon>
-            <span class="pay__readout-label">{{ changeLabel }}</span>
-            <span class="pay__readout-amount">{{ formatMoney(changeAmount, currency) }}</span>
-          </div>
-        </div>
-
-        <!-- Collapsible numpad -->
-        <v-expansion-panels variant="accordion" class="pay__expander">
           <v-expansion-panel rounded="lg">
             <v-expansion-panel-title>
-              <v-icon size="18" start>mdi-dialpad</v-icon>
-              لوحة الأرقام — إدخال يدوي
+              <v-icon size="16" start>mdi-dialpad</v-icon>
+              إدخال مبلغ مستلم
             </v-expansion-panel-title>
+
             <v-expansion-panel-text>
               <div class="numpad__quick">
                 <v-btn
@@ -746,23 +814,22 @@
                   :key="a"
                   size="small"
                   variant="tonal"
-                  :title="`+ ${formatMoney(a, currency)}`"
                   @click="addToPaid(a)"
                 >
                   +{{ shortAmount(a) }}
                 </v-btn>
               </div>
+
               <div class="numpad__keys">
                 <v-btn
                   v-for="k in numpadKeys"
                   :key="k.value"
-                  size="large"
+                  size="small"
                   variant="tonal"
                   :color="k.value === 'back' ? 'error' : undefined"
-                  :aria-label="k.aria || k.label"
                   @click="onNumpad(k.value)"
                 >
-                  <v-icon v-if="k.icon" size="22">{{ k.icon }}</v-icon>
+                  <v-icon v-if="k.icon" size="18">{{ k.icon }}</v-icon>
                   <span v-else>{{ k.label }}</span>
                 </v-btn>
               </div>
@@ -770,40 +837,17 @@
           </v-expansion-panel>
         </v-expansion-panels>
 
-        <!-- Tender utilities. The paid amount auto-fills with the cart total
-             (see usePosCart), so there's no «المبلغ كامل» button to press — just
-             tender a different amount via the numpad when needed. -->
-        <div class="pay__utils">
+        <div class="pay__actions pay__actions--compact">
           <v-btn
-            variant="text"
-            color="error"
-            prepend-icon="mdi-refresh"
-            :disabled="!paidInput"
-            @click="onNumpad('clear')"
+            v-if="draftsVisible"
+            variant="outlined"
+            size="large"
+            prepend-icon="mdi-content-save-outline"
+            :disabled="draftsDisabled || items.length === 0 || submitting || !hasActivePeriod"
+            @click="onHold"
           >
-            تصفير
+            مسودة
           </v-btn>
-        </div>
-
-        <!-- Primary actions -->
-        <div class="pay__actions">
-          <v-tooltip location="top" :text="draftsReason" :disabled="!draftsDisabled">
-            <template #activator="{ props: tipProps }">
-              <span v-bind="tipProps" class="pay__draft-wrap">
-                <v-btn
-                  v-if="draftsVisible"
-                  variant="outlined"
-                  size="large"
-                  block
-                  prepend-icon="mdi-content-save-outline"
-                  :disabled="draftsDisabled || items.length === 0 || submitting || !hasActivePeriod"
-                  @click="onHold"
-                >
-                  مسودة
-                </v-btn>
-              </span>
-            </template>
-          </v-tooltip>
 
           <v-btn
             data-testid="pos-checkout"
@@ -816,7 +860,6 @@
           >
             <v-icon start>mdi-check-circle-outline</v-icon>
             دفع وإتمام
-            <span class="pay__hotkey">F9</span>
           </v-btn>
         </div>
       </div>
@@ -1419,6 +1462,7 @@ const availableOf = (p) => Number(p?.warehouseStock ?? p?.totalStock ?? p?.stock
 // blocked by an availability check.
 const isService = (p) => p?.productType === 'service';
 // A product is sellable when it's a service (no stock gate) or has stock.
+const hideNotAvailable = ref(false);
 const isSellable = (p) => isService(p) || availableOf(p) > 0;
 
 // Stock-status badge: a label + color + icon for the product card.
@@ -1463,15 +1507,29 @@ const productMatchesTerm = (p, q) =>
 const filteredProducts = computed(() => {
   const q = debouncedSearch.value;
   const catId = selectedCategory.value;
-  const base = hideExpired.value
-    ? products.value.filter((p) => expiryStatusOf(p) !== 'منتهي')
-    : products.value;
-  if (!q && catId == null) return base;
 
-  return base.filter((p) => {
-    if (catId != null && p.categoryId !== catId) return false;
-    if (!q) return true;
-    return productMatchesTerm(p, q);
+  return products.value.filter((p) => {
+    // إخفاء المنتهي
+    if (hideExpired.value && expiryStatusOf(p) === 'منتهي') {
+      return false;
+    }
+
+    // إخفاء غير المتوفر (الخدمات لا تُخفى)
+    if (hideNotAvailable.value && !isService(p) && availableOf(p) <= 0) {
+      return false;
+    }
+
+    // التصنيف
+    if (catId != null && p.categoryId !== catId) {
+      return false;
+    }
+
+    // البحث
+    if (q && !productMatchesTerm(p, q)) {
+      return false;
+    }
+
+    return true;
   });
 });
 
@@ -2307,197 +2365,349 @@ onUnmounted(() => {
 /* ══════════════════ Product card ══════════════════ */
 /* All cards share one structure (fixed-ratio media + 3-row body) so they line
    up to a perfectly even grid regardless of name length. */
-.pos-tile {
+
+.product-glass-card {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  /* Fixed geometry: media (132) + the 3-row body. The min-height guarantees the
-     card keeps a clear, consistent size no matter how many products render —
-     the grid scrolls, the cards never shrink. */
-  min-height: 236px;
-  border: 1px solid var(--pos-border);
-  background: rgb(var(--v-theme-surface));
+  min-height: 210px;
+  padding: 14px;
+  border-radius: 24px;
+  border: 1px solid rgba(var(--v-border-color), 0.14);
+  background:
+    linear-gradient(180deg, rgba(var(--v-theme-surface), 0.96), rgba(var(--v-theme-surface), 0.88)),
+    radial-gradient(circle at top right, rgba(var(--v-theme-primary), 0.18), transparent 45%);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.09);
   cursor: pointer;
   overflow: hidden;
-  transition:
-    transform 0.1s ease,
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
-
-  &:hover:not(.pos-tile--disabled) {
-    transform: translateY(-3px);
-    border-color: var(--pos-primary);
-    box-shadow: 0 8px 22px rgba(var(--v-theme-primary), 0.18);
-  }
-
-  &:hover:not(.pos-tile--disabled) .pos-tile__add {
-    opacity: 1;
-    transform: scale(1);
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--pos-primary);
-    outline-offset: 2px;
-  }
-
-  /* Out-of-stock / expired products stay visible but clearly dimmed and
-     de-saturated, and can't be added (pointer-events off). The "نفذ" status
-     badge keeps reading at full strength on top of the muted media. */
-  &--disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    pointer-events: none;
-
-    .pos-tile__media,
-    .pos-tile__body {
-      filter: grayscale(0.55);
-    }
-  }
+  transition: 0.18s ease;
 }
 
-/* ── Media ── */
-/* Fixed image height (within the 120–150px target) keeps every card the same
-   height regardless of how wide the column is at the current breakpoint. */
-.pos-tile__media {
-  position: relative;
-  /* flex: 0 0 132px locks the media band's height in the column — it can neither
-     grow nor shrink, so the image area is identical on every card. */
-  flex: 0 0 132px;
-  height: 132px;
-  width: 100%;
-  background: var(--pos-tint);
+.product-glass-card:hover {
+  transform: translateY(-4px) scale(1.01);
+  border-color: rgba(var(--v-theme-primary), 0.38);
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.15);
 }
 
-.pos-tile__img {
-  width: 100%;
-  height: 100%;
+.product-glass-card--disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+  filter: grayscale(0.45);
 }
 
-.pos-tile__placeholder {
-  position: absolute;
-  inset: 0;
+.product-glass-card__header {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, var(--ph-from, #6a6a72), var(--ph-to, #44444c));
+  align-items: start;
+  justify-content: space-between;
 }
 
-.pos-tile__placeholder-icon {
-  position: absolute;
-  color: rgba(255, 255, 255, 0.22);
+.product-glass-card__icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 22px;
+  display: grid;
+  place-items: center;
+  color: rgba(var(--v-theme-on-surface), 0.55);
+  background: rgba(var(--v-theme-surface-variant), 0.7);
 }
 
-.pos-tile__initials {
-  position: relative;
-  font-size: 1.4rem;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-  color: rgba(255, 255, 255, 0.92);
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+.product-glass-card__add {
+  box-shadow: 0 8px 18px rgba(var(--v-theme-primary), 0.32);
 }
 
-.pos-tile__status {
-  position: absolute;
-  top: 6px;
-  inset-inline-start: 6px;
-  font-weight: 700;
+.product-glass-card__content {
+  margin-top: 16px;
 }
 
-.pos-tile__star {
-  position: absolute;
-  top: 6px;
-  inset-inline-end: 6px;
-  color: rgb(var(--v-theme-warning));
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
-}
-
-.pos-tile__expiry {
-  position: absolute;
-  bottom: 6px;
-  inset-inline-start: 6px;
-  font-weight: 700;
-}
-
-.pos-tile__add {
-  position: absolute;
-  bottom: 6px;
-  inset-inline-end: 6px;
-  opacity: 1;
-  transform: scale(1);
-  transition:
-    opacity 0.15s ease,
-    transform 0.15s ease;
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
-
-  /* On hover-capable screens the (+) reveals on hover to keep the media clean;
-     on touch it stays visible since there's no hover. */
-  @media (hover: hover) {
-    opacity: 0;
-    transform: scale(0.7);
-  }
-}
-
-/* ── Body ── */
-.pos-tile__body {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 8px 10px 10px;
-  width: 100%;
-  /* Take the space left under the fixed media band and allow inner clamping. */
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-.pos-tile__name {
-  font-weight: 600;
-  font-size: 0.86rem;
-  line-height: 1.3;
-  /* Reserve exactly two lines so every card is the same height. */
-  min-height: 2.24em;
-  overflow: hidden;
+.product-glass-card__name {
+  min-height: 44px;
+  font-size: 1rem;
+  font-weight: 900;
+  line-height: 1.45;
+  color: rgb(var(--v-theme-on-surface));
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-.pos-tile__sku {
-  display: inline-flex;
+.product-glass-card__code {
+  margin-top: 7px;
+  display: flex;
   align-items: center;
-  gap: 3px;
-  font-size: 0.7rem;
-  color: rgba(var(--v-theme-on-surface), 0.55);
-  font-variant-numeric: tabular-nums;
+  gap: 5px;
+  font-size: 0.78rem;
+  color: rgba(var(--v-theme-on-surface), 0.56);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.pos-tile__foot {
-  /* Pin price + stock to the bottom so they line up across every card. */
-  margin-top: auto;
-  padding-top: 2px;
+.product-glass-card__badges {
+  min-height: 26px;
+  margin-top: 12px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.product-glass-card__bottom {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed rgba(var(--v-border-color), 0.18);
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.product-glass-card__label {
+  font-size: 0.72rem;
+  color: rgba(var(--v-theme-on-surface), 0.5);
+}
+
+.product-glass-card__price {
+  margin-top: 2px;
+  font-size: 1.08rem;
+  font-weight: 950;
+  color: rgb(var(--v-theme-primary));
+}
+
+.product-glass-card__prices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 0 0;
+}
+
+.product-glass-card__cost,
+.product-glass-card__sale {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: 12px;
 }
 
-.pos-tile__price {
-  font-weight: 800;
-  font-size: 1.04rem;
-  color: var(--pos-primary);
-  font-variant-numeric: tabular-nums;
+.product-glass-card__cost span,
+.product-glass-card__sale span {
+  font-size: 11px;
+  color: rgba(var(--v-theme-on-surface), 0.55);
 }
 
-.pos-tile__count {
+.product-glass-card__cost strong {
+  font-size: 13px;
+  font-weight: 700;
+  color: rgb(var(--v-theme-warning));
+}
+
+.product-glass-card__sale strong {
+  font-size: 18px;
+  font-weight: 900;
+  color: rgb(var(--v-theme-primary));
+}
+
+.product-glass-card__qty {
+  min-width: 44px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 999px;
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  font-size: 0.74rem;
-  color: rgba(var(--v-theme-on-surface), 0.6);
-  font-variant-numeric: tabular-nums;
+  justify-content: center;
+  gap: 4px;
+  font-weight: 800;
+  background: rgba(var(--v-theme-primary), 0.1);
+  color: rgb(var(--v-theme-primary));
 }
+// .pos-tile {
+//   position: relative;
+//   display: flex;
+//   flex-direction: column;
+//   /* Fixed geometry: media (132) + the 3-row body. The min-height guarantees the
+//      card keeps a clear, consistent size no matter how many products render —
+//      the grid scrolls, the cards never shrink. */
+//   min-height: 236px;
+//   border: 1px solid var(--pos-border);
+//   background: rgb(var(--v-theme-surface));
+//   cursor: pointer;
+//   overflow: hidden;
+//   transition:
+//     transform 0.1s ease,
+//     border-color 0.15s ease,
+//     box-shadow 0.15s ease;
+
+//   &:hover:not(.pos-tile--disabled) {
+//     transform: translateY(-3px);
+//     border-color: var(--pos-primary);
+//     box-shadow: 0 8px 22px rgba(var(--v-theme-primary), 0.18);
+//   }
+
+//   &:hover:not(.pos-tile--disabled) .pos-tile__add {
+//     opacity: 1;
+//     transform: scale(1);
+//   }
+
+//   &:focus-visible {
+//     outline: 2px solid var(--pos-primary);
+//     outline-offset: 2px;
+//   }
+
+//   /* Out-of-stock / expired products stay visible but clearly dimmed and
+//      de-saturated, and can't be added (pointer-events off). The "نفذ" status
+//      badge keeps reading at full strength on top of the muted media. */
+//   &--disabled {
+//     opacity: 0.5;
+//     cursor: not-allowed;
+//     pointer-events: none;
+
+//     .pos-tile__media,
+//     .pos-tile__body {
+//       filter: grayscale(0.55);
+//     }
+//   }
+// }
+
+// /* ── Media ── */
+// /* Fixed image height (within the 120–150px target) keeps every card the same
+//    height regardless of how wide the column is at the current breakpoint. */
+// .pos-tile__media {
+//   position: relative;
+//   /* flex: 0 0 132px locks the media band's height in the column — it can neither
+//      grow nor shrink, so the image area is identical on every card. */
+//   flex: 0 0 132px;
+//   height: 132px;
+//   width: 100%;
+//   background: var(--pos-tint);
+// }
+
+// .pos-tile__img {
+//   width: 100%;
+//   height: 100%;
+// }
+
+// .pos-tile__placeholder {
+//   position: absolute;
+//   inset: 0;
+//   display: flex;
+//   align-items: center;
+//   justify-content: center;
+//   background: linear-gradient(135deg, var(--ph-from, #6a6a72), var(--ph-to, #44444c));
+// }
+
+// .pos-tile__placeholder-icon {
+//   position: absolute;
+//   color: rgba(255, 255, 255, 0.22);
+// }
+
+// .pos-tile__initials {
+//   position: relative;
+//   font-size: 1.4rem;
+//   font-weight: 800;
+//   letter-spacing: 0.02em;
+//   color: rgba(255, 255, 255, 0.92);
+//   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+// }
+
+// .pos-tile__status {
+//   position: absolute;
+//   top: 6px;
+//   inset-inline-start: 6px;
+//   font-weight: 700;
+// }
+
+// .pos-tile__star {
+//   position: absolute;
+//   top: 6px;
+//   inset-inline-end: 6px;
+//   color: rgb(var(--v-theme-warning));
+//   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+// }
+
+// .pos-tile__expiry {
+//   position: absolute;
+//   bottom: 6px;
+//   inset-inline-start: 6px;
+//   font-weight: 700;
+// }
+
+// .pos-tile__add {
+//   position: absolute;
+//   bottom: 6px;
+//   inset-inline-end: 6px;
+//   opacity: 1;
+//   transform: scale(1);
+//   transition:
+//     opacity 0.15s ease,
+//     transform 0.15s ease;
+//   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+
+//   /* On hover-capable screens the (+) reveals on hover to keep the media clean;
+//      on touch it stays visible since there's no hover. */
+//   @media (hover: hover) {
+//     opacity: 0;
+//     transform: scale(0.7);
+//   }
+// }
+
+// /* ── Body ── */
+// .pos-tile__body {
+//   display: flex;
+//   flex-direction: column;
+//   gap: 3px;
+//   padding: 8px 10px 10px;
+//   width: 100%;
+//   /* Take the space left under the fixed media band and allow inner clamping. */
+//   flex: 1 1 auto;
+//   min-height: 0;
+// }
+
+// .pos-tile__name {
+//   font-weight: 600;
+//   font-size: 0.86rem;
+//   line-height: 1.3;
+//   /* Reserve exactly two lines so every card is the same height. */
+//   min-height: 2.24em;
+//   overflow: hidden;
+//   display: -webkit-box;
+//   -webkit-line-clamp: 2;
+//   -webkit-box-orient: vertical;
+// }
+
+// .pos-tile__sku {
+//   display: inline-flex;
+//   align-items: center;
+//   gap: 3px;
+//   font-size: 0.7rem;
+//   color: rgba(var(--v-theme-on-surface), 0.55);
+//   font-variant-numeric: tabular-nums;
+//   white-space: nowrap;
+//   overflow: hidden;
+//   text-overflow: ellipsis;
+// }
+
+// .pos-tile__foot {
+//   /* Pin price + stock to the bottom so they line up across every card. */
+//   margin-top: auto;
+//   padding-top: 2px;
+//   display: flex;
+//   align-items: center;
+//   justify-content: space-between;
+//   gap: 6px;
+// }
+
+// .pos-tile__price {
+//   font-weight: 800;
+//   font-size: 1.04rem;
+//   color: var(--pos-primary);
+//   font-variant-numeric: tabular-nums;
+// }
+
+// .pos-tile__count {
+//   display: inline-flex;
+//   align-items: center;
+//   gap: 2px;
+//   font-size: 0.74rem;
+//   color: rgba(var(--v-theme-on-surface), 0.6);
+//   font-variant-numeric: tabular-nums;
+// }
 
 /* ── Skeleton (matches the card silhouette) ── */
 .pos-tile--skeleton {
@@ -2537,6 +2747,9 @@ onUnmounted(() => {
 /* ══════════════════ Cart panel ══════════════════ */
 .pos__cart {
   background: rgb(var(--v-theme-surface));
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .cart__handle {
@@ -2581,8 +2794,8 @@ onUnmounted(() => {
 
 /* ── Lines ── */
 .cart__lines {
-  flex: 1;
-  min-height: 0;
+  flex: 1 1 auto;
+  min-height: 180px;
   overflow-y: auto;
   scrollbar-gutter: stable;
   padding: 8px;
@@ -2737,133 +2950,105 @@ onUnmounted(() => {
 
 /* ══════════════════ Pay / footer ══════════════════ */
 .cart__pay {
+  flex: 0 0 auto;
+  max-height: 38vh;
+  overflow-y: auto;
+  padding: 10px;
   flex-shrink: 0;
-  padding: 12px;
-  border-top: 1px solid var(--pos-border);
+  border-top: 1px solid rgba(var(--v-border-color), 0.12);
   background: rgb(var(--v-theme-surface));
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
 }
 
-.pay__breakdown {
+.pay__total--compact {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 0.82rem;
-  color: rgba(var(--v-theme-on-surface), 0.75);
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(var(--v-theme-primary), 0.08);
+}
+
+.pay__total-label {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.pay__total-value {
+  font-size: 21px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.pay__breakdown--compact {
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 12px;
+  background: rgba(var(--v-theme-surface-variant), 0.45);
 }
 
 .pay__row {
   display: flex;
   justify-content: space-between;
-  font-variant-numeric: tabular-nums;
-
-  &--warning {
-    color: rgb(var(--v-theme-warning));
-  }
+  gap: 8px;
+  font-size: 12px;
 }
 
-.pay__total {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  padding: 6px 12px;
-  border-radius: 12px;
-  background: var(--pos-primary-soft);
+.pay__alert {
+  margin-top: 8px;
 }
 
-.pay__total-label {
-  font-weight: 700;
-}
-
-.pay__total-value {
-  font-size: 1.5rem;
-  font-weight: 800;
-  color: var(--pos-primary);
-  font-variant-numeric: tabular-nums;
-}
-
-.pay__expander {
-  :deep(.v-expansion-panel) {
-    background: var(--pos-soft);
-  }
-  :deep(.v-expansion-panel-title) {
-    min-height: 40px;
-    font-size: 0.82rem;
-    padding: 8px 12px;
-  }
-  :deep(.v-expansion-panel-text__wrapper) {
-    padding: 8px 12px 12px;
-  }
-}
-
-.pay__adjust {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.pay__methods-row {
+  margin-top: 8px;
 }
 
 .pay__methods {
   width: 100%;
-  gap: 8px;
-
-  :deep(.v-btn) {
-    flex: 1;
-  }
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
 }
 
-.pay__readout {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 12px;
-  border-radius: 12px;
-  background: var(--pos-tint);
-  border: 1px solid transparent;
-  transition:
-    background 0.15s ease,
-    border-color 0.15s ease;
+.pay__methods .v-btn {
+  min-width: 0;
+}
 
-  &.is-success {
-    background: rgba(var(--v-theme-success), 0.1);
-    border-color: rgba(var(--v-theme-success), 0.4);
-  }
-  &.is-error {
-    background: rgba(var(--v-theme-error), 0.08);
-    border-color: rgba(var(--v-theme-error), 0.35);
-  }
+.pay__readout--compact {
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 12px;
+  background: rgba(var(--v-theme-surface-variant), 0.45);
 }
 
 .pay__readout-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-variant-numeric: tabular-nums;
-
-  &--delta {
-    font-weight: 700;
-  }
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
 }
 
-.pay__readout-label {
-  color: rgba(var(--v-theme-on-surface), 0.7);
-  font-size: 0.82rem;
+.pay__expander--dense {
+  margin-top: 8px;
 }
 
-.pay__readout-typed {
-  font-size: 0.78rem;
-  color: rgba(var(--v-theme-on-surface), 0.55);
+.pay__expander--dense .v-expansion-panel-title {
+  min-height: 38px;
+  padding: 8px 12px;
+  font-size: 13px;
 }
 
-.pay__readout-amount {
-  margin-inline-start: auto;
-  font-weight: 700;
+.pay__expander--dense .v-expansion-panel-text__wrapper {
+  padding: 8px;
+}
+
+.pay__adjust {
+  display: grid;
+  gap: 8px;
 }
 
 .numpad__quick {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(56px, 1fr));
+  grid-template-columns: repeat(3, 1fr);
   gap: 6px;
   margin-bottom: 8px;
 }
@@ -2874,25 +3059,24 @@ onUnmounted(() => {
   gap: 6px;
 }
 
-.pay__utils {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
+.numpad__keys .v-btn {
+  min-width: 0;
+  height: 36px;
 }
 
-.pay__actions {
+.pay__actions--compact {
+  position: sticky;
+  bottom: 0;
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: 0.85fr 1.4fr;
   gap: 8px;
-  align-items: stretch;
-}
-
-.pay__draft-wrap {
-  display: inline-flex;
+  padding-top: 8px;
+  margin-top: 8px;
+  background: rgb(var(--v-theme-surface));
 }
 
 .pay__checkout {
-  position: relative;
+  font-weight: 800;
 }
 
 .pay__hotkey {
