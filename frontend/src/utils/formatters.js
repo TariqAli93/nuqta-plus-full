@@ -2,6 +2,40 @@
  * Utility functions for formatting dates, numbers, and currencies
  */
 
+/*
+ * Intl formatter memoization.
+ *
+ * Constructing an `Intl.NumberFormat` / `Intl.DateTimeFormat` is expensive
+ * (it loads locale + numbering-system data). These formatters are called from
+ * inside table cells, so previously EVERY repaint of a 25-row list allocated a
+ * fresh formatter per numeric/date/currency cell — hundreds of throwaway
+ * objects per frame, which is a primary cause of scroll/render jank and GC
+ * pressure in the Electron renderer. We cache one instance per (locale, options)
+ * key and reuse it; the cache is tiny and bounded by the handful of distinct
+ * option shapes the app actually uses.
+ */
+const _numberFmtCache = new Map();
+function numberFormatter(locale, options) {
+  const key = `${locale}|${JSON.stringify(options)}`;
+  let fmt = _numberFmtCache.get(key);
+  if (!fmt) {
+    fmt = new Intl.NumberFormat(locale, options);
+    _numberFmtCache.set(key, fmt);
+  }
+  return fmt;
+}
+
+const _dateFmtCache = new Map();
+function dateFormatter(locale, options) {
+  const key = `${locale}|${JSON.stringify(options)}`;
+  let fmt = _dateFmtCache.get(key);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat(locale, options);
+    _dateFmtCache.set(key, fmt);
+  }
+  return fmt;
+}
+
 /**
  * Format date in Arabic locale
  * @param {Date|String} date - Date to format
@@ -20,7 +54,7 @@ export function formatDate(date, options = {}) {
     numberingSystem: 'latn',
   };
 
-  return new Intl.DateTimeFormat('ar-IQ', { ...defaultOptions, ...options }).format(dateObj);
+  return dateFormatter('ar-IQ', { ...defaultOptions, ...options }).format(dateObj);
 }
 
 /**
@@ -46,7 +80,7 @@ export function formatDateTime(date) {
 export function formatNumber(number, decimals = 2) {
   if (number === null || number === undefined || isNaN(number)) return '0';
 
-  return new Intl.NumberFormat('ar', {
+  return numberFormatter('ar', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
     numberingSystem: 'latn',
@@ -77,10 +111,12 @@ export function formatCurrency(amount, currency = 'IQD') {
   const cur = currency || 'IQD';
   const num = Number(amount) || 0;
   const decimals = cur === 'USD' ? 2 : 0;
-  const formatted = num.toLocaleString('en-US', {
+  // Reuse a cached formatter instead of the per-call `toLocaleString` path —
+  // currency cells are the hottest formatter in the product/sales tables.
+  const formatted = numberFormatter('en-US', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
-  });
+  }).format(num);
   return `${formatted} ${getCurrencySymbol(cur)}`;
 }
 

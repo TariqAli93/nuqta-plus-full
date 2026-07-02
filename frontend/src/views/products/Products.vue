@@ -25,14 +25,14 @@
       data-testid="products-table"
       table-key="products-table"
       :headers="headers"
-      :items="productStore.products"
+      :items="items"
       :loading="tableLoading"
       :error="error"
-      :total-items="productStore.pagination.total"
+      :total-items="pagination.total"
       server-side
       :initial-load="false"
-      :page="productStore.pagination.page"
-      :page-size="productStore.pagination.limit"
+      :page="pagination.page"
+      :page-size="pagination.limit"
       :search="query"
       :search-placeholder="'ابحث بالاسم، الرمز، الباركود، الوحدة...'"
       :filter-chips="filterChips"
@@ -45,7 +45,9 @@
       :empty-title="'لا توجد منتجات'"
       :empty-description="'ابدأ بإضافة منتج جديد لبناء مخزونك'"
       empty-icon="mdi-package-variant"
-      :empty-actions="[{ text: 'إضافة منتج جديد', icon: 'mdi-plus', to: '/products/new', color: 'primary' }]"
+      :empty-actions="[
+        { text: 'إضافة منتج جديد', icon: 'mdi-plus', to: '/products/new', color: 'primary' },
+      ]"
       @update:search="onQueryChange"
       @search-now="runNow"
       @clear-search="clear"
@@ -135,10 +137,13 @@
       <template #[`item.name`]="{ item }">
         <div class="d-flex flex-column py-1">
           <span class="font-weight-medium">
-            <template v-for="(seg, i) in highlightOf(item.name)" :key="i">
-              <mark v-if="seg.match" class="search-hl">{{ seg.text }}</mark>
-              <template v-else>{{ seg.text }}</template>
+            <template v-if="searchActive">
+              <template v-for="(seg, i) in highlightOf(item.name)" :key="i">
+                <mark v-if="seg.match" class="search-hl">{{ seg.text }}</mark>
+                <template v-else>{{ seg.text }}</template>
+              </template>
             </template>
+            <template v-else>{{ item.name }}</template>
           </span>
           <MatchBadge
             v-if="item.matchedField"
@@ -150,18 +155,24 @@
       </template>
       <template #[`item.sku`]="{ item }">
         <span dir="ltr" class="st-cell-num">
-          <template v-for="(seg, i) in highlightOf(item.sku)" :key="i">
-            <mark v-if="seg.match" class="search-hl">{{ seg.text }}</mark>
-            <template v-else>{{ seg.text }}</template>
+          <template v-if="searchActive">
+            <template v-for="(seg, i) in highlightOf(item.sku)" :key="i">
+              <mark v-if="seg.match" class="search-hl">{{ seg.text }}</mark>
+              <template v-else>{{ seg.text }}</template>
+            </template>
           </template>
+          <template v-else>{{ item.sku }}</template>
         </span>
       </template>
       <template #[`item.barcode`]="{ item }">
         <span dir="ltr" class="st-cell-num">
-          <template v-for="(seg, i) in highlightOf(item.barcode)" :key="i">
-            <mark v-if="seg.match" class="search-hl">{{ seg.text }}</mark>
-            <template v-else>{{ seg.text }}</template>
+          <template v-if="searchActive">
+            <template v-for="(seg, i) in highlightOf(item.barcode)" :key="i">
+              <mark v-if="seg.match" class="search-hl">{{ seg.text }}</mark>
+              <template v-else>{{ seg.text }}</template>
+            </template>
           </template>
+          <template v-else>{{ item.barcode }}</template>
         </span>
       </template>
       <template #[`item.productType`]="{ item }">
@@ -194,7 +205,9 @@
       </template>
       <template #[`item.wholesalePrice`]="{ item }">
         <span :class="{ 'text-medium-emphasis': item.wholesalePrice == null }">
-          {{ item.wholesalePrice == null ? '—' : formatCurrency(item.wholesalePrice, item.currency) }}
+          {{
+            item.wholesalePrice == null ? '—' : formatCurrency(item.wholesalePrice, item.currency)
+          }}
         </span>
       </template>
       <template #[`item.agentPrice`]="{ item }">
@@ -213,6 +226,11 @@
         </v-chip>
       </template>
     </SmartTable>
+
+    <!-- Manual stock adjustment (increase / decrease / correction …) for the
+         selected product. Reuses the shared inventory-adjust workflow + endpoint;
+         refreshes the list on a successful save. -->
+    <StockAdjustDialog ref="adjustDialog" @saved="refresh" />
   </div>
 </template>
 
@@ -227,6 +245,7 @@ import * as uiAccess from '@/auth/uiAccess.js';
 import PageHeader from '@/components/PageHeader.vue';
 import MatchBadge from '@/components/MatchBadge.vue';
 import SmartTable from '@/components/common/SmartTable';
+import StockAdjustDialog from '@/components/inventory/StockAdjustDialog.vue';
 import { useServerSearch } from '@/composables/useServerSearch';
 import { highlightSegments } from '@/utils/highlight';
 import { formatCurrency } from '@/utils/formatters';
@@ -243,6 +262,8 @@ const { registerUndo } = useUndo();
 
 const { can } = usePermissions();
 const canReadCategories = computed(() => can('categories:read'));
+// Same permission the inventory page + backend enforce for POST /inventory/adjust.
+const canAdjustInventory = computed(() => can('inventory:adjust'));
 
 const userRole = computed(() => authStore.user?.role);
 const canManageProducts = computed(() =>
@@ -254,6 +275,7 @@ const canDeleteProducts = computed(() =>
 );
 
 const tableRef = ref(null);
+const adjustDialog = ref(null);
 const categories = ref([]);
 
 const selectedCategory = ref(null);
@@ -271,9 +293,36 @@ const productTypeOptions = [
   { title: 'منتجات مخزنية', value: 'inventory' },
   { title: 'خدمات', value: 'service' },
 ];
-const productTypeLabel = (v) => (v === 'service' ? 'خدمات' : v === 'inventory' ? 'منتجات مخزنية' : '');
+const productTypeLabel = (v) =>
+  v === 'service' ? 'خدمات' : v === 'inventory' ? 'منتجات مخزنية' : '';
 
 const currentWarehouseId = () => inventoryStore.selectedWarehouseId || undefined;
+
+// The `product` Pinia store slice is SHARED across screens: POS (PosScreen) and
+// the New-Sale form load the FULL catalogue into it with `limit: 1000` for
+// offline barcode/search, and InventoryValuation loads 500. If this list page
+// bound straight to that shared slice, opening Products right after visiting POS
+// would flash ~1000 stale rows AND inherit `pagination.limit = 1000` as the
+// table's items-per-page — the exact freeze-then-settle-to-25 bug — until the
+// fresh limit-25 request landed. So the list view keeps its OWN isolated items
+// + pagination and never reads the shared store's list/pagination state.
+const PAGE_SIZE = 25;
+const items = ref([]);
+const pagination = ref({ page: 1, limit: PAGE_SIZE, total: 0, totalPages: 0 });
+
+// Single funnel for both fresh (`load`) and cached (`apply`) responses so ONLY
+// this page's local state is ever touched. `limit` is pinned to PAGE_SIZE — the
+// backend meta is trusted for page/total but never for the render page size.
+const applyResponse = (res) => {
+  items.value = res?.data || [];
+  const meta = res?.meta;
+  pagination.value = {
+    page: Number(meta?.page) || 1,
+    limit: PAGE_SIZE,
+    total: Number(meta?.total) || 0,
+    totalPages: Number(meta?.totalPages) || 0,
+  };
+};
 
 const {
   query,
@@ -288,7 +337,7 @@ const {
   setPageSize,
   refresh,
 } = useServerSearch({
-  limit: productStore.pagination.limit,
+  limit: PAGE_SIZE,
   initialFilters: {
     categoryId: null,
     status: null,
@@ -296,19 +345,15 @@ const {
     minPrice: null,
     maxPrice: null,
   },
-  load: (params, opts) =>
-    productStore.fetch({ ...params, warehouseId: currentWarehouseId() }, { ...opts, silent: true }),
-  apply: (res) => {
-    productStore.products = res?.data || [];
-    if (res?.meta) {
-      productStore.pagination = {
-        page: Number(res.meta.page) || 1,
-        limit: Number(res.meta.limit) || productStore.pagination.limit,
-        total: Number(res.meta.total) || 0,
-        totalPages: Number(res.meta.totalPages) || 0,
-      };
-    }
+  load: async (params, opts) => {
+    const res = await productStore.fetch(
+      { ...params, warehouseId: currentWarehouseId() },
+      { ...opts, silent: true }
+    );
+    applyResponse(res);
+    return res;
   },
+  apply: (res) => applyResponse(res),
 });
 
 const tableLoading = computed(() => isSearching.value || productStore.loading);
@@ -319,14 +364,24 @@ const filterChips = computed(() => {
     const cat = categories.value.find((c) => c.id === selectedCategory.value);
     chips.push({ key: 'categoryId', label: `التصنيف: ${cat?.name ?? selectedCategory.value}` });
   }
-  if (statusFilter.value) chips.push({ key: 'status', label: `الحالة: ${getStatusText(statusFilter.value)}` });
+  if (statusFilter.value)
+    chips.push({ key: 'status', label: `الحالة: ${getStatusText(statusFilter.value)}` });
   if (productTypeFilter.value)
-    chips.push({ key: 'productType', label: `النوع: ${productTypeLabel(productTypeFilter.value)}` });
+    chips.push({
+      key: 'productType',
+      label: `النوع: ${productTypeLabel(productTypeFilter.value)}`,
+    });
   if (minPrice.value) chips.push({ key: 'minPrice', label: `السعر من: ${minPrice.value}` });
   if (maxPrice.value) chips.push({ key: 'maxPrice', label: `السعر إلى: ${maxPrice.value}` });
   return chips;
 });
 
+// Only run the (allocating) segment splitter when there is actually something
+// to highlight. On the default, no-query catalogue view every name/sku/barcode
+// cell would otherwise call highlightSegments on each render; this keeps those
+// cells to a plain text interpolation. `matchedField` is NULL from the backend
+// when not searching, so the MatchBadge stays hidden too.
+const searchActive = computed(() => !!(query.value && query.value.trim()));
 const highlightOf = (value) => highlightSegments(value, query.value);
 
 const onCategoryChange = () => setFilters({ categoryId: selectedCategory.value || null });
@@ -389,6 +444,16 @@ const rowActions = computed(() => {
       primary: true,
     });
   }
+  if (canAdjustInventory.value) {
+    list.push({
+      key: 'inventory',
+      icon: 'mdi-tune',
+      title: 'إدارة المخزون',
+      // Services have no stock — offer the action only for inventory products.
+      hidden: (item) => isServiceItem(item),
+      handler: (item) => adjustDialog.value?.openFor(item),
+    });
+  }
   if (canDeleteProducts.value) {
     list.push({
       key: 'delete',
@@ -424,7 +489,9 @@ const isLowStock = (item) => {
   if (isServiceItem(item)) return false;
   const qty = resolvedStock(item);
   const threshold =
-    item.lowStockThreshold && item.lowStockThreshold > 0 ? item.lowStockThreshold : item.minStock || 0;
+    item.lowStockThreshold && item.lowStockThreshold > 0
+      ? item.lowStockThreshold
+      : item.minStock || 0;
   return qty <= threshold;
 };
 
@@ -432,6 +499,9 @@ const handleDelete = async (product) => {
   const productName = product.name;
   try {
     await productStore.deleteProduct(product.id);
+    // Instant feedback on the isolated local list, then refresh to resync
+    // counts/totals from the server.
+    items.value = items.value.filter((p) => p.id !== product.id);
     refresh();
     registerUndo(
       {

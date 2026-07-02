@@ -42,12 +42,23 @@ defineEmits(['update:modelValue']);
 </script>
 
 <style scoped lang="scss">
+.payment-method {
+  width: 100%;
+}
+
 .payment-method__toggle {
   width: 100%;
-  gap: 10px;
+  gap: 8px;
+  padding: 3px;
+  border-radius: 12px;
+  background: rgba(var(--v-theme-surface-variant), 0.26);
 
   :deep(.v-btn) {
     flex: 1;
+    min-height: 40px;
+    border-radius: 10px !important;
+    font-weight: 800;
   }
 }
 </style>
+

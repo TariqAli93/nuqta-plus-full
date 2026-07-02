@@ -406,42 +406,53 @@ useKeyboardShortcuts({
 </script>
 
 <style scoped lang="scss">
-// Full-height desktop layout: header / workspace (fills) / action bar.
 .new-sale-page {
+  --sale-gap: 12px;
+  --sale-radius: 14px;
+  --sale-border: rgba(var(--v-theme-on-surface), 0.1);
+  --sale-soft: rgba(var(--v-theme-on-surface), 0.055);
   height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  gap: 12px;
+  gap: var(--sale-gap);
+  padding: 2px;
+  overflow: hidden;
 }
 
 .sale-workspace {
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) clamp(330px, 28vw, 390px);
+  gap: var(--sale-gap);
+  align-items: stretch;
 }
 
-// Shared panel chrome (one panel for main, one for summary).
 .panel {
-  background-color: rgb(var(--v-theme-surface));
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.1);
-  border-radius: 10px;
   min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  border: 1px solid var(--sale-border);
+  border-radius: var(--sale-radius);
+  background: rgb(var(--v-theme-surface));
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.035);
 }
 
-// ── Main panel ───────────────────────────────────────────────────────────────
 .sale-main {
   min-width: 0;
 }
 
 .product-add {
-  padding: 10px 12px;
-  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.07);
+  flex: 0 0 auto;
+  padding: 10px;
+  border-bottom: 1px solid var(--sale-soft);
+  background: linear-gradient(180deg, rgba(var(--v-theme-primary), 0.035), transparent);
+}
+
+.product-add__field {
+  width: 100%;
 }
 
 .sale-items-section {
@@ -453,81 +464,108 @@ useKeyboardShortcuts({
 
 .sale-items-scroll {
   flex: 1 1 auto;
-  min-height: 180px;
+  min-height: 0;
   overflow: auto;
-  padding: 4px 12px 12px;
+  padding: 8px 10px 12px;
+  scrollbar-gutter: stable;
 }
 
-// ── Summary panel ────────────────────────────────────────────────────────────
 .sale-summary-col {
-  min-height: 0;
+  min-width: 0;
 }
 
 .panel__head {
   flex: 0 0 auto;
+  min-height: 54px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
   padding: 10px 12px;
-  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.07);
+  border-bottom: 1px solid var(--sale-soft);
+  background: rgba(var(--v-theme-surface-variant), 0.18);
 }
 
 .panel__title {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
+  min-width: 0;
   font-size: 0.95rem;
-  font-weight: 600;
+  font-weight: 800;
+  color: rgba(var(--v-theme-on-surface), 0.9);
 }
 
 .currency-select {
-  max-width: 116px;
+  flex: 0 0 112px;
+  max-width: 112px;
 }
 
 .panel__scroll {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
+  padding: 12px;
+  scrollbar-gutter: stable;
 }
 
 .notes-toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   width: 100%;
-  padding: 6px 4px;
-  font-size: 0.8rem;
-  color: rgba(var(--v-theme-on-surface), 0.7);
-  background: transparent;
-  border: none;
+  padding: 9px 10px;
+  border: 1px dashed rgba(var(--v-theme-on-surface), 0.14);
+  border-radius: 10px;
+  background: rgba(var(--v-theme-surface-variant), 0.16);
+  color: rgba(var(--v-theme-on-surface), 0.72);
+  font-size: 0.82rem;
   cursor: pointer;
 }
 
-// ── Responsive desktop ───────────────────────────────────────────────────────
-@media (max-width: 1100px) {
+.notes-toggle:hover {
+  background: rgba(var(--v-theme-primary), 0.05);
+  border-color: rgba(var(--v-theme-primary), 0.22);
+}
+
+:deep(.v-field) {
+  border-radius: 10px;
+}
+
+@media (max-width: 1368px) {
+  .sale-workspace {
+    grid-template-columns: minmax(0, 1fr) 340px;
+  }
+
+  .panel__scroll {
+    padding: 10px;
+    gap: 9px;
+  }
+}
+
+@media (max-width: 1180px) {
   .sale-workspace {
     grid-template-columns: minmax(0, 1fr) 320px;
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 980px) {
   .new-sale-page {
     height: auto;
     overflow: visible;
   }
+
   .sale-workspace {
     grid-template-columns: 1fr;
   }
-  .sale-items-scroll {
-    overflow: visible;
-  }
+
+  .sale-items-scroll,
   .panel__scroll {
     overflow: visible;
   }
 }
 </style>
+

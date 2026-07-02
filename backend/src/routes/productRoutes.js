@@ -27,7 +27,11 @@ export default async function productRoutes(fastify) {
         properties: {
           search: { type: 'string' },
           page: { type: 'integer', minimum: 1, default: 1 },
-          limit: { type: 'integer', minimum: 1, maximum: 1000000, default: 10 },
+          // Hard ceiling: the list screen uses 25; POS / sale-form deliberately
+          // pull the full catalogue at 1000. Cap at 2000 so a legit 1000 still
+          // works but a pathological "give me everything" (was 1,000,000) can't
+          // sequential-scan the whole table in one request.
+          limit: { type: 'integer', minimum: 1, maximum: 2000, default: 25 },
           categoryId: { type: 'integer' },
           warehouseId: { type: 'integer' },
           status: { type: 'string' },

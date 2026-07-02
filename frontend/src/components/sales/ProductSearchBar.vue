@@ -144,29 +144,53 @@ defineExpose({
 
 <style scoped lang="scss">
 .product-search {
-  display: flex;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
+  align-items: stretch;
 
   &__field {
-    flex: 1 1 auto;
     min-width: 0;
+
+    :deep(.v-field) {
+      min-height: 46px;
+      border-radius: 12px;
+      background: rgb(var(--v-theme-surface));
+    }
+
+    :deep(input) {
+      font-size: 0.92rem;
+      font-weight: 600;
+    }
   }
 
   &__add {
-    flex: 0 0 auto;
-    width: 96px;
-    height: 48px;
+    min-width: 92px;
+    height: 46px !important;
+    border-radius: 12px;
+    font-weight: 800;
   }
 
   &__kbd {
     align-self: center;
-    padding: 1px 6px;
-    border-radius: 4px;
-    font-size: 0.62rem;
-    font-weight: 600;
-    background-color: rgba(var(--v-theme-on-surface), 0.08);
-    color: rgba(var(--v-theme-on-surface), 0.5);
+    padding: 2px 7px;
+    border-radius: 6px;
+    font-size: 0.64rem;
+    font-weight: 800;
+    background: rgba(var(--v-theme-primary), 0.1);
+    color: rgb(var(--v-theme-primary));
+    border: 1px solid rgba(var(--v-theme-primary), 0.18);
+  }
+}
+
+@media (max-width: 760px) {
+  .product-search {
+    grid-template-columns: 1fr;
+
+    &__add {
+      width: 100%;
+    }
   }
 }
 </style>
+

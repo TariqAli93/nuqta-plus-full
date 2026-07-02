@@ -1,0 +1,1009 @@
+/* ══════════════════ Design tokens (local) ══════════════════ */
+.pos {
+  --pos-gap: 16px;
+  --pos-radius: 16px;
+  --pos-border: rgba(var(--v-theme-on-surface), 0.08);
+  --pos-soft: rgba(var(--v-theme-on-surface), 0.03);
+  --pos-tint: rgba(var(--v-theme-on-surface), 0.06);
+  --pos-primary: rgb(var(--v-theme-primary));
+  --pos-primary-soft: rgba(var(--v-theme-primary), 0.08);
+
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(330px, 31vw, 440px);
+  gap: var(--pos-gap);
+  height: calc(100dvh - 96px);
+  min-height: 560px;
+  direction: rtl;
+}
+
+/* Tablet: narrow the cart a touch so the catalogue keeps breathing room. */
+@media (max-width: 1280px) {
+  .pos {
+    grid-template-columns: minmax(0, 1fr) 320px;
+  }
+}
+
+.pos__panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  border: 1px solid var(--pos-border);
+  border-radius: var(--pos-radius);
+  overflow: hidden;
+}
+
+/* ══════════════════ Products panel ══════════════════ */
+.pos__products {
+  min-height: 0;
+}
+
+.pos__toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--pos-border);
+  background: rgb(var(--v-theme-surface));
+}
+
+.pos__filters {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pos__category {
+  flex: 1 1 200px;
+  min-width: 180px;
+}
+
+.pos__tiers {
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.pos__expired {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+}
+
+.pos__search-hint {
+  opacity: 0.45;
+}
+
+/* Column count is fixed per breakpoint (not auto-fill) so the card size stays
+   stable and we hit the intended grid: ~2 (mobile) → 3–4 (tablet) → 5–6
+   (desktop). The panel width tracks the viewport (the cart is a fixed-ish
+   column / drawer), so viewport breakpoints map cleanly to the catalogue. */
+.pos__grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr); /* mobile: 2 columns */
+  gap: 12px;
+  padding: 14px;
+  /* Fill the space between the toolbar and the pagination bar; this is the only
+     scroll region in the products panel (the pager below stays fixed). */
+  flex: 1 1 auto;
+  overflow-y: auto;
+  align-content: start;
+  /* Rows size to the card's own height and never stretch/compress to fill the
+     scroll area — so adding more products grows the scroll, never shrinks the
+     cards. (Explicitly NOT `1fr`, which would distribute height across rows.) */
+  grid-auto-rows: max-content;
+  min-height: 0;
+  min-width: 0;
+  scrollbar-gutter: stable;
+}
+
+/* Large phones / small tablets (drawer mode, full width) → 3 columns. */
+@media (min-width: 600px) {
+  .pos__grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* Tablets → 4 columns (portrait drawer and the md side-by-side band). */
+@media (min-width: 768px) {
+  .pos__grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+/* Desktop side-by-side → ~5 columns. */
+@media (min-width: 1280px) {
+  .pos__grid {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
+
+/* Wide desktop → 6 columns when the space allows it. */
+@media (min-width: 1700px) {
+  .pos__grid {
+    grid-template-columns: repeat(6, 1fr);
+  }
+}
+
+.pos__empty {
+  grid-column: 1 / -1;
+  padding: 48px 16px;
+}
+
+/* Pagination bar: pinned below the grid (never scrolls), mirrors the cart's
+   footer border so the two panels feel balanced. */
+.pos__pager {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--pos-border);
+  background: rgb(var(--v-theme-surface));
+}
+
+.pos__pager--mobile {
+  margin-bottom: 45px;
+}
+
+.pos__pager-size {
+  flex: 0 0 116px;
+  max-width: 116px;
+}
+
+.pos__pager-count {
+  font-size: 0.78rem;
+  color: rgba(var(--v-theme-on-surface), 0.6);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Push the page controls to the inline-end (visual left in RTL). */
+.pos__pager-nav {
+  margin-inline-start: auto;
+  width: auto;
+}
+
+/* ══════════════════ Product card ══════════════════ */
+/* All cards share one structure (fixed-ratio media + 3-row body) so they line
+   up to a perfectly even grid regardless of name length. */
+
+.product-glass-card {
+  position: relative;
+  min-height: 210px;
+  padding: 14px;
+  border-radius: 24px;
+  border: 1px solid rgba(var(--v-border-color), 0.14);
+  background:
+    linear-gradient(180deg, rgba(var(--v-theme-surface), 0.96), rgba(var(--v-theme-surface), 0.88)),
+    radial-gradient(circle at top right, rgba(var(--v-theme-primary), 0.18), transparent 45%);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.09);
+  cursor: pointer;
+  overflow: hidden;
+  transition: 0.18s ease;
+}
+
+.product-glass-card:hover {
+  transform: translateY(-4px) scale(1.01);
+  border-color: rgba(var(--v-theme-primary), 0.38);
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.15);
+}
+
+.product-glass-card--disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+  filter: grayscale(0.45);
+}
+
+.product-glass-card__header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+}
+
+.product-glass-card__icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 22px;
+  display: grid;
+  place-items: center;
+  color: rgba(var(--v-theme-on-surface), 0.55);
+  background: rgba(var(--v-theme-surface-variant), 0.7);
+}
+
+.product-glass-card__add {
+  box-shadow: 0 8px 18px rgba(var(--v-theme-primary), 0.32);
+}
+
+.product-glass-card__content {
+  margin-top: 16px;
+}
+
+.product-glass-card__name {
+  min-height: 44px;
+  font-size: 1rem;
+  font-weight: 900;
+  line-height: 1.45;
+  color: rgb(var(--v-theme-on-surface));
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.product-glass-card__code {
+  margin-top: 7px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.78rem;
+  color: rgba(var(--v-theme-on-surface), 0.56);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.product-glass-card__badges {
+  min-height: 26px;
+  margin-top: 12px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.product-glass-card__bottom {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed rgba(var(--v-border-color), 0.18);
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.product-glass-card__label {
+  font-size: 0.72rem;
+  color: rgba(var(--v-theme-on-surface), 0.5);
+}
+
+.product-glass-card__price {
+  margin-top: 2px;
+  font-size: 1.08rem;
+  font-weight: 950;
+  color: rgb(var(--v-theme-primary));
+}
+
+.product-glass-card__prices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 0 0;
+}
+
+.product-glass-card__cost,
+.product-glass-card__sale {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.product-glass-card__cost span,
+.product-glass-card__sale span {
+  font-size: 11px;
+  color: rgba(var(--v-theme-on-surface), 0.55);
+}
+
+.product-glass-card__cost strong {
+  font-size: 13px;
+  font-weight: 700;
+  color: rgb(var(--v-theme-warning));
+}
+
+.product-glass-card__sale strong {
+  font-size: 18px;
+  font-weight: 900;
+  color: rgb(var(--v-theme-primary));
+}
+
+.product-glass-card__qty {
+  min-width: 44px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-weight: 800;
+  background: rgba(var(--v-theme-primary), 0.1);
+  color: rgb(var(--v-theme-primary));
+}
+// .pos-tile {
+//   position: relative;
+//   display: flex;
+//   flex-direction: column;
+//   /* Fixed geometry: media (132) + the 3-row body. The min-height guarantees the
+//      card keeps a clear, consistent size no matter how many products render —
+//      the grid scrolls, the cards never shrink. */
+//   min-height: 236px;
+//   border: 1px solid var(--pos-border);
+//   background: rgb(var(--v-theme-surface));
+//   cursor: pointer;
+//   overflow: hidden;
+//   transition:
+//     transform 0.1s ease,
+//     border-color 0.15s ease,
+//     box-shadow 0.15s ease;
+
+//   &:hover:not(.pos-tile--disabled) {
+//     transform: translateY(-3px);
+//     border-color: var(--pos-primary);
+//     box-shadow: 0 8px 22px rgba(var(--v-theme-primary), 0.18);
+//   }
+
+//   &:hover:not(.pos-tile--disabled) .pos-tile__add {
+//     opacity: 1;
+//     transform: scale(1);
+//   }
+
+//   &:focus-visible {
+//     outline: 2px solid var(--pos-primary);
+//     outline-offset: 2px;
+//   }
+
+//   /* Out-of-stock / expired products stay visible but clearly dimmed and
+//      de-saturated, and can't be added (pointer-events off). The "نفذ" status
+//      badge keeps reading at full strength on top of the muted media. */
+//   &--disabled {
+//     opacity: 0.5;
+//     cursor: not-allowed;
+//     pointer-events: none;
+
+//     .pos-tile__media,
+//     .pos-tile__body {
+//       filter: grayscale(0.55);
+//     }
+//   }
+// }
+
+// /* ── Media ── */
+// /* Fixed image height (within the 120–150px target) keeps every card the same
+//    height regardless of how wide the column is at the current breakpoint. */
+// .pos-tile__media {
+//   position: relative;
+//   /* flex: 0 0 132px locks the media band's height in the column — it can neither
+//      grow nor shrink, so the image area is identical on every card. */
+//   flex: 0 0 132px;
+//   height: 132px;
+//   width: 100%;
+//   background: var(--pos-tint);
+// }
+
+// .pos-tile__img {
+//   width: 100%;
+//   height: 100%;
+// }
+
+// .pos-tile__placeholder {
+//   position: absolute;
+//   inset: 0;
+//   display: flex;
+//   align-items: center;
+//   justify-content: center;
+//   background: linear-gradient(135deg, var(--ph-from, #6a6a72), var(--ph-to, #44444c));
+// }
+
+// .pos-tile__placeholder-icon {
+//   position: absolute;
+//   color: rgba(255, 255, 255, 0.22);
+// }
+
+// .pos-tile__initials {
+//   position: relative;
+//   font-size: 1.4rem;
+//   font-weight: 800;
+//   letter-spacing: 0.02em;
+//   color: rgba(255, 255, 255, 0.92);
+//   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+// }
+
+// .pos-tile__status {
+//   position: absolute;
+//   top: 6px;
+//   inset-inline-start: 6px;
+//   font-weight: 700;
+// }
+
+// .pos-tile__star {
+//   position: absolute;
+//   top: 6px;
+//   inset-inline-end: 6px;
+//   color: rgb(var(--v-theme-warning));
+//   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+// }
+
+// .pos-tile__expiry {
+//   position: absolute;
+//   bottom: 6px;
+//   inset-inline-start: 6px;
+//   font-weight: 700;
+// }
+
+// .pos-tile__add {
+//   position: absolute;
+//   bottom: 6px;
+//   inset-inline-end: 6px;
+//   opacity: 1;
+//   transform: scale(1);
+//   transition:
+//     opacity 0.15s ease,
+//     transform 0.15s ease;
+//   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+
+//   /* On hover-capable screens the (+) reveals on hover to keep the media clean;
+//      on touch it stays visible since there's no hover. */
+//   @media (hover: hover) {
+//     opacity: 0;
+//     transform: scale(0.7);
+//   }
+// }
+
+// /* ── Body ── */
+// .pos-tile__body {
+//   display: flex;
+//   flex-direction: column;
+//   gap: 3px;
+//   padding: 8px 10px 10px;
+//   width: 100%;
+//   /* Take the space left under the fixed media band and allow inner clamping. */
+//   flex: 1 1 auto;
+//   min-height: 0;
+// }
+
+// .pos-tile__name {
+//   font-weight: 600;
+//   font-size: 0.86rem;
+//   line-height: 1.3;
+//   /* Reserve exactly two lines so every card is the same height. */
+//   min-height: 2.24em;
+//   overflow: hidden;
+//   display: -webkit-box;
+//   -webkit-line-clamp: 2;
+//   -webkit-box-orient: vertical;
+// }
+
+// .pos-tile__sku {
+//   display: inline-flex;
+//   align-items: center;
+//   gap: 3px;
+//   font-size: 0.7rem;
+//   color: rgba(var(--v-theme-on-surface), 0.55);
+//   font-variant-numeric: tabular-nums;
+//   white-space: nowrap;
+//   overflow: hidden;
+//   text-overflow: ellipsis;
+// }
+
+// .pos-tile__foot {
+//   /* Pin price + stock to the bottom so they line up across every card. */
+//   margin-top: auto;
+//   padding-top: 2px;
+//   display: flex;
+//   align-items: center;
+//   justify-content: space-between;
+//   gap: 6px;
+// }
+
+// .pos-tile__price {
+//   font-weight: 800;
+//   font-size: 1.04rem;
+//   color: var(--pos-primary);
+//   font-variant-numeric: tabular-nums;
+// }
+
+// .pos-tile__count {
+//   display: inline-flex;
+//   align-items: center;
+//   gap: 2px;
+//   font-size: 0.74rem;
+//   color: rgba(var(--v-theme-on-surface), 0.6);
+//   font-variant-numeric: tabular-nums;
+// }
+
+/* ── Skeleton (matches the card silhouette) ── */
+.pos-tile--skeleton {
+  pointer-events: none;
+}
+
+.sk-shimmer {
+  background: linear-gradient(90deg, var(--pos-soft) 0%, var(--pos-tint) 50%, var(--pos-soft) 100%);
+  background-size: 200% 100%;
+  animation: pos-shimmer 1.4s infinite ease-in-out;
+}
+
+.sk-line {
+  height: 11px;
+  border-radius: 6px;
+  margin-bottom: 6px;
+
+  &--short {
+    width: 55%;
+  }
+  &--price {
+    width: 40%;
+    height: 16px;
+    margin-top: 4px;
+  }
+}
+
+@keyframes pos-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+/* ══════════════════ Cart panel ══════════════════ */
+.pos__cart {
+  background: rgb(var(--v-theme-surface));
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.cart__handle {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0 4px;
+  cursor: pointer;
+}
+
+.cart__handle-bar {
+  width: 42px;
+  height: 4px;
+  border-radius: 4px;
+  background: rgba(var(--v-theme-on-surface), 0.25);
+}
+
+.cart__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  flex-shrink: 0;
+}
+
+.cart__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cart__title-text {
+  font-size: 1.02rem;
+  font-weight: 800;
+}
+
+.cart__header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* ── Lines ── */
+.cart__lines {
+  flex: 1 1 auto;
+  min-height: 180px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: 8px;
+}
+
+.cart__lines-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: relative;
+}
+
+.cart__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 24px;
+}
+
+.cart__hints {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+
+  @media (pointer: coarse) {
+    display: none;
+  }
+
+  kbd {
+    font-family: inherit;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.line {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+
+  &--flash {
+    animation: line-flash 0.9s ease-out;
+  }
+
+  &--skeleton {
+    min-height: 76px;
+    background: linear-gradient(
+      90deg,
+      var(--pos-soft) 0%,
+      var(--pos-tint) 50%,
+      var(--pos-soft) 100%
+    );
+    background-size: 200% 100%;
+    animation: pos-shimmer 1.4s infinite ease-in-out;
+  }
+}
+
+@keyframes line-flash {
+  0% {
+    box-shadow: 0 0 0 2px rgba(var(--v-theme-primary), 0.5) inset;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent inset;
+  }
+}
+
+.line__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.line__name {
+  font-weight: 700;
+  font-size: 0.92rem;
+  line-height: 1.3;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  color: rgb(var(--v-theme-on-surface));
+}
+
+.line__actions {
+  display: inline-flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.line__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: rgba(var(--v-theme-on-surface), 0.75);
+}
+
+.line__unit-price {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.line__sep {
+  opacity: 0.4;
+}
+
+.line__unit-btn {
+  height: 22px !important;
+}
+
+.line__warn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.72rem;
+  color: rgb(var(--v-theme-warning));
+}
+
+.line__bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 2px;
+  color: rgba(var(--v-theme-on-surface), 0.85);
+}
+
+.line__qty {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.line__qty-input {
+  width: 64px;
+
+  :deep(input) {
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    -moz-appearance: textfield;
+  }
+}
+
+.line__total {
+  font-weight: 800;
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ══════════════════ Pay / footer ══════════════════ */
+.cart__pay {
+  flex: 0 0 auto;
+  max-height: 38vh;
+  overflow-y: auto;
+  padding: 10px;
+  flex-shrink: 0;
+  border-top: 1px solid rgba(var(--v-border-color), 0.12);
+  background: rgb(var(--v-theme-surface));
+}
+
+.pay__total--compact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(var(--v-theme-primary), 0.08);
+}
+
+.pay__total-label {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.pay__total-value {
+  font-size: 21px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.pay__breakdown--compact {
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 12px;
+  background: rgba(var(--v-theme-surface-variant), 0.45);
+}
+
+.pay__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.pay__alert {
+  margin-top: 8px;
+}
+
+.pay__methods-row {
+  margin-top: 8px;
+}
+
+.pay__methods {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.pay__methods .v-btn {
+  min-width: 0;
+}
+
+.pay__readout--compact {
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 12px;
+  background: rgba(var(--v-theme-surface-variant), 0.45);
+}
+
+.pay__readout-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.pay__expander--dense {
+  margin-top: 8px;
+}
+
+.pay__expander--dense .v-expansion-panel-title {
+  min-height: 38px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.pay__expander--dense .v-expansion-panel-text__wrapper {
+  padding: 8px;
+}
+
+.pay__adjust {
+  display: grid;
+  gap: 8px;
+}
+
+.numpad__quick {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.numpad__keys {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.numpad__keys .v-btn {
+  min-width: 0;
+  height: 36px;
+}
+
+.pay__actions--compact {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: 0.85fr 1.4fr;
+  gap: 8px;
+  padding-top: 8px;
+  margin-top: 8px;
+  background: rgb(var(--v-theme-surface));
+  z-index: 10;
+}
+
+.pay__checkout {
+  font-weight: 800;
+}
+
+.pay__hotkey {
+  position: absolute;
+  inset-inline-end: 8px;
+  bottom: 4px;
+  font-size: 0.6rem;
+  opacity: 0.7;
+}
+
+/* ── List transitions ── */
+.line-anim-enter-from {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+.line-anim-enter-active {
+  transition:
+    opacity 0.18s ease-out,
+    transform 0.18s ease-out;
+}
+.line-anim-leave-active {
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
+  position: absolute;
+  inset-inline: 0;
+}
+.line-anim-leave-to {
+  opacity: 0;
+  transform: translateX(-12px);
+}
+.line-anim-move {
+  transition: transform 0.18s ease;
+}
+
+/* ── Drafts dialog ── */
+.drafts__state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 32px 16px;
+}
+
+.drafts__item {
+  border: 1px solid var(--pos-border);
+  background: var(--pos-soft);
+}
+
+/* ══════════════════ Responsive: drawer mode ══════════════════ */
+.pos--drawer {
+  display: block;
+  height: auto;
+  min-height: 0;
+}
+
+.pos--drawer .pos__products {
+  height: calc(100dvh - 96px);
+  min-height: 420px;
+}
+
+.pos--drawer .pos__cart {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(94vw, 420px);
+  border-radius: 0;
+  z-index: 2400;
+  transform: translateX(100%);
+  transition: transform 0.26s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: -8px 0 30px rgba(0, 0, 0, 0.35);
+
+  &.is-open {
+    transform: translateX(0);
+  }
+}
+
+.pos__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 2300;
+}
+
+.pos__bottombar {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 2200;
+  padding: 10px 14px;
+  background: rgb(var(--v-theme-surface));
+  border-top: 1px solid var(--pos-border);
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.18);
+}
+
+.pos__bottombar-cart {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Phones: tighter two-column grid, leave room for the bottom bar. */
+@media (max-width: 600px) {
+  .pos--drawer .pos__products {
+    height: calc(100dvh - 168px);
+  }
+  /* Keep the base 2-column grid; just tighten spacing and the media height. */
+  .pos__grid {
+    gap: 8px;
+    padding: 10px;
+  }
+  /* Shorter card on phones, but still a locked size — never collapses. */
+  .pos-tile {
+    min-height: 212px;
+  }
+  .pos-tile__media {
+    flex-basis: 116px;
+    height: 116px;
+  }
+  .pos-tile__add {
+    opacity: 1;
+    transform: scale(1);
+  }
+  .pos__expired {
+    margin-inline-start: 0;
+  }
+}

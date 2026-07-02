@@ -151,59 +151,90 @@ const statusMeta = computed(() => STATUS_META[props.paymentStatus] || STATUS_MET
 .summary-panel {
   display: flex;
   flex-direction: column;
+  gap: 8px;
 }
 
 .discount-row {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 8px;
+  align-items: center;
 
   &__label {
-    flex: 0 0 auto;
-    font-size: 0.8rem;
-    color: rgba(var(--v-theme-on-surface), 0.7);
+    display: inline-block;
+    font-size: 0.76rem;
+    font-weight: 800;
+    color: rgba(var(--v-theme-on-surface), 0.58);
   }
+
   &__type {
-    flex: 0 0 auto;
-  }
-  &__value {
-    flex: 1 1 auto;
-    :deep(input) {
-      text-align: end;
+    border-radius: 10px;
+
+    :deep(.v-btn) {
+      font-weight: 800;
     }
   }
+
+  &__value {
+    min-width: 0;
+
+    :deep(.v-field) {
+      min-height: 36px;
+      border-radius: 10px;
+    }
+
+    :deep(input) {
+      text-align: end;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+    }
+  }
+}
+
+.discount-warning {
+  line-height: 1.55;
 }
 
 .totals {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
 
   &--foot {
-    margin-top: 8px;
+    margin-top: 2px;
+    padding-top: 4px;
   }
 
   &__row {
+    min-height: 26px;
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 10px;
     font-size: 0.84rem;
-    color: rgba(var(--v-theme-on-surface), 0.8);
+    color: rgba(var(--v-theme-on-surface), 0.78);
     font-variant-numeric: tabular-nums;
+
+    span:last-child {
+      font-weight: 800;
+    }
 
     &--muted {
       color: rgba(var(--v-theme-on-surface), 0.55);
       font-size: 0.78rem;
     }
+
     &--soft {
-      color: rgba(var(--v-theme-on-surface), 0.65);
+      color: rgba(var(--v-theme-on-surface), 0.66);
     }
+
     &--rem {
-      font-weight: 600;
+      font-weight: 800;
       color: rgb(var(--v-theme-error));
     }
+
     &--change {
-      font-weight: 600;
+      font-weight: 800;
       color: rgb(var(--v-theme-success));
     }
   }
@@ -211,24 +242,28 @@ const statusMeta = computed(() => STATUS_META[props.paymentStatus] || STATUS_MET
 
 .grand {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  margin-top: 10px;
-  padding: 8px 12px;
-  border-radius: 10px;
-  background-color: rgba(var(--v-theme-primary), 0.08);
+  flex-direction: column;
+  gap: 5px;
+  margin: 4px 0;
+  padding: 12px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(var(--v-theme-primary), 0.13), rgba(var(--v-theme-primary), 0.06));
+  border: 1px solid rgba(var(--v-theme-primary), 0.18);
 
   &__label {
-    font-size: 0.82rem;
-    font-weight: 600;
-    color: rgba(var(--v-theme-on-surface), 0.7);
-  }
-  &__value {
-    font-size: 1.55rem;
+    font-size: 0.76rem;
     font-weight: 800;
+    color: rgba(var(--v-theme-on-surface), 0.66);
+  }
+
+  &__value {
+    font-size: clamp(1.45rem, 3vw, 1.85rem);
+    font-weight: 950;
+    line-height: 1.05;
     color: rgb(var(--v-theme-primary));
     font-variant-numeric: tabular-nums;
-    line-height: 1.1;
+    letter-spacing: -0.02em;
   }
 }
 </style>
+

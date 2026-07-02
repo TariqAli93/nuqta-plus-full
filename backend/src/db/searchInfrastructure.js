@@ -110,6 +110,30 @@ const BTREE_INDEXES = [
   ['srch_sale_items_sale_btree', 'sale_items', 'sale_id'],
 ];
 
+// Structural btree indexes — these back the *list-screen* itself (filters + the
+// default sort + the batched units hydration), independent of full-text search.
+// The `products` table historically had only a PK and the `sku` unique index,
+// so on a large catalogue every non-search page load did a full sequential scan
+// + in-memory sort (ORDER BY created_at DESC), and every category/status/type/
+// price filter and the `product_units WHERE product_id IN (...)` hydration also
+// scanned the whole table. These single-column btrees turn those into index
+// scans; Postgres bitmap-ANDs them for multi-filter combinations.
+//   - products.created_at  → default "newest first" order + LIMIT/OFFSET paging
+//   - products.category_id → التصنيف filter (also speeds the FK / cascade delete)
+//   - products.status      → الحالة filter
+//   - products.product_type→ نوع المنتج filter
+//   - products.selling_price → السعر من/إلى range filter
+//   - product_units.product_id → units hydration lookup (was fully unindexed)
+// [indexName, table, columnsSql]
+const STRUCTURAL_INDEXES = [
+  ['idx_products_created_at', 'products', 'created_at DESC'],
+  ['idx_products_category_id', 'products', 'category_id'],
+  ['idx_products_status', 'products', 'status'],
+  ['idx_products_product_type', 'products', 'product_type'],
+  ['idx_products_selling_price', 'products', 'selling_price'],
+  ['idx_product_units_product_id', 'product_units', 'product_id'],
+];
+
 async function runStatement(pool, label, sql) {
   try {
     await pool.query(sql);
@@ -163,6 +187,13 @@ export async function ensureSearchInfrastructure(pool) {
 
   // 4b. btree indexes
   for (const [name, table, cols] of BTREE_INDEXES) {
+    results.push(
+      await runStatement(pool, `index ${name}`, `CREATE INDEX IF NOT EXISTS ${name} ON ${table} (${cols})`)
+    );
+  }
+
+  // 4c. structural (filter/sort/hydration) btree indexes
+  for (const [name, table, cols] of STRUCTURAL_INDEXES) {
     results.push(
       await runStatement(pool, `index ${name}`, `CREATE INDEX IF NOT EXISTS ${name} ON ${table} (${cols})`)
     );

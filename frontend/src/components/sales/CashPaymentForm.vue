@@ -14,16 +14,12 @@
       variant="outlined"
       hide-details="auto"
       prepend-inner-icon="mdi-cash"
-      :hint="`أدخل قيمة بين 0 و ${formatCurrency(total, currency)} — الباقي يُسجَّل ديناً`"
       persistent-hint
       @input="(e) => $emit('update:receivedAmount', parseAmount(e.target.value))"
     />
 
     <!-- Outstanding balance (debt) — replaces the old change/الباقي line. -->
-    <div
-      class="cash-row cash-row--remaining"
-      :class="{ 'cash-row--paid': remainingAmount <= 0 }"
-    >
+    <div class="cash-row cash-row--remaining" :class="{ 'cash-row--paid': remainingAmount <= 0 }">
       <span class="cash-row__label">المبلغ المتبقي</span>
       <span class="cash-row__value">{{ formatCurrency(remainingAmount, currency) }}</span>
     </div>
@@ -84,39 +80,59 @@ defineExpose({
 .cash-form {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 9px;
 }
 
 .cash-row {
+  min-height: 34px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 0.85rem;
+  gap: 10px;
+  font-size: 0.84rem;
 
   &__label {
-    color: rgba(var(--v-theme-on-surface), 0.65);
+    color: rgba(var(--v-theme-on-surface), 0.62);
+    font-weight: 700;
   }
+
   &__value {
-    font-weight: 600;
+    font-weight: 850;
     font-variant-numeric: tabular-nums;
+    color: rgba(var(--v-theme-on-surface), 0.86);
   }
 
   &--remaining {
-    padding: 8px 10px;
-    border-radius: 8px;
-    background-color: rgba(var(--v-theme-error), 0.1);
+    padding: 9px 10px;
+    border-radius: 12px;
+    background: rgba(var(--v-theme-error), 0.09);
+    border: 1px solid rgba(var(--v-theme-error), 0.16);
 
     .cash-row__value {
       color: rgb(var(--v-theme-error));
-      font-size: 1rem;
+      font-size: 1.05rem;
     }
 
     &.cash-row--paid {
-      background-color: rgba(var(--v-theme-success), 0.1);
+      background: rgba(var(--v-theme-success), 0.09);
+      border-color: rgba(var(--v-theme-success), 0.16);
+
       .cash-row__value {
         color: rgb(var(--v-theme-success));
       }
     }
   }
 }
+
+:deep(.v-field) {
+  min-height: 42px;
+  border-radius: 11px;
+}
+
+:deep(input) {
+  text-align: end;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
 </style>
+

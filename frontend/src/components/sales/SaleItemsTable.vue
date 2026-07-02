@@ -1,41 +1,42 @@
 <template>
-  <div class="items-table">
-    <!-- Empty state -->
-    <div v-if="!items.length" class="items-empty">
-      <v-icon size="34" color="medium-emphasis">mdi-cart-outline</v-icon>
-      <div class="items-empty__title">لا توجد منتجات بعد</div>
-      <div class="items-empty__hint">ابحث عن منتج أو امسح الباركود للبدء</div>
+  <section class="sale-lines">
+    <div v-if="!items.length" class="empty-state">
+      <v-icon size="38" color="medium-emphasis">mdi-cart-outline</v-icon>
+      <strong>لا توجد منتجات بعد</strong>
+      <span>ابحث عن منتج أو امسح الباركود للبدء</span>
     </div>
 
     <template v-else>
-      <!-- Header -->
-      <div class="items-row items-row--head" :class="{ 'items-row--with-interest': showInterest }">
-        <div>المنتج</div>
-        <div class="ta-center">الكمية</div>
-        <div class="ta-end">السعر</div>
-        <div class="ta-end">الخصم</div>
-        <div v-if="showInterest" class="ta-end">فائدة الوحدة</div>
-        <div class="ta-end">الإجمالي</div>
-        <div></div>
+      <div class="table-head" :class="{ 'has-interest': showInterest }">
+        <span>المنتج</span>
+        <span class="num">الكلفة</span>
+        <span class="center">الكمية</span>
+        <span class="num">السعر</span>
+        <span class="num">الخصم</span>
+        <span v-if="showInterest" class="num">الفائدة</span>
+        <span class="num">الإجمالي</span>
+        <span></span>
       </div>
 
-      <div
+      <article
         v-for="(item, index) in items"
         :key="index"
-        class="items-row"
+        class="line"
         :class="{
-          'items-row--error': getQuantityError(item).length > 0,
-          'items-row--with-interest': showInterest,
+          'has-error': getQuantityError(item).length > 0,
+          'has-interest': showInterest,
         }"
       >
-        <!-- Product (name + sku + unit) -->
-        <div class="cell-product" data-label="المنتج">
-          <div class="cell-product__name text-truncate">{{ item.productName || '—' }}</div>
-          <div class="cell-product__sub">
-            <span v-if="item.sku" class="cell-product__sku">{{ item.sku }}</span>
+        <div class="product" data-label="المنتج">
+          <div class="product__name text-truncate">{{ item.productName || '—' }}</div>
+
+          <div class="product__meta">
+            <span v-if="item.sku" class="sku">{{ item.sku }}</span>
+
             <v-chip v-if="item.isService" size="x-small" color="secondary" variant="tonal">
               خدمة
             </v-chip>
+
             <v-select
               v-if="unitOptionsFor(item).length > 1"
               :model-value="item.unitId"
@@ -45,14 +46,17 @@
               density="compact"
               variant="plain"
               hide-details
-              class="cell-product__unit"
+              class="unit-select"
               @update:model-value="(v) => onUnit(item, v)"
             />
           </div>
         </div>
 
-        <!-- Quantity stepper -->
-        <div class="cell-qty" data-label="الكمية">
+        <div class="cell read" data-label="الكلفة">
+          {{ formatCurrency(item.unitCostPrice || 0, currency) }}
+        </div>
+
+        <div class="qty" data-label="الكمية">
           <v-btn
             icon="mdi-minus"
             size="x-small"
@@ -61,6 +65,7 @@
             aria-label="إنقاص"
             @click="step(item, -1)"
           />
+
           <v-text-field
             v-model.number="item.quantity"
             type="number"
@@ -68,9 +73,10 @@
             density="compact"
             variant="outlined"
             hide-details
-            class="cell-qty__field"
+            class="qty__input"
             :error="getQuantityError(item).length > 0"
           />
+
           <v-btn
             icon="mdi-plus"
             size="x-small"
@@ -80,64 +86,63 @@
           />
         </div>
 
-        <!-- Price -->
-        <div class="ta-end" data-label="السعر">
+        <div class="cell" data-label="السعر">
           <v-text-field
             v-if="canEditPrice"
-            :model-value="groupNumber(item.unitPrice)"
+            :model-value="groupNumber(item.unitPrice || 0)"
             density="compact"
             variant="outlined"
             hide-details
-            class="cell-num"
+            class="money-input"
             @input="(e) => onPriceInput(item, e.target.value)"
-          />
-          <span v-else class="cell-readonly">{{ formatCurrency(item.unitPrice, currency) }}</span>
-          <v-chip
-            v-if="item.isCustomPrice"
-            size="x-small"
-            color="info"
-            variant="tonal"
-            label
-            class="mt-1"
-            :title="`السعر الأصلي: ${formatCurrency(item.unitPriceOriginal, currency)}`"
           >
-            سعر مخصص
-          </v-chip>
+            <template #append-inner>
+              <v-btn
+                v-if="item.isCustomPrice"
+                icon="mdi-restore"
+                size="x-small"
+                variant="text"
+                color="primary"
+                :title="`السعر الأصلي: ${formatCurrency(item.unitPriceOriginal || 0, currency)}`"
+                @click.stop="resetPrice(item)"
+              />
+            </template>
+          </v-text-field>
+
+          <span v-else class="read">
+            {{ formatCurrency(item.unitPrice || 0, currency) }}
+          </span>
         </div>
 
-        <!-- Discount -->
-        <div class="ta-end" data-label="الخصم">
+        <div class="cell" data-label="الخصم">
           <v-text-field
-            :model-value="groupNumber(item.discount)"
+            :model-value="groupNumber(item.discount || 0)"
             density="compact"
             variant="outlined"
             hide-details
             placeholder="0"
-            class="cell-num"
+            class="money-input"
             @input="(e) => (item.discount = parseAmount(e.target.value))"
           />
         </div>
 
-        <!-- Per-unit installment interest (فائدة الوحدة) — installment only -->
-        <div v-if="showInterest" class="ta-end" data-label="فائدة الوحدة">
+        <div v-if="showInterest" class="cell" data-label="الفائدة">
           <v-text-field
-            :model-value="groupNumber(item.interestPerUnit)"
+            :model-value="groupNumber(item.interestPerUnit || 0)"
             density="compact"
             variant="outlined"
             hide-details
             placeholder="0"
-            class="cell-num"
+            class="money-input"
             @input="(e) => (item.interestPerUnit = parseAmount(e.target.value))"
           />
         </div>
 
-        <!-- Net -->
-        <div class="ta-end cell-net" data-label="الإجمالي">
+        <div class="cell total" data-label="الإجمالي">
           {{ formatCurrency(netOf(item), currency) }}
         </div>
 
-        <!-- Actions -->
-        <div class="cell-actions">
+        <div class="actions">
           <v-btn
             :icon="item._notesOpen ? 'mdi-note-edit' : 'mdi-note-plus-outline'"
             size="x-small"
@@ -146,6 +151,7 @@
             aria-label="ملاحظة المنتج"
             @click="item._notesOpen = !item._notesOpen"
           />
+
           <v-btn
             icon="mdi-delete-outline"
             size="x-small"
@@ -156,8 +162,13 @@
           />
         </div>
 
-        <!-- Per-line note -->
-        <div v-if="item._notesOpen" class="cell-note">
+        <div v-if="item.isCustomPrice" class="badge-row">
+          <v-chip size="x-small" color="info" variant="tonal" label>
+            سعر مخصص — الأصلي {{ formatCurrency(item.unitPriceOriginal || 0, currency) }}
+          </v-chip>
+        </div>
+
+        <div v-if="item._notesOpen" class="full-row">
           <v-text-field
             v-model="item.notes"
             label="ملاحظة المنتج"
@@ -171,13 +182,12 @@
           />
         </div>
 
-        <!-- Inline quantity error -->
-        <div v-if="getQuantityError(item).length" class="cell-error">
+        <div v-if="getQuantityError(item).length" class="error-row">
           {{ getQuantityError(item)[0] }}
         </div>
-      </div>
+      </article>
     </template>
-  </div>
+  </section>
 </template>
 
 <script setup>
@@ -191,28 +201,35 @@ const props = defineProps({
   unitOptionsFor: { type: Function, required: true },
   getQuantityError: { type: Function, required: true },
   canEditPrice: { type: Boolean, default: false },
-  // Show the per-unit installment interest column (installment invoices only).
   showInterest: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['remove', 'unit-change']);
 
-// Apply a hand-edited unit price and flag the line as custom-priced when it
-// diverges from the catalog/tier price (per-invoice only — never the product).
 const onPriceInput = (item, raw) => {
   item.unitPrice = parseAmount(raw);
   item.isCustomPrice = Number(item.unitPrice) !== Number(item.unitPriceOriginal);
 };
 
-// Line net = qty·price − qty·(applied discount) (+ qty·interestPerUnit on
-// installments). The item discount is clamped to the cost floor so the line net
-// can never display below cost — matches the totals + the backend guard.
+const resetPrice = (item) => {
+  item.unitPrice = item.unitPriceOriginal;
+  item.isCustomPrice = false;
+};
+
 const appliedDiscountOf = (item) =>
-  clampItemDiscountPerUnit(item.unitPrice, item.unitCostPrice || 0, item.discount || 0).applied;
-const netOf = (item) =>
-  item.quantity * item.unitPrice -
-  appliedDiscountOf(item) * item.quantity +
-  (props.showInterest ? (item.interestPerUnit || 0) * item.quantity : 0);
+  clampItemDiscountPerUnit(
+    Number(item.unitPrice || 0),
+    Number(item.unitCostPrice || 0),
+    Number(item.discount || 0),
+  ).applied;
+
+const netOf = (item) => {
+  const quantity = Number(item.quantity || 0);
+  const unitPrice = Number(item.unitPrice || 0);
+  const interest = props.showInterest ? Number(item.interestPerUnit || 0) : 0;
+
+  return quantity * unitPrice - appliedDiscountOf(item) * quantity + interest * quantity;
+};
 
 const step = (item, delta) => {
   const next = Number(item.quantity || 0) + delta;
@@ -226,175 +243,310 @@ const onUnit = (item, unitId) => {
 </script>
 
 <style scoped lang="scss">
-.items-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  min-height: 160px;
-  max-height: 180px;
-  text-align: center;
-
-  &__title {
-    font-weight: 600;
-    color: rgba(var(--v-theme-on-surface), 0.8);
-  }
-  &__hint {
-    font-size: 0.8rem;
-    color: rgba(var(--v-theme-on-surface), 0.55);
-  }
+.sale-lines {
+  width: 100%;
+  min-width: 0;
 }
 
-.items-row {
+.empty-state {
+  min-height: 170px;
   display: grid;
-  grid-template-columns: minmax(0, 2.4fr) 120px minmax(0, 1fr) minmax(0, 0.9fr) minmax(0, 1fr) 56px;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 4px;
-  min-height: 52px;
-  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.06);
+  place-items: center;
+  align-content: center;
+  gap: 6px;
+  text-align: center;
+  border: 1px dashed rgba(var(--v-theme-on-surface), 0.16);
+  border-radius: 14px;
+  background: rgba(var(--v-theme-surface-variant), 0.22);
 
-  // 7-column variant: adds the «فائدة الوحدة» column for installment invoices.
-  // Cash invoices keep the default 6-column layout untouched.
-  &--with-interest {
-    grid-template-columns:
-      minmax(0, 2.4fr) 120px minmax(0, 1fr) minmax(0, 0.9fr) minmax(0, 0.9fr) minmax(0, 1fr) 56px;
+  strong {
+    font-size: 0.95rem;
+    color: rgba(var(--v-theme-on-surface), 0.86);
   }
 
-  &--head {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    min-height: 0;
-    padding-block: 6px;
-    background-color: rgb(var(--v-theme-surface));
-    font-size: 0.74rem;
-    font-weight: 600;
-    color: rgba(var(--v-theme-on-surface), 0.55);
-  }
-
-  &--error {
-    background-color: rgba(var(--v-theme-error), 0.04);
-    border-radius: 8px;
+  span {
+    font-size: 0.78rem;
+    color: rgba(var(--v-theme-on-surface), 0.56);
   }
 }
 
-.cell-product {
+.table-head,
+.line {
+  display: grid;
+  grid-template-columns:
+    minmax(170px, 1.9fr)
+    minmax(70px, 0.68fr)
+    minmax(104px, 0.9fr)
+    minmax(92px, 0.9fr)
+    minmax(82px, 0.78fr)
+    minmax(110px, 1fr)
+    56px;
+  gap: 8px;
+  align-items: center;
+}
+
+.table-head.has-interest,
+.line.has-interest {
+  grid-template-columns:
+    minmax(170px, 1.9fr)
+    minmax(70px, 0.68fr)
+    minmax(104px, 0.9fr)
+    minmax(92px, 0.9fr)
+    minmax(82px, 0.78fr)
+    minmax(82px, 0.78fr)
+    minmax(110px, 1fr)
+    56px;
+}
+
+.table-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  padding: 8px 10px;
+  font-size: 0.72rem;
+  font-weight: 850;
+  color: rgba(var(--v-theme-on-surface), 0.58);
+  background: rgb(var(--v-theme-surface));
+  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+}
+
+.line {
+  min-height: 58px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.065);
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    background: rgba(var(--v-theme-primary), 0.026);
+  }
+
+  &.has-error {
+    background: rgba(var(--v-theme-error), 0.045);
+    border-radius: 10px;
+  }
+}
+
+.product {
   min-width: 0;
 
   &__name {
-    font-weight: 600;
-    font-size: 0.86rem;
-    line-height: 1.2;
+    font-size: 0.88rem;
+    font-weight: 850;
+    line-height: 1.25;
   }
-  &__sub {
+
+  &__meta {
+    min-height: 19px;
     display: flex;
     align-items: center;
-    gap: 8px;
-    min-height: 18px;
-  }
-  &__sku {
-    font-size: 0.7rem;
-    color: rgba(var(--v-theme-on-surface), 0.5);
-  }
-  &__unit {
-    max-width: 150px;
-    font-size: 0.72rem;
-    :deep(.v-field__input) {
-      min-height: 20px;
-      padding-top: 0;
-      padding-bottom: 0;
-    }
+    gap: 6px;
+    overflow: hidden;
   }
 }
 
-.cell-qty {
-  display: flex;
-  align-items: center;
-  gap: 3px;
+.sku {
+  font-size: 0.68rem;
+  color: rgba(var(--v-theme-on-surface), 0.5);
+  white-space: nowrap;
+}
 
-  &__field {
-    width: 50px;
-    :deep(input) {
-      text-align: center;
-      padding-inline: 2px;
-    }
+.unit-select {
+  max-width: 128px;
+  font-size: 0.7rem;
+
+  :deep(.v-field__input) {
+    min-height: 20px;
+    padding-top: 0;
+    padding-bottom: 0;
   }
 }
 
-.cell-num :deep(input) {
+.cell {
+  min-width: 0;
   text-align: end;
 }
 
-.cell-readonly {
+.read {
+  font-size: 0.82rem;
   font-variant-numeric: tabular-nums;
-  font-size: 0.85rem;
-  color: rgba(var(--v-theme-on-surface), 0.85);
+  color: rgba(var(--v-theme-on-surface), 0.8);
 }
 
-.cell-net {
-  font-weight: 700;
+.total {
+  font-size: 0.9rem;
+  font-weight: 950;
   color: rgb(var(--v-theme-primary));
   font-variant-numeric: tabular-nums;
-  font-size: 0.88rem;
 }
 
-.cell-actions {
+.qty {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: center;
+  gap: 4px;
+
+  &__input {
+    width: 50px;
+    flex: 0 0 50px;
+
+    :deep(input) {
+      text-align: center;
+      padding-inline: 2px;
+      font-weight: 850;
+    }
+  }
 }
 
-.cell-note,
-.cell-error {
+.money-input {
+  width: 100%;
+
+  :deep(.v-field) {
+    min-height: 34px;
+    border-radius: 9px;
+  }
+
+  :deep(.v-field__input) {
+    min-height: 34px;
+    padding-inline: 6px;
+  }
+
+  :deep(input) {
+    text-align: end;
+    font-size: 0.82rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.full-row,
+.error-row,
+.badge-row {
   grid-column: 1 / -1;
 }
 
-.cell-error {
-  font-size: 0.74rem;
-  color: rgb(var(--v-theme-error));
-  padding-inline-start: 4px;
+.badge-row {
+  margin-top: -2px;
 }
 
-.cell-note {
+.full-row {
   padding-top: 2px;
   padding-bottom: 4px;
 }
 
-.ta-center {
+.error-row {
+  font-size: 0.74rem;
+  color: rgb(var(--v-theme-error));
+}
+
+.center {
   text-align: center;
 }
-.ta-end {
+
+.num {
   text-align: end;
 }
 
-@media (max-width: 760px) {
-  .items-row--head {
+@media (max-width: 1280px) {
+  .table-head,
+  .line {
+    grid-template-columns:
+      minmax(150px, 1.7fr)
+      minmax(98px, 0.95fr)
+      minmax(86px, 0.82fr)
+      minmax(94px, 0.95fr)
+      50px;
+  }
+
+  .table-head.has-interest,
+  .line.has-interest {
+    grid-template-columns:
+      minmax(150px, 1.7fr)
+      minmax(98px, 0.95fr)
+      minmax(86px, 0.82fr)
+      minmax(86px, 0.82fr)
+      minmax(94px, 0.95fr)
+      50px;
+  }
+
+  .table-head span:nth-child(2),
+  .line > .read[data-label='الكلفة'] {
     display: none;
   }
-  .items-row {
-    grid-template-columns: 1fr 1fr;
-    gap: 8px 12px;
-    padding: 10px 8px;
+}
+
+@media (max-width: 1080px) {
+  .table-head {
+    display: none;
+  }
+
+  .line,
+  .line.has-interest {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 9px 12px;
+    padding: 10px;
+    margin-bottom: 9px;
     border: 1px solid rgba(var(--v-theme-on-surface), 0.1);
-    border-radius: 10px;
-    margin-bottom: 8px;
+    border-radius: 14px;
+    background: rgb(var(--v-theme-surface));
   }
-  .cell-product {
-    grid-column: 1 / -1;
+
+  .product {
+    grid-column: 1 / 2;
   }
-  .ta-end[data-label]::before,
-  .cell-qty[data-label]::before {
-    content: attr(data-label);
-    display: block;
-    font-size: 0.68rem;
-    color: rgba(var(--v-theme-on-surface), 0.5);
-    margin-bottom: 2px;
+
+  .actions {
+    grid-column: 2 / 3;
+    grid-row: 1;
+    align-self: start;
   }
-  .cell-actions {
-    grid-column: 1 / -1;
+
+  .qty,
+  .cell {
+    &::before {
+      content: attr(data-label);
+      display: block;
+      margin-bottom: 4px;
+      font-size: 0.68rem;
+      font-weight: 750;
+      color: rgba(var(--v-theme-on-surface), 0.52);
+      text-align: start;
+    }
+  }
+
+  .qty {
     justify-content: flex-start;
+  }
+
+  .cell {
+    text-align: start;
+  }
+
+  .total {
+    text-align: end;
+    padding-top: 6px;
+    border-top: 1px dashed rgba(var(--v-theme-on-surface), 0.12);
+  }
+}
+
+@media (max-width: 760px) {
+  .line,
+  .line.has-interest {
+    grid-template-columns: 1fr auto;
+  }
+
+  .qty,
+  .cell {
+    grid-column: 1 / -1;
+  }
+
+  .money-input {
+    max-width: 100%;
   }
 }
 </style>

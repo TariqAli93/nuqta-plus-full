@@ -28,842 +28,108 @@
     </div>
   </v-alert>
   <div class="pos" :class="{ 'pos--drawer': isMobile, 'pos--cart-open': cartOpen }" dir="rtl">
-    <!-- ═══════════════════ Products zone ═══════════════════ -->
+    <!-- Products zone -->
     <v-card class="pos__panel pos__products" flat aria-label="المنتجات">
-      <!-- Accounting-period gate (القيد المحاسبي): selling needs a usable open
-           period. The banner points the cashier at the fix; actions stay
-           blocked by `hasActivePeriod` regardless. -->
+      <PosToolbar
+        v-model:search-input="searchInput"
+        v-model:selected-category="selectedCategory"
+        v-model:hide-expired="hideExpired"
+        v-model:hide-not-available="hideNotAvailable"
+        :category-options="categoryOptions"
+        :agent-pricing-on="agentPricingOn"
+        :price-type="priceType"
+        :price-tiers="PRICE_TIERS"
+        :focus-request="searchFocusRequest"
+        @search-enter="onSearchEnter"
+        @focus-first-card="focusFirstCard"
+        @set-price-type="setPriceType"
+      />
 
-      <!-- ── Toolbar: unified search/barcode + category + tier + filter ── -->
-      <div class="pos__toolbar">
-        <!-- One field for search AND barcode: typing filters the grid (debounced)
-             while Enter resolves an exact barcode/SKU scan or a single match. -->
-        <v-text-field
-          ref="searchRef"
-          v-model="searchInput"
-          data-testid="pos-search"
-          class="pos__search"
-          variant="solo-filled"
-          density="comfortable"
-          flat
-          rounded="lg"
-          hide-details
-          clearable
-          autocomplete="off"
-          placeholder="ابحث بالاسم / SKU أو امسح الباركود ثم Enter"
-          prepend-inner-icon="mdi-magnify"
-          @keyup.enter="onSearchEnter"
-          @keydown.esc.prevent="searchInput = ''"
-          @keydown.down.prevent="focusFirstCard"
-        >
-          <template #append-inner>
-            <v-icon size="18" class="pos__search-hint">mdi-barcode-scan</v-icon>
-          </template>
-        </v-text-field>
-
-        <div class="pos__filters">
-          <!-- Categories as a searchable select (replaces the old chip row). -->
-          <v-autocomplete
-            v-model="selectedCategory"
-            :items="categoryOptions"
-            item-title="title"
-            item-value="value"
-            class="pos__category"
-            variant="solo-filled"
-            density="comfortable"
-            flat
-            rounded="lg"
-            hide-details
-            clearable
-            menu-icon="mdi-chevron-down"
-            placeholder="كل التصنيفات"
-            prepend-inner-icon="mdi-shape-outline"
-            no-data-text="لا توجد تصنيفات"
-          />
-
-          <!-- Pricing tier (تسعير الوكلاء) — only when the feature is on. -->
-          <v-btn-toggle
-            v-if="agentPricingOn"
-            :model-value="priceType"
-            color="primary"
-            variant="elevated"
-            class="pos__tiers"
-            aria-label="نوع التسعيرة"
-            @update:model-value="setPriceType"
-          >
-            <v-btn v-for="tier in PRICE_TIERS" :key="tier.value" :value="tier.value" size="small">
-              {{ tier.label }}
-            </v-btn>
-          </v-btn-toggle>
-
-          <v-switch
-            v-model="hideExpired"
-            color="error"
-            density="compact"
-            hide-details
-            inset
-            label="إخفاء المنتهي"
-            class="pos__expired"
-          />
-
-          <v-switch
-            v-model="hideNotAvailable"
-            color="warning"
-            density="compact"
-            hide-details
-            inset
-            label="إخفاء غير المتوفر"
-            class="pos__stock"
-          />
-        </div>
-      </div>
-
-      <!-- ── Product grid ── -->
-      <div ref="gridRef" class="pos__grid" role="grid" aria-live="polite" @keydown="onGridKey">
-        <!-- Loading skeletons (mirror the real card: media block + text lines) -->
-        <template v-if="loadingProducts">
-          <v-card
-            v-for="n in 12"
-            :key="`sk-${n}`"
-            class="pos-tile pos-tile--skeleton"
-            rounded="lg"
-            flat
-            aria-hidden="true"
-          >
-            <div class="pos-tile__media sk-shimmer" />
-            <div class="pos-tile__body">
-              <div class="sk-line sk-shimmer" />
-              <div class="sk-line sk-line--short sk-shimmer" />
-              <div class="sk-line sk-line--price sk-shimmer" />
-            </div>
-          </v-card>
-        </template>
-
-        <!-- Empty state -->
-        <div v-else-if="filteredProducts.length === 0" class="pos__empty">
-          <EmptyState
-            :icon="
-              debouncedSearch || selectedCategory
-                ? 'mdi-magnify-close'
-                : 'mdi-package-variant-closed'
-            "
-            :title="debouncedSearch || selectedCategory ? 'لا نتائج' : 'لا توجد منتجات'"
-            :description="
-              debouncedSearch || selectedCategory
-                ? 'جرّب تعديل البحث أو التصنيف.'
-                : 'أضف منتجات من شاشة المنتجات لبدء البيع.'
-            "
-          />
-        </div>
-
-        <!-- Product cards (one page at a time: see paginatedProducts) -->
-        <!-- <v-card
-          v-for="p in paginatedProducts"
-          v-else
-          :key="p.id"
-          v-memo="[
-            p.id,
-            availableOf(p),
-            p.sellingPrice,
-            p.name,
-            p.sku,
-            isFeatured(p),
-            isService(p),
-            expiryStatusOf(p),
-            productImageOf(p),
-          ]"
-          data-testid="pos-product"
-          :data-product-id="p.id"
-          :data-product-name="p.name"
-          class="pos-tile"
-          :class="{ 'pos-tile--disabled': !isSellable(p) || expiryStatusOf(p) === 'منتهي' }"
-          :ripple="isSellable(p) && expiryStatusOf(p) !== 'منتهي'"
-          :tabindex="!isSellable(p) || expiryStatusOf(p) === 'منتهي' ? -1 : 0"
-          role="gridcell"
-          @click="isSellable(p) && expiryStatusOf(p) !== 'منتهي' && addProduct(p)"
-          @keydown.enter.prevent="isSellable(p) && expiryStatusOf(p) !== 'منتهي' && addProduct(p)"
-          @keydown.space.prevent="isSellable(p) && expiryStatusOf(p) !== 'منتهي' && addProduct(p)"
-        >
-          
-          <div class="pos-tile__media">
-            <div class="pos-tile__placeholder" :style="placeholderStyle(p)">
-              <v-icon class="pos-tile__placeholder-icon" size="40"
-                >mdi-package-variant-closed</v-icon
-              >
-            </div>
-
-            <div class="pos-tile__status flex align-center justify-space-between ga-1">
-              <v-chip size="x-small" :color="stockStatusOf(p).color" variant="flat" label>
-                <v-icon start size="11">{{ stockStatusOf(p).icon }}</v-icon>
-                {{ stockStatusOf(p).label }}
-              </v-chip>
-
-
-              <v-chip
-                v-if="nearestExpiryOf(p)"
-                size="x-small"
-                :color="expiryColor(expiryStatusOf(p))"
-                variant="flat"
-                label
-              >
-                <v-icon start size="11">mdi-calendar-clock</v-icon>
-                {{ nearestExpiryOf(p) }}
-              </v-chip>
-            </div>
-         
-            <v-icon v-if="isFeatured(p)" class="pos-tile__star" size="15" aria-label="مميّز">
-              mdi-star
-            </v-icon>
-
-  
-            <v-chip
-              v-if="expiryStatusOf(p) === 'ينتهي قريباً' || expiryStatusOf(p) === 'منتهي'"
-              class="pos-tile__expiry"
-              size="x-small"
-              :color="expiryColor(expiryStatusOf(p))"
-              variant="flat"
-              label
-            >
-              {{ expiryStatusOf(p) }}
-            </v-chip>
-
-
-            <v-btn
-              v-if="isSellable(p) && expiryStatusOf(p) !== 'منتهي'"
-              class="pos-tile__add"
-              icon="mdi-plus"
-              size="small"
-              color="primary"
-              variant="flat"
-              :aria-label="`إضافة ${p.name}`"
-              @click.stop="addProduct(p)"
-            />
-          </div>
-
-  
-          <div class="pos-tile__body">
-            <div class="pos-tile__name" :title="p.name">{{ p.name }}</div>
-            <div class="pos-tile__sku">
-              <v-icon size="12">mdi-pound</v-icon>
-              <span>{{ p.sku || p.barcode || p.id }}</span>
-            </div>
-            <div class="pos-tile__foot align-center">
-              <div class="flex flex-col">
-                <span class="pos-tile__price__org">
-                  {{ formatMoney(p.costPrice, p.currency) }}
-                </span>
-                <span class="pos-tile__price">{{ formatMoney(p.sellingPrice, p.currency) }}</span>
-              </div>
-              <span
-                v-if="!isService(p)"
-                class="pos-tile__count"
-                :title="`المتوفر: ${availableOf(p)}`"
-              >
-                <v-icon size="12">mdi-cube-outline</v-icon>{{ availableOf(p) }}
-              </span>
-            </div>
-          </div>
-        </v-card> -->
-
-        <v-card
-          v-for="p in paginatedProducts"
-          v-else
-          :key="p.id"
-          class="product-glass-card"
-          :class="{
-            'product-glass-card--disabled': !isSellable(p) || expiryStatusOf(p) === 'منتهي',
-          }"
-          :ripple="isSellable(p) && expiryStatusOf(p) !== 'منتهي'"
-          @click="isSellable(p) && expiryStatusOf(p) !== 'منتهي' && addProduct(p)"
-        >
-          <div class="product-glass-card__header">
-            <div class="product-glass-card__icon" :style="placeholderStyle(p)">
-              <v-icon size="34">mdi-package-variant</v-icon>
-            </div>
-
-            <v-btn
-              v-if="isSellable(p) && expiryStatusOf(p) !== 'منتهي'"
-              icon="mdi-plus"
-              size="small"
-              color="primary"
-              variant="flat"
-              class="product-glass-card__add"
-              @click.stop="addProduct(p)"
-            />
-          </div>
-
-          <div class="product-glass-card__content">
-            <div class="product-glass-card__name" :title="p.name">
-              {{ p.name }}
-            </div>
-
-            <div v-if="!isService(p)" class="product-glass-card__qty">
-              <v-icon size="15">mdi-cube-outline</v-icon>
-              {{ availableOf(p) }}
-            </div>
-
-            <div class="product-glass-card__code">
-              <v-icon size="13">mdi-barcode-scan</v-icon>
-              {{ p.sku || p.barcode || p.id }}
-            </div>
-
-            <div class="product-glass-card__badges">
-              <v-chip size="x-small" :color="stockStatusOf(p).color" variant="tonal" label>
-                <v-icon start size="12">{{ stockStatusOf(p).icon }}</v-icon>
-                {{ stockStatusOf(p).label }}
-              </v-chip>
-
-              <v-chip
-                v-if="expiryStatusOf(p) === 'ينتهي قريباً' || expiryStatusOf(p) === 'منتهي'"
-                size="x-small"
-                :color="expiryColor(expiryStatusOf(p))"
-                variant="tonal"
-                label
-              >
-                {{ expiryStatusOf(p) }}
-              </v-chip>
-            </div>
-
-            <div class="product-glass-card__bottom">
-              <div class="product-glass-card__prices">
-                <div class="product-glass-card__cost">
-                  <span>سعر التكلفة</span>
-                  <strong>{{ formatMoney(p.costPrice, p.currency) }}</strong>
-                </div>
-
-                <v-divider />
-
-                <div class="product-glass-card__sale">
-                  <span>سعر البيع</span>
-                  <strong>{{ formatMoney(p.sellingPrice, p.currency) }}</strong>
-                </div>
-              </div>
-            </div>
-          </div>
-        </v-card>
-      </div>
-
-      <div
-        v-if="!loadingProducts && filteredProducts.length > 0"
-        class="pos__pager"
-        :class="{
-          'pos__pager--mobile': isMobile,
-        }"
-      >
-        <v-select
-          v-model="productsPerPage"
-          :items="PER_PAGE_OPTIONS"
-          density="compact"
-          variant="outlined"
-          hide-details
-          label="لكل صفحة"
-          class="pos__pager-size"
-        />
-        <span class="pos__pager-count">
-          {{ pageRangeStart }}–{{ pageRangeEnd }} من {{ filteredProducts.length }}
-        </span>
-        <v-pagination
-          v-model="productPage"
-          :length="totalProductPages"
-          :total-visible="isMobile ? 3 : 7"
-          density="comfortable"
-          class="pos__pager-nav"
-        />
-      </div>
+      <ProductGrid
+        v-model:products-per-page="productsPerPage"
+        v-model:product-page="productPage"
+        :loading-products="loadingProducts"
+        :filtered-products="filteredProducts"
+        :paginated-products="paginatedProducts"
+        :debounced-search="debouncedSearch"
+        :selected-category="selectedCategory"
+        :per-page-options="PER_PAGE_OPTIONS"
+        :page-range-start="pageRangeStart"
+        :page-range-end="pageRangeEnd"
+        :total-product-pages="totalProductPages"
+        :is-mobile="isMobile"
+        :available-of="availableOf"
+        :is-service="isService"
+        :is-sellable="isSellable"
+        :stock-status-of="stockStatusOf"
+        :expiry-status-of="expiryStatusOf"
+        :expiry-color="expiryColor"
+        :placeholder-style="placeholderStyle"
+        :focus-request="gridFocusRequest"
+        @add-product="addProduct"
+      />
     </v-card>
 
-    <!-- ═══════════════════ Cart zone ═══════════════════ -->
-    <v-card class="pos__panel pos__cart" :class="{ 'is-open': cartOpen }" flat aria-label="السلة">
-      <!-- Mobile drag handle -->
-      <div v-if="isMobile" class="cart__handle" @click="cartOpen = false">
-        <span class="cart__handle-bar" />
-      </div>
-
-      <!-- ── Header ── -->
-      <div class="cart__header">
-        <div class="cart__title">
-          <v-icon size="20" color="primary">mdi-cart-variant</v-icon>
-          <span class="cart__title-text">السلة</span>
-          <v-chip v-if="itemCount > 0" size="x-small" color="primary" variant="flat">
-            {{ itemCount }}
-          </v-chip>
-        </div>
-
-        <div class="cart__header-actions">
-          <v-tooltip location="bottom" :text="draftsReason" :disabled="!draftsDisabled">
-            <template #activator="{ props: tipProps }">
-              <span v-bind="tipProps">
-                <v-btn
-                  v-if="draftsVisible"
-                  size="small"
-                  variant="text"
-                  :color="currentDraftId ? 'primary' : undefined"
-                  :prepend-icon="draftsDisabled ? 'mdi-lock-outline' : 'mdi-archive-clock-outline'"
-                  :disabled="draftsDisabled"
-                  @click="openDraftsList"
-                >
-                  المسودات
-                  <v-chip
-                    v-if="currentDraftId && !draftsDisabled"
-                    size="x-small"
-                    class="ms-1"
-                    color="primary"
-                  >
-                    #{{ currentDraftId }}
-                  </v-chip>
-                </v-btn>
-              </span>
-            </template>
-          </v-tooltip>
-
-          <v-btn
-            v-if="items.length > 0"
-            size="small"
-            variant="text"
-            color="error"
-            prepend-icon="mdi-delete-sweep-outline"
-            @click="confirmClear"
-          >
-            تفريغ
-          </v-btn>
-        </div>
-      </div>
-
-      <v-divider />
-
-      <!-- ── Lines ── -->
-      <div class="cart__lines" aria-live="polite">
-        <!-- Draft-load skeleton -->
-        <div
-          v-if="continuingDraftId && items.length === 0"
-          class="cart__lines-inner"
-          aria-hidden="true"
-        >
-          <v-sheet v-for="n in 3" :key="`cart-sk-${n}`" class="line line--skeleton" rounded="lg" />
-        </div>
-
-        <!-- Empty -->
-        <div v-else-if="items.length === 0" class="cart__empty">
-          <EmptyState
-            compact
-            icon="mdi-cart-outline"
-            :icon-size="44"
-            title="السلة فارغة"
-            description="اختر منتجاً أو امسح باركود لبدء البيع."
-          />
-          <div class="cart__hints">
-            <v-chip size="small" variant="tonal"><kbd>F2</kbd>&nbsp;بحث</v-chip>
-            <v-chip size="small" variant="tonal"><kbd>F9</kbd>&nbsp;دفع</v-chip>
-          </div>
-        </div>
-
-        <!-- Items -->
-        <TransitionGroup v-else name="line-anim" tag="div" class="cart__lines-inner">
-          <v-card
-            v-for="item in items"
-            :key="item.id"
-            class="line"
-            :class="{ 'line--flash': flashItemId === item.id }"
-          >
-            <!-- Row 1: name + per-line actions -->
-            <div class="line__top">
-              <div class="line__name" :title="item.name">{{ item.name }}</div>
-              <div class="line__actions">
-                <v-btn
-                  icon="mdi-tune-variant"
-                  size="x-small"
-                  variant="text"
-                  color="primary"
-                  title="خصم / ملاحظة"
-                  @click.stop="openLineEdit(item)"
-                />
-                <v-btn
-                  icon="mdi-trash-can-outline"
-                  size="x-small"
-                  variant="text"
-                  color="error"
-                  :title="`إزالة ${item.name}`"
-                  @click.stop="removeItem(item.id)"
-                />
-              </div>
-            </div>
-
-            <!-- Row 2: unit price + unit picker + chips -->
-            <div class="line__meta">
-              <span class="line__unit-price">
-                {{ formatMoney(Math.max(0, item.price - item.discount), currency) }}
-              </span>
-              <span class="line__sep">·</span>
-              <span class="line__unit-label">
-                {{ item.unitName ? `سعر ${item.unitName}` : 'للوحدة' }}
-              </span>
-
-              <v-menu v-if="item.units && item.units.length > 1" location="bottom start">
-                <template #activator="{ props: menuProps }">
-                  <v-btn
-                    v-bind="menuProps"
-                    size="x-small"
-                    variant="tonal"
-                    color="primary"
-                    prepend-icon="mdi-swap-horizontal"
-                    class="line__unit-btn"
-                    @click.stop
-                  >
-                    {{ item.unitName || 'الوحدة' }}
-                  </v-btn>
-                </template>
-                <v-list density="compact">
-                  <v-list-item
-                    v-for="u in item.units"
-                    :key="u.id"
-                    :active="u.id === item.unitId"
-                    :disabled="u.isActive === false"
-                    @click="updateLineUnit(item.id, u.id)"
-                  >
-                    <v-list-item-title>
-                      {{ u.name }}
-                      <span v-if="!u.isBase" class="text-caption text-medium-emphasis">
-                        (يعادل {{ Number(u.conversionFactor) || 1 }})
-                      </span>
-                    </v-list-item-title>
-                  </v-list-item>
-                </v-list>
-              </v-menu>
-
-              <v-chip v-if="item.discount > 0" size="x-small" color="warning" variant="tonal" label>
-                <v-icon start size="11">mdi-tag-outline</v-icon>خصم
-              </v-chip>
-              <v-chip
-                v-if="isLineDiscountCapped(item)"
-                :key="item.id + '-line-discount-capped'"
-                size="x-small"
-                color="warning"
-                variant="tonal"
-                label
-              >
-                <span>اقصى خصم ممكن: </span>
-                <b>{{ formatMoney(appliedLineDiscount(item), currency) }}</b>
-              </v-chip>
-              <v-chip
-                v-if="item.isCustomPrice"
-                size="x-small"
-                color="info"
-                variant="tonal"
-                label
-                :title="`السعر الأصلي: ${formatMoney(item.originalPrice, currency)}`"
-              >
-                <v-icon start size="11">mdi-cash-edit</v-icon>سعر مخصص
-              </v-chip>
-              <v-chip v-if="item.note" size="x-small" variant="tonal" label :title="item.note">
-                <v-icon start size="11">mdi-note-text-outline</v-icon>{{ truncate(item.note, 14) }}
-              </v-chip>
-            </div>
-
-            <!-- Service line: السعر المستلم (required; no fixed stored price) -->
-            <div v-if="isService(item)" class="line__service-price" @click.stop>
-              <v-text-field
-                :model-value="item.price || ''"
-                :data-testid="`pos-service-price-${item.productId}`"
-                type="number"
-                min="0"
-                variant="outlined"
-                density="compact"
-                hide-details
-                hide-spin-buttons
-                label="السعر المستلم"
-                :error="!(Number(item.price) > 0)"
-                prepend-inner-icon="mdi-cash-edit"
-                @update:model-value="(v) => updatePrice(item.id, v)"
-              />
-            </div>
-
-            <!-- Goods line: editable unit price (per-invoice only; gated by
-                 sales:edit_price). Never changes the catalog price. -->
-            <div v-else-if="canEditPrice" @click.stop>
-              <v-text-field
-                :model-value="item.price"
-                :data-testid="`pos-line-price-${item.productId}`"
-                type="number"
-                min="0"
-                variant="outlined"
-                hide-details
-                hide-spin-buttons
-                label="سعر الوحدة"
-                :prepend-inner-icon="item.isCustomPrice ? 'mdi-pencil' : 'mdi-cash-edit'"
-                @update:model-value="(v) => updatePrice(item.id, v)"
-              />
-            </div>
-
-            <div v-if="cartExpiryWarning(item)" class="line__warn">
-              <v-icon size="13">mdi-alert-outline</v-icon>
-              {{ cartExpiryWarning(item) }}
-            </div>
-
-            <!-- Row 3: qty stepper + line total -->
-            <div class="line__bottom">
-              <div class="line__qty" @click.stop>
-                <v-btn
-                  icon="mdi-minus"
-                  size="x-small"
-                  variant="tonal"
-                  density="comfortable"
-                  aria-label="إنقاص"
-                  @click="decQty(item.id)"
-                />
-                <v-text-field
-                  :model-value="item.qty"
-                  type="number"
-                  :min="1"
-                  variant="outlined"
-                  density="compact"
-                  hide-details
-                  hide-spin-buttons
-                  class="line__qty-input"
-                  inputmode="numeric"
-                  @click.stop
-                  @blur="(e) => commitQty(item.id, e.target.value)"
-                  @keyup.enter="
-                    (e) => {
-                      commitQty(item.id, e.target.value);
-                      e.target.blur();
-                    }
-                  "
-                />
-                <v-btn
-                  icon="mdi-plus"
-                  size="x-small"
-                  variant="tonal"
-                  density="comfortable"
-                  aria-label="زيادة"
-                  @click="incQty(item.id)"
-                />
-              </div>
-
-              <div class="line__total">{{ formatMoney(lineSubtotal(item), currency) }}</div>
-            </div>
-          </v-card>
-        </TransitionGroup>
-      </div>
-
-      <!-- ── Pay / footer ── -->
-      <div class="cart__pay">
-        <div class="pay__total pay__total--compact">
-          <span class="pay__total-label">الإجمالي</span>
-          <span class="pay__total-value" data-testid="pos-total">
-            {{ formatMoney(total, currency) }}
-          </span>
-        </div>
-
-        <div
-          v-if="appliedDiscount > 0 || taxValue > 0"
-          class="pay__breakdown pay__breakdown--compact"
-        >
-          <div class="pay__row">
-            <span>الفرعي</span>
-            <span>{{ formatMoney(subtotal, currency) }}</span>
-          </div>
-
-          <div v-if="appliedDiscount > 0" class="pay__row pay__row--warning">
-            <span>الخصم</span>
-            <span>− {{ formatMoney(appliedDiscount, currency) }}</span>
-          </div>
-
-          <div v-if="taxValue > 0" class="pay__row">
-            <span>الضريبة</span>
-            <span>{{ formatMoney(taxValue, currency) }}</span>
-          </div>
-        </div>
-
-        <v-alert
-          v-if="discountCapped"
-          type="warning"
-          variant="tonal"
-          density="compact"
-          class="pay__alert"
-          icon="mdi-alert"
-        >
-          أقصى خصم مسموح: <strong>{{ formatMoney(appliedDiscount, currency) }}</strong>
-        </v-alert>
-
-        <div class="pay__methods-row">
-          <v-btn-toggle
-            :model-value="payment.method"
-            class="pay__methods"
-            color="primary"
-            mandatory
-            @update:model-value="onMethodChange"
-          >
-            <v-btn
-              v-for="m in paymentMethods"
-              :key="m.value"
-              :value="m.value"
-              :prepend-icon="m.icon"
-              size="small"
-              variant="elevated"
-            >
-              {{ m.label }}
-            </v-btn>
-          </v-btn-toggle>
-        </div>
-
-        <v-text-field
-          v-if="payment.method === 'card'"
-          v-model="payment.reference"
-          data-testid="pos-card-ref"
-          variant="outlined"
-          density="compact"
-          hide-details="auto"
-          label="مرجع البطاقة *"
-          autocomplete="off"
-          prepend-inner-icon="mdi-credit-card-outline"
-        />
-
-        <div class="pay__readout pay__readout--compact" :class="changeStateClass">
-          <div class="pay__readout-row">
-            <span>المستلم</span>
-            <strong>{{ formatMoney(payment.paidAmount || 0, currency) }}</strong>
-          </div>
-
-          <div class="pay__readout-row">
-            <span>{{ changeLabel }}</span>
-            <strong>{{ formatMoney(changeAmount, currency) }}</strong>
-          </div>
-        </div>
-
-        <v-expansion-panels variant="accordion" class="pay__expander pay__expander--dense">
-          <v-expansion-panel rounded="lg">
-            <v-expansion-panel-title>
-              <v-icon size="16" start>mdi-tune-variant</v-icon>
-              خصم / ضريبة / ملاحظة
-            </v-expansion-panel-title>
-
-            <v-expansion-panel-text>
-              <div class="pay__adjust">
-                <v-number-input
-                  v-model.number="saleDiscount.value"
-                  type="number"
-                  :min="0"
-                  variant="outlined"
-                  density="compact"
-                  hide-details
-                  control-variant="split"
-                  label="خصم"
-                >
-                  <template #prepend>
-                    <v-btn-toggle
-                      v-model="saleDiscount.type"
-                      mandatory
-                      density="compact"
-                      color="primary"
-                      variant="outlined"
-                    >
-                      <v-btn value="amount" size="x-small" icon="mdi-cash" />
-                      <v-btn value="percent" size="x-small" icon="mdi-percent" />
-                    </v-btn-toggle>
-                  </template>
-                </v-number-input>
-
-                <v-number-input
-                  v-model.number="tax.value"
-                  type="number"
-                  :min="0"
-                  variant="outlined"
-                  density="compact"
-                  hide-details
-                  control-variant="split"
-                  label="ضريبة %"
-                  :readonly="!tax.enabled"
-                >
-                  <template #prepend>
-                    <v-switch
-                      v-model="tax.enabled"
-                      density="compact"
-                      color="primary"
-                      hide-details
-                    />
-                  </template>
-                </v-number-input>
-
-                <v-textarea
-                  v-model="saleNotes"
-                  data-testid="pos-sale-notes"
-                  label="ملاحظة الفاتورة"
-                  variant="outlined"
-                  density="compact"
-                  rows="1"
-                  auto-grow
-                  no-resize
-                  counter="1000"
-                  maxlength="1000"
-                  prepend-inner-icon="mdi-note-text-outline"
-                />
-              </div>
-            </v-expansion-panel-text>
-          </v-expansion-panel>
-
-          <v-expansion-panel rounded="lg">
-            <v-expansion-panel-title>
-              <v-icon size="16" start>mdi-dialpad</v-icon>
-              إدخال مبلغ مستلم
-            </v-expansion-panel-title>
-
-            <v-expansion-panel-text>
-              <div class="numpad__quick">
-                <v-btn
-                  v-for="a in quickAmounts"
-                  :key="a"
-                  size="small"
-                  variant="tonal"
-                  @click="addToPaid(a)"
-                >
-                  +{{ shortAmount(a) }}
-                </v-btn>
-              </div>
-
-              <div class="numpad__keys">
-                <v-btn
-                  v-for="k in numpadKeys"
-                  :key="k.value"
-                  size="small"
-                  variant="tonal"
-                  :color="k.value === 'back' ? 'error' : undefined"
-                  @click="onNumpad(k.value)"
-                >
-                  <v-icon v-if="k.icon" size="18">{{ k.icon }}</v-icon>
-                  <span v-else>{{ k.label }}</span>
-                </v-btn>
-              </div>
-            </v-expansion-panel-text>
-          </v-expansion-panel>
-        </v-expansion-panels>
-
-        <div class="pay__actions pay__actions--compact">
-          <v-btn
-            v-if="draftsVisible"
-            variant="outlined"
-            size="large"
-            prepend-icon="mdi-content-save-outline"
-            :disabled="draftsDisabled || items.length === 0 || submitting || !hasActivePeriod"
-            @click="onHold"
-          >
-            مسودة
-          </v-btn>
-
-          <v-btn
-            data-testid="pos-checkout"
-            size="large"
-            color="primary"
-            class="pay__checkout"
-            :loading="submitting"
-            :disabled="!canSubmit || !hasActivePeriod || discountCapped || itemDiscountCapped"
-            @click="checkout"
-          >
-            <v-icon start>mdi-check-circle-outline</v-icon>
-            دفع وإتمام
-          </v-btn>
-        </div>
-      </div>
-    </v-card>
+    <!-- Cart zone -->
+    <CartPanel
+      :cart-open="cartOpen"
+      :is-mobile="isMobile"
+      :item-count="itemCount"
+      :drafts-reason="draftsReason"
+      :drafts-disabled="draftsDisabled"
+      :drafts-visible="draftsVisible"
+      :current-draft-id="currentDraftId"
+      :continuing-draft-id="continuingDraftId"
+      :items="items"
+      :flash-item-id="flashItemId"
+      :currency="currency"
+      :can-edit-price="canEditPrice"
+      :is-line-discount-capped="isLineDiscountCapped"
+      :applied-line-discount="appliedLineDiscount"
+      :line-subtotal="lineSubtotal"
+      :cart-expiry-warning="cartExpiryWarning"
+      :is-service="isService"
+      :total="total"
+      :subtotal="subtotal"
+      :applied-discount="appliedDiscount"
+      :tax-value="taxValue"
+      :discount-capped="discountCapped"
+      :payment="payment"
+      :payment-methods="paymentMethods"
+      :change-state-class="changeStateClass"
+      :change-label="changeLabel"
+      :change-amount="changeAmount"
+      :sale-discount="saleDiscount"
+      :tax="tax"
+      :sale-notes="saleNotes"
+      :quick-amounts="quickAmounts"
+      :numpad-keys="numpadKeys"
+      :submitting="submitting"
+      :has-active-period="hasActivePeriod"
+      :can-submit="canSubmit"
+      :item-discount-capped="itemDiscountCapped"
+      @close-cart="cartOpen = false"
+      @open-drafts-list="openDraftsList"
+      @confirm-clear="confirmClear"
+      @open-line-edit="openLineEdit"
+      @remove-item="removeItem"
+      @update-line-unit="updateLineUnit"
+      @update-price="updatePrice"
+      @dec-qty="decQty"
+      @commit-qty="commitQty"
+      @inc-qty="incQty"
+      @method-change="onMethodChange"
+      @update-payment-reference="payment.reference = $event"
+      @update-sale-discount-value="saleDiscount.value = Number($event) || 0"
+      @update-sale-discount-type="saleDiscount.type = $event"
+      @update-tax-value="tax.value = Number($event) || 0"
+      @update-tax-enabled="tax.enabled = $event"
+      @update-sale-notes="saleNotes = $event"
+      @add-to-paid="addToPaid"
+      @numpad="onNumpad"
+      @hold="onHold"
+      @checkout="checkout"
+    />
 
     <!-- ═══════════════════ Mobile bits ═══════════════════ -->
     <!-- Backdrop behind the drawer -->
@@ -894,42 +160,15 @@
     </div>
 
     <!-- ═══════════════════ Overlays / dialogs ═══════════════════ -->
-    <!-- Per-line edit (discount + note) -->
-    <v-dialog v-model="lineEditOpen" max-width="440">
-      <v-card v-if="lineEditItem" rounded="lg">
-        <v-card-title>
-          <div>{{ lineEditItem.name }}</div>
-          <div class="text-caption text-medium-emphasis">
-            السعر: {{ formatMoney(lineEditItem.price, currency) }}
-          </div>
-        </v-card-title>
-        <v-card-text class="d-flex flex-column ga-3">
-          <v-text-field
-            v-model.number="lineEditDraft.discount"
-            type="number"
-            :min="0"
-            :max="lineEditItem.price"
-            label="خصم / وحدة"
-            variant="outlined"
-            density="comfortable"
-            hide-details
-          />
-          <v-text-field
-            v-model="lineEditDraft.note"
-            label="ملاحظة"
-            variant="outlined"
-            density="comfortable"
-            hide-details
-            autofocus
-          />
-        </v-card-text>
-        <v-card-actions>
-          <v-btn variant="text" @click="lineEditOpen = false">إلغاء</v-btn>
-          <v-spacer />
-          <v-btn color="primary" variant="flat" @click="saveLineEdit">حفظ</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+    <LineEditDialog
+      v-model="lineEditOpen"
+      :item="lineEditItem"
+      :draft="lineEditDraft"
+      :currency="currency"
+      @update-draft-discount="lineEditDraft.discount = Number($event) || 0"
+      @update-draft-note="lineEditDraft.note = $event"
+      @save="saveLineEdit"
+    />
 
     <ConfirmDialog
       v-model="clearDialog"
@@ -941,124 +180,20 @@
       @confirm="clear"
     />
 
-    <!-- Drafts list (POS-compatible cash drafts only) -->
-    <v-dialog v-model="draftsOpen" max-width="640" scrollable>
-      <v-card rounded="lg">
-        <v-card-title>
-          <div class="d-flex align-center ga-2">
-            <v-icon size="22">mdi-archive-clock-outline</v-icon>
-            <span>المسودات (POS)</span>
-            <v-spacer />
-            <v-btn
-              icon="mdi-refresh"
-              variant="text"
-              size="small"
-              :loading="draftsLoading"
-              title="تحديث"
-              @click="loadDrafts"
-            />
-          </div>
-          <v-text-field
-            v-model="draftsSearch"
-            density="comfortable"
-            variant="outlined"
-            hide-details
-            clearable
-            placeholder="بحث برقم الفاتورة أو اسم العميل"
-            prepend-inner-icon="mdi-magnify"
-            class="mt-3"
-          />
-        </v-card-title>
-
-        <v-card-text style="min-height: 240px">
-          <div v-if="draftsLoading && draftList.length === 0" class="drafts__state">
-            <v-progress-circular indeterminate color="primary" />
-            <div class="text-medium-emphasis mt-2">جاري التحميل…</div>
-          </div>
-          <div v-else-if="draftsError" class="drafts__state">
-            <v-icon size="40" color="error">mdi-alert-circle-outline</v-icon>
-            <div class="text-body-2 mt-2">{{ draftsError }}</div>
-            <v-btn
-              class="mt-3"
-              variant="outlined"
-              size="small"
-              prepend-icon="mdi-refresh"
-              @click="loadDrafts"
-            >
-              إعادة المحاولة
-            </v-btn>
-          </div>
-          <div v-else-if="filteredDrafts.length === 0" class="drafts__state">
-            <v-icon size="40" class="text-medium-emphasis">mdi-tray-remove</v-icon>
-            <div class="text-body-2 text-medium-emphasis mt-2">
-              {{ draftsSearch ? 'لا توجد مسودات مطابقة' : 'لا توجد مسودات للـ POS' }}
-            </div>
-          </div>
-          <v-list v-else lines="two" class="bg-transparent">
-            <v-list-item
-              v-for="d in filteredDrafts"
-              :key="d.id"
-              class="drafts__item mb-2"
-              rounded="lg"
-            >
-              <template #title>
-                <div class="d-flex align-center justify-space-between">
-                  <span class="font-weight-bold">{{ d.invoiceNumber || `#${d.id}` }}</span>
-                  <span class="text-primary font-weight-bold">{{
-                    formatMoney(d.total, d.currency)
-                  }}</span>
-                </div>
-              </template>
-              <template #subtitle>
-                <div class="d-flex flex-wrap ga-3 text-caption mt-1">
-                  <span
-                    ><v-icon size="14">mdi-account-outline</v-icon>
-                    {{ d.customer || 'بدون عميل' }}</span
-                  >
-                  <span
-                    ><v-icon size="14">mdi-package-variant-closed</v-icon>
-                    {{ d.itemCount ?? 0 }} عنصر</span
-                  >
-                  <span
-                    ><v-icon size="14">mdi-clock-outline</v-icon>
-                    {{ formatDraftDate(d.createdAt) }}</span
-                  >
-                </div>
-              </template>
-              <template #append>
-                <div class="d-flex ga-1">
-                  <v-btn
-                    variant="flat"
-                    color="primary"
-                    size="small"
-                    prepend-icon="mdi-play-circle-outline"
-                    :loading="continuingDraftId === d.id"
-                    :disabled="!!continuingDraftId || deletingDraftId === d.id"
-                    @click="continueDraft(d)"
-                  >
-                    متابعة
-                  </v-btn>
-                  <v-btn
-                    icon="mdi-trash-can-outline"
-                    variant="text"
-                    color="error"
-                    size="small"
-                    :loading="deletingDraftId === d.id"
-                    :disabled="!!continuingDraftId || !!deletingDraftId"
-                    @click="askDeleteDraft(d)"
-                  />
-                </div>
-              </template>
-            </v-list-item>
-          </v-list>
-        </v-card-text>
-
-        <v-card-actions>
-          <v-spacer />
-          <v-btn variant="text" @click="draftsOpen = false">إغلاق</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+    <DraftsDialog
+      v-model="draftsOpen"
+      v-model:drafts-search="draftsSearch"
+      :drafts-loading="draftsLoading"
+      :draft-list="draftList"
+      :drafts-error="draftsError"
+      :filtered-drafts="filteredDrafts"
+      :continuing-draft-id="continuingDraftId"
+      :deleting-draft-id="deletingDraftId"
+      :format-draft-date="formatDraftDate"
+      @load-drafts="loadDrafts"
+      @continue-draft="continueDraft"
+      @ask-delete-draft="askDeleteDraft"
+    />
 
     <ConfirmDialog
       v-model="draftDeleteDialog"
@@ -1115,7 +250,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRouter, useRoute, isNavigationFailure } from 'vue-router';
 import { useDisplay } from 'vuetify';
 import {
@@ -1132,10 +267,15 @@ import { usePosCart } from '@/composables/usePosCart';
 import { useFeatureGate } from '@/composables/useFeatureGate';
 import { usePermissions } from '@/composables/usePermissions';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
-import EmptyState from '@/components/EmptyState.vue';
+import PosToolbar from '@/components/pos/PosToolbar.vue';
+import ProductGrid from '@/components/pos/ProductGrid.vue';
+import CartPanel from '@/components/pos/CartPanel.vue';
+import DraftsDialog from '@/components/pos/DraftsDialog.vue';
+import LineEditDialog from '@/components/pos/LineEditDialog.vue';
 import api from '@/plugins/axios';
 import { formatCurrency as formatMoney } from '@/utils/formatters';
 import { PRICE_TIERS } from '@/utils/productUnits';
+import '@/components/pos/pos.scss';
 
 // ── Stores ──────────────────────────────────────────────────────────────────
 const productStore = useProductStore();
@@ -1260,7 +400,6 @@ const {
   discountCapped,
   isLineDiscountCapped,
   appliedLineDiscount,
-  itemDiscountApplied,
   itemDiscountCapped,
   taxValue,
   total,
@@ -1371,13 +510,8 @@ watch(
   { deep: true, flush: 'post' }
 );
 
-const truncate = (s, n) => {
-  const str = String(s ?? '');
-  return str.length > n ? `${str.slice(0, n)}…` : str;
-};
-
-const searchRef = ref(null);
-const gridRef = ref(null);
+const searchFocusRequest = ref(0);
+const gridFocusRequest = ref(0);
 
 let searchTimer = null;
 watch(searchInput, (v) => {
@@ -1477,15 +611,6 @@ const stockStatusOf = (p) => {
   return { label: 'متوفر', color: 'success', icon: 'mdi-check-circle-outline' };
 };
 
-const isFeatured = (p) => Boolean(p?.isFeatured || p?.isBestSeller || p?.featured || p?.bestseller);
-
-// ── Product card media ─────────────────────────────────────────────────────
-// The catalogue has no image column yet; support several likely field names so
-// the card lights up automatically once images ship, and fall back to a clean
-// placeholder otherwise.
-const productImageOf = (p) =>
-  p?.imageUrl || p?.image || p?.thumbnail || p?.photo || p?.imagePath || null;
-
 // Deterministic two-tone gradient per product so placeholders look varied but
 // stay stable across renders (seeded by id, falling back to the name length).
 const placeholderStyle = (p) => {
@@ -1569,11 +694,6 @@ watch([debouncedSearch, selectedCategory, productsPerPage], () => {
 watch(totalProductPages, (pages) => {
   if (productPage.value > pages) productPage.value = pages;
 });
-// Scroll the grid back to the top whenever the visible page changes.
-watch(productPage, () => {
-  nextTick(() => gridRef.value?.scrollTo?.({ top: 0 }));
-});
-
 const expiryByProductWarehouse = computed(() => {
   const map = new Map();
   for (const row of expiryAlerts.value || []) {
@@ -1588,7 +708,6 @@ const expiryByProductWarehouse = computed(() => {
 
 const expiryInfoOf = (p) =>
   expiryByProductWarehouse.value.get(`${p.id}:${inventoryStore.selectedWarehouseId || ''}`) || null;
-const nearestExpiryOf = (p) => expiryInfoOf(p)?.expiryDate || null;
 const expiryStatusOf = (p) => {
   if (!p?.tracksExpiry) return 'بدون تاريخ انتهاء';
   const status = expiryInfoOf(p)?.status;
@@ -1634,11 +753,6 @@ const changeLabel = computed(() => {
   if (remaining.value > 0) return 'المستحق';
   return 'التعادل';
 });
-const changeIcon = computed(() => {
-  if (change.value > 0) return 'mdi-cash-refund';
-  if (remaining.value > 0) return 'mdi-alert-circle-outline';
-  return 'mdi-check-circle-outline';
-});
 const changeStateClass = computed(() => {
   if (change.value > 0) return 'is-success';
   if (remaining.value > 0) return 'is-error';
@@ -1649,13 +763,6 @@ const changeStateClass = computed(() => {
 // ── Formatting ─────────────────────────────────────────────────────────────
 // Currency formatting is centralized in '@/utils/formatters' (imported above
 // as formatMoney). All call sites pass the relevant currency explicitly.
-
-// Compact label for quick-add chips (e.g., 1k, 10k, 1M).
-const shortAmount = (a) => {
-  if (a >= 1_000_000) return `${a / 1_000_000}M`;
-  if (a >= 1_000) return `${a / 1_000}k`;
-  return String(a);
-};
 
 // ── Data load ──────────────────────────────────────────────────────────────
 const loadProducts = async () => {
@@ -1723,7 +830,7 @@ const resetSearch = () => {
   searchInput.value = '';
   debouncedSearch.value = '';
   clearTimeout(searchTimer);
-  nextTick(() => searchRef.value?.focus?.());
+  searchFocusRequest.value += 1;
 };
 
 // Unified search + barcode entry (one field). Pressing Enter:
@@ -2056,7 +1163,7 @@ const onKeydown = (e) => {
   // F2 / F4 both focus the unified search/barcode field.
   if (e.key === 'F2' || e.key === 'F4') {
     e.preventDefault();
-    searchRef.value?.focus?.();
+    searchFocusRequest.value += 1;
     return;
   }
   if (e.key === 'F9' || ((e.ctrlKey || e.metaKey) && e.key === 'Enter')) {
@@ -2069,57 +1176,7 @@ const onKeydown = (e) => {
 
 // ── Keyboard: grid roving focus ────────────────────────────────────────────
 const focusFirstCard = () => {
-  const first = gridRef.value?.querySelector('.pos-tile:not(.pos-tile--disabled)');
-  if (first) first.focus();
-};
-
-const gridCols = () => {
-  const grid = gridRef.value;
-  if (!grid) return 1;
-  const tmpl = getComputedStyle(grid).gridTemplateColumns;
-  return Math.max(1, tmpl.split(' ').filter(Boolean).length);
-};
-
-const onGridKey = (e) => {
-  const keys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'];
-  if (!keys.includes(e.key)) return;
-
-  const cards = Array.from(
-    gridRef.value?.querySelectorAll('.pos-tile:not(.pos-tile--disabled)') || []
-  );
-  if (cards.length === 0) return;
-
-  const current = document.activeElement;
-  let idx = cards.indexOf(current);
-  if (idx < 0) idx = 0;
-
-  const cols = gridCols();
-  let next = idx;
-
-  switch (e.key) {
-    case 'ArrowLeft':
-      next = idx + 1;
-      break;
-    case 'ArrowRight':
-      next = idx - 1;
-      break;
-    case 'ArrowDown':
-      next = idx + cols;
-      break;
-    case 'ArrowUp':
-      next = idx - cols;
-      break;
-    case 'Home':
-      next = 0;
-      break;
-    case 'End':
-      next = cards.length - 1;
-      break;
-  }
-
-  if (next < 0 || next >= cards.length) return;
-  e.preventDefault();
-  cards[next]?.focus();
+  gridFocusRequest.value += 1;
 };
 
 // ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -2153,7 +1210,7 @@ onMounted(async () => {
   }
 
   window.addEventListener('keydown', onKeydown);
-  nextTick(() => searchRef.value?.focus?.());
+  searchFocusRequest.value += 1;
 });
 
 // Resume a cash/card draft into the POS cart. Installment drafts are routed
@@ -2194,1014 +1251,3 @@ onUnmounted(() => {
   if (periodPollTimer) clearInterval(periodPollTimer);
 });
 </script>
-
-<style scoped lang="scss">
-/* ══════════════════ Design tokens (local) ══════════════════ */
-.pos {
-  --pos-gap: 16px;
-  --pos-radius: 16px;
-  --pos-border: rgba(var(--v-theme-on-surface), 0.08);
-  --pos-soft: rgba(var(--v-theme-on-surface), 0.03);
-  --pos-tint: rgba(var(--v-theme-on-surface), 0.06);
-  --pos-primary: rgb(var(--v-theme-primary));
-  --pos-primary-soft: rgba(var(--v-theme-primary), 0.08);
-
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) clamp(330px, 31vw, 440px);
-  gap: var(--pos-gap);
-  height: calc(100dvh - 96px);
-  min-height: 560px;
-  direction: rtl;
-}
-
-/* Tablet: narrow the cart a touch so the catalogue keeps breathing room. */
-@media (max-width: 1280px) {
-  .pos {
-    grid-template-columns: minmax(0, 1fr) 320px;
-  }
-}
-
-.pos__panel {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  min-width: 0;
-  border: 1px solid var(--pos-border);
-  border-radius: var(--pos-radius);
-  overflow: hidden;
-}
-
-/* ══════════════════ Products panel ══════════════════ */
-.pos__products {
-  min-height: 0;
-}
-
-.pos__toolbar {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--pos-border);
-  background: rgb(var(--v-theme-surface));
-}
-
-.pos__filters {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.pos__category {
-  flex: 1 1 200px;
-  min-width: 180px;
-}
-
-.pos__tiers {
-  flex: 0 0 auto;
-  gap: 6px;
-}
-
-.pos__expired {
-  flex: 0 0 auto;
-  margin-inline-start: auto;
-}
-
-.pos__search-hint {
-  opacity: 0.45;
-}
-
-/* Column count is fixed per breakpoint (not auto-fill) so the card size stays
-   stable and we hit the intended grid: ~2 (mobile) → 3–4 (tablet) → 5–6
-   (desktop). The panel width tracks the viewport (the cart is a fixed-ish
-   column / drawer), so viewport breakpoints map cleanly to the catalogue. */
-.pos__grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr); /* mobile: 2 columns */
-  gap: 12px;
-  padding: 14px;
-  /* Fill the space between the toolbar and the pagination bar; this is the only
-     scroll region in the products panel (the pager below stays fixed). */
-  flex: 1 1 auto;
-  overflow-y: auto;
-  align-content: start;
-  /* Rows size to the card's own height and never stretch/compress to fill the
-     scroll area — so adding more products grows the scroll, never shrinks the
-     cards. (Explicitly NOT `1fr`, which would distribute height across rows.) */
-  grid-auto-rows: max-content;
-  min-height: 0;
-  min-width: 0;
-  scrollbar-gutter: stable;
-}
-
-/* Large phones / small tablets (drawer mode, full width) → 3 columns. */
-@media (min-width: 600px) {
-  .pos__grid {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-/* Tablets → 4 columns (portrait drawer and the md side-by-side band). */
-@media (min-width: 768px) {
-  .pos__grid {
-    grid-template-columns: repeat(4, 1fr);
-  }
-}
-
-/* Desktop side-by-side → ~5 columns. */
-@media (min-width: 1280px) {
-  .pos__grid {
-    grid-template-columns: repeat(5, 1fr);
-  }
-}
-
-/* Wide desktop → 6 columns when the space allows it. */
-@media (min-width: 1700px) {
-  .pos__grid {
-    grid-template-columns: repeat(6, 1fr);
-  }
-}
-
-.pos__empty {
-  grid-column: 1 / -1;
-  padding: 48px 16px;
-}
-
-/* Pagination bar: pinned below the grid (never scrolls), mirrors the cart's
-   footer border so the two panels feel balanced. */
-.pos__pager {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  padding: 8px 14px;
-  border-top: 1px solid var(--pos-border);
-  background: rgb(var(--v-theme-surface));
-}
-
-.pos__pager--mobile {
-  margin-bottom: 45px;
-}
-
-.pos__pager-size {
-  flex: 0 0 116px;
-  max-width: 116px;
-}
-
-.pos__pager-count {
-  font-size: 0.78rem;
-  color: rgba(var(--v-theme-on-surface), 0.6);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-/* Push the page controls to the inline-end (visual left in RTL). */
-.pos__pager-nav {
-  margin-inline-start: auto;
-  width: auto;
-}
-
-/* ══════════════════ Product card ══════════════════ */
-/* All cards share one structure (fixed-ratio media + 3-row body) so they line
-   up to a perfectly even grid regardless of name length. */
-
-.product-glass-card {
-  position: relative;
-  min-height: 210px;
-  padding: 14px;
-  border-radius: 24px;
-  border: 1px solid rgba(var(--v-border-color), 0.14);
-  background:
-    linear-gradient(180deg, rgba(var(--v-theme-surface), 0.96), rgba(var(--v-theme-surface), 0.88)),
-    radial-gradient(circle at top right, rgba(var(--v-theme-primary), 0.18), transparent 45%);
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.09);
-  cursor: pointer;
-  overflow: hidden;
-  transition: 0.18s ease;
-}
-
-.product-glass-card:hover {
-  transform: translateY(-4px) scale(1.01);
-  border-color: rgba(var(--v-theme-primary), 0.38);
-  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.15);
-}
-
-.product-glass-card--disabled {
-  opacity: 0.48;
-  cursor: not-allowed;
-  filter: grayscale(0.45);
-}
-
-.product-glass-card__header {
-  display: flex;
-  align-items: start;
-  justify-content: space-between;
-}
-
-.product-glass-card__icon {
-  width: 72px;
-  height: 72px;
-  border-radius: 22px;
-  display: grid;
-  place-items: center;
-  color: rgba(var(--v-theme-on-surface), 0.55);
-  background: rgba(var(--v-theme-surface-variant), 0.7);
-}
-
-.product-glass-card__add {
-  box-shadow: 0 8px 18px rgba(var(--v-theme-primary), 0.32);
-}
-
-.product-glass-card__content {
-  margin-top: 16px;
-}
-
-.product-glass-card__name {
-  min-height: 44px;
-  font-size: 1rem;
-  font-weight: 900;
-  line-height: 1.45;
-  color: rgb(var(--v-theme-on-surface));
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.product-glass-card__code {
-  margin-top: 7px;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 0.78rem;
-  color: rgba(var(--v-theme-on-surface), 0.56);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.product-glass-card__badges {
-  min-height: 26px;
-  margin-top: 12px;
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.product-glass-card__bottom {
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px dashed rgba(var(--v-border-color), 0.18);
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.product-glass-card__label {
-  font-size: 0.72rem;
-  color: rgba(var(--v-theme-on-surface), 0.5);
-}
-
-.product-glass-card__price {
-  margin-top: 2px;
-  font-size: 1.08rem;
-  font-weight: 950;
-  color: rgb(var(--v-theme-primary));
-}
-
-.product-glass-card__prices {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  flex: 1 0 0;
-}
-
-.product-glass-card__cost,
-.product-glass-card__sale {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.product-glass-card__cost span,
-.product-glass-card__sale span {
-  font-size: 11px;
-  color: rgba(var(--v-theme-on-surface), 0.55);
-}
-
-.product-glass-card__cost strong {
-  font-size: 13px;
-  font-weight: 700;
-  color: rgb(var(--v-theme-warning));
-}
-
-.product-glass-card__sale strong {
-  font-size: 18px;
-  font-weight: 900;
-  color: rgb(var(--v-theme-primary));
-}
-
-.product-glass-card__qty {
-  min-width: 44px;
-  height: 32px;
-  padding: 0 10px;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  font-weight: 800;
-  background: rgba(var(--v-theme-primary), 0.1);
-  color: rgb(var(--v-theme-primary));
-}
-// .pos-tile {
-//   position: relative;
-//   display: flex;
-//   flex-direction: column;
-//   /* Fixed geometry: media (132) + the 3-row body. The min-height guarantees the
-//      card keeps a clear, consistent size no matter how many products render —
-//      the grid scrolls, the cards never shrink. */
-//   min-height: 236px;
-//   border: 1px solid var(--pos-border);
-//   background: rgb(var(--v-theme-surface));
-//   cursor: pointer;
-//   overflow: hidden;
-//   transition:
-//     transform 0.1s ease,
-//     border-color 0.15s ease,
-//     box-shadow 0.15s ease;
-
-//   &:hover:not(.pos-tile--disabled) {
-//     transform: translateY(-3px);
-//     border-color: var(--pos-primary);
-//     box-shadow: 0 8px 22px rgba(var(--v-theme-primary), 0.18);
-//   }
-
-//   &:hover:not(.pos-tile--disabled) .pos-tile__add {
-//     opacity: 1;
-//     transform: scale(1);
-//   }
-
-//   &:focus-visible {
-//     outline: 2px solid var(--pos-primary);
-//     outline-offset: 2px;
-//   }
-
-//   /* Out-of-stock / expired products stay visible but clearly dimmed and
-//      de-saturated, and can't be added (pointer-events off). The "نفذ" status
-//      badge keeps reading at full strength on top of the muted media. */
-//   &--disabled {
-//     opacity: 0.5;
-//     cursor: not-allowed;
-//     pointer-events: none;
-
-//     .pos-tile__media,
-//     .pos-tile__body {
-//       filter: grayscale(0.55);
-//     }
-//   }
-// }
-
-// /* ── Media ── */
-// /* Fixed image height (within the 120–150px target) keeps every card the same
-//    height regardless of how wide the column is at the current breakpoint. */
-// .pos-tile__media {
-//   position: relative;
-//   /* flex: 0 0 132px locks the media band's height in the column — it can neither
-//      grow nor shrink, so the image area is identical on every card. */
-//   flex: 0 0 132px;
-//   height: 132px;
-//   width: 100%;
-//   background: var(--pos-tint);
-// }
-
-// .pos-tile__img {
-//   width: 100%;
-//   height: 100%;
-// }
-
-// .pos-tile__placeholder {
-//   position: absolute;
-//   inset: 0;
-//   display: flex;
-//   align-items: center;
-//   justify-content: center;
-//   background: linear-gradient(135deg, var(--ph-from, #6a6a72), var(--ph-to, #44444c));
-// }
-
-// .pos-tile__placeholder-icon {
-//   position: absolute;
-//   color: rgba(255, 255, 255, 0.22);
-// }
-
-// .pos-tile__initials {
-//   position: relative;
-//   font-size: 1.4rem;
-//   font-weight: 800;
-//   letter-spacing: 0.02em;
-//   color: rgba(255, 255, 255, 0.92);
-//   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
-// }
-
-// .pos-tile__status {
-//   position: absolute;
-//   top: 6px;
-//   inset-inline-start: 6px;
-//   font-weight: 700;
-// }
-
-// .pos-tile__star {
-//   position: absolute;
-//   top: 6px;
-//   inset-inline-end: 6px;
-//   color: rgb(var(--v-theme-warning));
-//   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
-// }
-
-// .pos-tile__expiry {
-//   position: absolute;
-//   bottom: 6px;
-//   inset-inline-start: 6px;
-//   font-weight: 700;
-// }
-
-// .pos-tile__add {
-//   position: absolute;
-//   bottom: 6px;
-//   inset-inline-end: 6px;
-//   opacity: 1;
-//   transform: scale(1);
-//   transition:
-//     opacity 0.15s ease,
-//     transform 0.15s ease;
-//   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
-
-//   /* On hover-capable screens the (+) reveals on hover to keep the media clean;
-//      on touch it stays visible since there's no hover. */
-//   @media (hover: hover) {
-//     opacity: 0;
-//     transform: scale(0.7);
-//   }
-// }
-
-// /* ── Body ── */
-// .pos-tile__body {
-//   display: flex;
-//   flex-direction: column;
-//   gap: 3px;
-//   padding: 8px 10px 10px;
-//   width: 100%;
-//   /* Take the space left under the fixed media band and allow inner clamping. */
-//   flex: 1 1 auto;
-//   min-height: 0;
-// }
-
-// .pos-tile__name {
-//   font-weight: 600;
-//   font-size: 0.86rem;
-//   line-height: 1.3;
-//   /* Reserve exactly two lines so every card is the same height. */
-//   min-height: 2.24em;
-//   overflow: hidden;
-//   display: -webkit-box;
-//   -webkit-line-clamp: 2;
-//   -webkit-box-orient: vertical;
-// }
-
-// .pos-tile__sku {
-//   display: inline-flex;
-//   align-items: center;
-//   gap: 3px;
-//   font-size: 0.7rem;
-//   color: rgba(var(--v-theme-on-surface), 0.55);
-//   font-variant-numeric: tabular-nums;
-//   white-space: nowrap;
-//   overflow: hidden;
-//   text-overflow: ellipsis;
-// }
-
-// .pos-tile__foot {
-//   /* Pin price + stock to the bottom so they line up across every card. */
-//   margin-top: auto;
-//   padding-top: 2px;
-//   display: flex;
-//   align-items: center;
-//   justify-content: space-between;
-//   gap: 6px;
-// }
-
-// .pos-tile__price {
-//   font-weight: 800;
-//   font-size: 1.04rem;
-//   color: var(--pos-primary);
-//   font-variant-numeric: tabular-nums;
-// }
-
-// .pos-tile__count {
-//   display: inline-flex;
-//   align-items: center;
-//   gap: 2px;
-//   font-size: 0.74rem;
-//   color: rgba(var(--v-theme-on-surface), 0.6);
-//   font-variant-numeric: tabular-nums;
-// }
-
-/* ── Skeleton (matches the card silhouette) ── */
-.pos-tile--skeleton {
-  pointer-events: none;
-}
-
-.sk-shimmer {
-  background: linear-gradient(90deg, var(--pos-soft) 0%, var(--pos-tint) 50%, var(--pos-soft) 100%);
-  background-size: 200% 100%;
-  animation: pos-shimmer 1.4s infinite ease-in-out;
-}
-
-.sk-line {
-  height: 11px;
-  border-radius: 6px;
-  margin-bottom: 6px;
-
-  &--short {
-    width: 55%;
-  }
-  &--price {
-    width: 40%;
-    height: 16px;
-    margin-top: 4px;
-  }
-}
-
-@keyframes pos-shimmer {
-  0% {
-    background-position: 100% 0;
-  }
-  100% {
-    background-position: -100% 0;
-  }
-}
-
-/* ══════════════════ Cart panel ══════════════════ */
-.pos__cart {
-  background: rgb(var(--v-theme-surface));
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.cart__handle {
-  display: flex;
-  justify-content: center;
-  padding: 8px 0 4px;
-  cursor: pointer;
-}
-
-.cart__handle-bar {
-  width: 42px;
-  height: 4px;
-  border-radius: 4px;
-  background: rgba(var(--v-theme-on-surface), 0.25);
-}
-
-.cart__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 10px 12px;
-  flex-shrink: 0;
-}
-
-.cart__title {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.cart__title-text {
-  font-size: 1.02rem;
-  font-weight: 800;
-}
-
-.cart__header-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-}
-
-/* ── Lines ── */
-.cart__lines {
-  flex: 1 1 auto;
-  min-height: 180px;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-  padding: 8px;
-}
-
-.cart__lines-inner {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  position: relative;
-}
-
-.cart__empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding-top: 24px;
-}
-
-.cart__hints {
-  display: flex;
-  gap: 10px;
-  margin-top: 14px;
-
-  @media (pointer: coarse) {
-    display: none;
-  }
-
-  kbd {
-    font-family: inherit;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-  }
-}
-
-.line {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
-
-  &--flash {
-    animation: line-flash 0.9s ease-out;
-  }
-
-  &--skeleton {
-    min-height: 76px;
-    background: linear-gradient(
-      90deg,
-      var(--pos-soft) 0%,
-      var(--pos-tint) 50%,
-      var(--pos-soft) 100%
-    );
-    background-size: 200% 100%;
-    animation: pos-shimmer 1.4s infinite ease-in-out;
-  }
-}
-
-@keyframes line-flash {
-  0% {
-    box-shadow: 0 0 0 2px rgba(var(--v-theme-primary), 0.5) inset;
-  }
-  100% {
-    box-shadow: 0 0 0 0 transparent inset;
-  }
-}
-
-.line__top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-}
-
-.line__name {
-  font-weight: 700;
-  font-size: 0.92rem;
-  line-height: 1.3;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  color: rgb(var(--v-theme-on-surface));
-}
-
-.line__actions {
-  display: inline-flex;
-  gap: 2px;
-  flex-shrink: 0;
-}
-
-.line__meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  font-size: 0.78rem;
-  color: rgba(var(--v-theme-on-surface), 0.75);
-}
-
-.line__unit-price {
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
-.line__sep {
-  opacity: 0.4;
-}
-
-.line__unit-btn {
-  height: 22px !important;
-}
-
-.line__warn {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 0.72rem;
-  color: rgb(var(--v-theme-warning));
-}
-
-.line__bottom {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 2px;
-  color: rgba(var(--v-theme-on-surface), 0.85);
-}
-
-.line__qty {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.line__qty-input {
-  width: 64px;
-
-  :deep(input) {
-    text-align: center;
-    font-variant-numeric: tabular-nums;
-    -moz-appearance: textfield;
-  }
-}
-
-.line__total {
-  font-weight: 800;
-  font-size: 1rem;
-  font-variant-numeric: tabular-nums;
-}
-
-/* ══════════════════ Pay / footer ══════════════════ */
-.cart__pay {
-  flex: 0 0 auto;
-  max-height: 38vh;
-  overflow-y: auto;
-  padding: 10px;
-  flex-shrink: 0;
-  border-top: 1px solid rgba(var(--v-border-color), 0.12);
-  background: rgb(var(--v-theme-surface));
-}
-
-.pay__total--compact {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: 14px;
-  background: rgba(var(--v-theme-primary), 0.08);
-}
-
-.pay__total-label {
-  font-size: 12px;
-  opacity: 0.7;
-}
-
-.pay__total-value {
-  font-size: 21px;
-  font-weight: 900;
-  white-space: nowrap;
-}
-
-.pay__breakdown--compact {
-  margin-top: 8px;
-  padding: 8px;
-  border-radius: 12px;
-  background: rgba(var(--v-theme-surface-variant), 0.45);
-}
-
-.pay__row {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 12px;
-}
-
-.pay__alert {
-  margin-top: 8px;
-}
-
-.pay__methods-row {
-  margin-top: 8px;
-}
-
-.pay__methods {
-  width: 100%;
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-}
-
-.pay__methods .v-btn {
-  min-width: 0;
-}
-
-.pay__readout--compact {
-  margin-top: 8px;
-  padding: 8px;
-  border-radius: 12px;
-  background: rgba(var(--v-theme-surface-variant), 0.45);
-}
-
-.pay__readout-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 12px;
-}
-
-.pay__expander--dense {
-  margin-top: 8px;
-}
-
-.pay__expander--dense .v-expansion-panel-title {
-  min-height: 38px;
-  padding: 8px 12px;
-  font-size: 13px;
-}
-
-.pay__expander--dense .v-expansion-panel-text__wrapper {
-  padding: 8px;
-}
-
-.pay__adjust {
-  display: grid;
-  gap: 8px;
-}
-
-.numpad__quick {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
-  margin-bottom: 8px;
-}
-
-.numpad__keys {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
-}
-
-.numpad__keys .v-btn {
-  min-width: 0;
-  height: 36px;
-}
-
-.pay__actions--compact {
-  position: sticky;
-  bottom: 0;
-  display: grid;
-  grid-template-columns: 0.85fr 1.4fr;
-  gap: 8px;
-  padding-top: 8px;
-  margin-top: 8px;
-  background: rgb(var(--v-theme-surface));
-}
-
-.pay__checkout {
-  font-weight: 800;
-}
-
-.pay__hotkey {
-  position: absolute;
-  inset-inline-end: 8px;
-  bottom: 4px;
-  font-size: 0.6rem;
-  opacity: 0.7;
-}
-
-/* ── List transitions ── */
-.line-anim-enter-from {
-  opacity: 0;
-  transform: translateY(-6px);
-}
-.line-anim-enter-active {
-  transition:
-    opacity 0.18s ease-out,
-    transform 0.18s ease-out;
-}
-.line-anim-leave-active {
-  transition:
-    opacity 0.15s ease,
-    transform 0.15s ease;
-  position: absolute;
-  inset-inline: 0;
-}
-.line-anim-leave-to {
-  opacity: 0;
-  transform: translateX(-12px);
-}
-.line-anim-move {
-  transition: transform 0.18s ease;
-}
-
-/* ── Drafts dialog ── */
-.drafts__state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 32px 16px;
-}
-
-.drafts__item {
-  border: 1px solid var(--pos-border);
-  background: var(--pos-soft);
-}
-
-/* ══════════════════ Responsive: drawer mode ══════════════════ */
-.pos--drawer {
-  display: block;
-  height: auto;
-  min-height: 0;
-}
-
-.pos--drawer .pos__products {
-  height: calc(100dvh - 96px);
-  min-height: 420px;
-}
-
-.pos--drawer .pos__cart {
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: min(94vw, 420px);
-  border-radius: 0;
-  z-index: 2400;
-  transform: translateX(100%);
-  transition: transform 0.26s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: -8px 0 30px rgba(0, 0, 0, 0.35);
-
-  &.is-open {
-    transform: translateX(0);
-  }
-}
-
-.pos__backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  z-index: 2300;
-}
-
-.pos__bottombar {
-  position: fixed;
-  inset-inline: 0;
-  bottom: 0;
-  z-index: 2200;
-  padding: 10px 14px;
-  background: rgb(var(--v-theme-surface));
-  border-top: 1px solid var(--pos-border);
-  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.18);
-}
-
-.pos__bottombar-cart {
-  font-variant-numeric: tabular-nums;
-}
-
-/* Phones: tighter two-column grid, leave room for the bottom bar. */
-@media (max-width: 600px) {
-  .pos--drawer .pos__products {
-    height: calc(100dvh - 168px);
-  }
-  /* Keep the base 2-column grid; just tighten spacing and the media height. */
-  .pos__grid {
-    gap: 8px;
-    padding: 10px;
-  }
-  /* Shorter card on phones, but still a locked size — never collapses. */
-  .pos-tile {
-    min-height: 212px;
-  }
-  .pos-tile__media {
-    flex-basis: 116px;
-    height: 116px;
-  }
-  .pos-tile__add {
-    opacity: 1;
-    transform: scale(1);
-  }
-  .pos__expired {
-    margin-inline-start: 0;
-  }
-}
-</style>

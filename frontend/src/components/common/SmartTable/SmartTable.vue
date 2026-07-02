@@ -150,8 +150,15 @@
 
         <!-- Default smart formatting for columns that declare `format` and have
              no caller slot — pages only template genuinely custom cells. -->
-        <template v-for="col in autoFormatColumns" :key="`fmt-${col.key}`" #[`item.${col.key}`]="{ item }">
-          <span :dir="isLtrColumn(col) ? 'ltr' : undefined" :class="{ 'st-cell-num': isNumericColumn(col) }">
+        <template
+          v-for="col in autoFormatColumns"
+          :key="`fmt-${col.key}`"
+          #[`item.${col.key}`]="{ item }"
+        >
+          <span
+            :dir="isLtrColumn(col) ? 'ltr' : undefined"
+            :class="{ 'st-cell-num': isNumericColumn(col) }"
+          >
             {{ formatColumnCell(col, item) }}
           </span>
         </template>
@@ -176,7 +183,14 @@
             />
             <v-menu v-if="overflowActionsFor(item).length" location="bottom end">
               <template #activator="{ props: m }">
-                <v-btn v-bind="m" icon="mdi-dots-vertical" size="small" variant="text" title="إجراءات" @click.stop />
+                <v-btn
+                  v-bind="m"
+                  icon="mdi-dots-vertical"
+                  size="small"
+                  variant="text"
+                  title="إجراءات"
+                  @click.stop
+                />
               </template>
               <v-list density="compact">
                 <v-list-item
@@ -199,7 +213,11 @@
         <!-- Loading skeleton (no “no data” flicker during load). -->
         <template #loading>
           <slot name="loading">
-            <TableSkeleton :rows="skeletonRows" :columns="vuetifyHeaders.length || 4" class="pa-3" />
+            <TableSkeleton
+              :rows="skeletonRows"
+              :columns="vuetifyHeaders.length || 4"
+              class="pa-3"
+            />
           </slot>
         </template>
 
@@ -210,7 +228,13 @@
               title="لا توجد نتائج مطابقة"
               description="جرّب تعديل البحث أو الفلاتر"
               icon="mdi-magnify-close"
-              :actions="[{ text: 'مسح البحث والفلاتر', icon: 'mdi-filter-remove-outline', onClick: clearAllQuery }]"
+              :actions="[
+                {
+                  text: 'مسح البحث والفلاتر',
+                  icon: 'mdi-filter-remove-outline',
+                  onClick: clearAllQuery,
+                },
+              ]"
               compact
             />
           </slot>
@@ -229,11 +253,21 @@
         <template v-if="hasFooterTotals" #[`body.append`]>
           <tr class="st-totals-row">
             <td v-if="selectable" class="st-totals-row__cell" />
-            <td v-for="col in vuetifyHeaders" :key="col.key" class="st-totals-row__cell" :class="totalCellClass(col)">
-              <span v-if="footerTotals[col.key] != null" :dir="isLtrColumn(col) ? 'ltr' : undefined">
+            <td
+              v-for="col in vuetifyHeaders"
+              :key="col.key"
+              class="st-totals-row__cell"
+              :class="totalCellClass(col)"
+            >
+              <span
+                v-if="footerTotals[col.key] != null"
+                :dir="isLtrColumn(col) ? 'ltr' : undefined"
+              >
                 {{ footerTotals[col.key] }}
               </span>
-              <span v-else-if="col.key === totalsLabelKey" class="st-totals-row__label">الإجمالي</span>
+              <span v-else-if="col.key === totalsLabelKey" class="st-totals-row__label"
+                >الإجمالي</span
+              >
             </td>
           </tr>
         </template>
@@ -272,13 +306,19 @@
           v-for="action in ctxMenu.actions"
           :key="action.key"
           :prepend-icon="action.icon"
+          :to="resolveTo(action, ctxMenu.item)"
+          :disabled="action._disabled"
           :class="{ 'text-error': action.danger }"
           @click="runAction(action, ctxMenu.item)"
         >
           <v-list-item-title>{{ action.title }}</v-list-item-title>
         </v-list-item>
         <v-divider v-if="ctxMenu.actions.length" class="my-1" />
-        <v-list-item prepend-icon="mdi-content-copy" title="نسخ قيمة الخلية" @click="copyCellValue" />
+        <v-list-item
+          prepend-icon="mdi-content-copy"
+          title="نسخ قيمة الخلية"
+          @click="copyCellValue"
+        />
       </v-list>
     </v-menu>
 
@@ -506,10 +546,29 @@ const page = ref(props.page);
 const pageSize = ref(props.pageSize);
 const sortBy = ref([]);
 
-watch(() => props.search, (v) => { if (v !== searchState.value) searchState.value = v; });
-watch(() => props.filterValues, (v) => Object.assign(filterState, v), { deep: true });
-watch(() => props.page, (v) => { if (v !== page.value) page.value = v; });
-watch(() => props.pageSize, (v) => { if (v !== pageSize.value) pageSize.value = v; });
+watch(
+  () => props.search,
+  (v) => {
+    if (v !== searchState.value) searchState.value = v;
+  }
+);
+watch(
+  () => props.filterValues,
+  (v) => Object.assign(filterState, v),
+  { deep: true }
+);
+watch(
+  () => props.page,
+  (v) => {
+    if (v !== page.value) page.value = v;
+  }
+);
+watch(
+  () => props.pageSize,
+  (v) => {
+    if (v !== pageSize.value) pageSize.value = v;
+  }
+);
 
 /* ─────────────────────────── table component ─────────────────────────── */
 const tableComponent = computed(() => {
@@ -519,8 +578,10 @@ const tableComponent = computed(() => {
 
 const viewportStyle = computed(() => {
   const s = {};
-  if (props.height) s.height = typeof props.height === 'number' ? `${props.height}px` : props.height;
-  if (props.maxHeight) s.maxHeight = typeof props.maxHeight === 'number' ? `${props.maxHeight}px` : props.maxHeight;
+  if (props.height)
+    s.height = typeof props.height === 'number' ? `${props.height}px` : props.height;
+  if (props.maxHeight)
+    s.maxHeight = typeof props.maxHeight === 'number' ? `${props.maxHeight}px` : props.maxHeight;
   return s;
 });
 
@@ -552,7 +613,8 @@ const vuetifyHeaders = computed(() => {
       title: props.actionsLabel,
       sortable: false,
       align: 'end',
-      width: typeof props.actionsWidth === 'number' ? `${props.actionsWidth}px` : props.actionsWidth,
+      width:
+        typeof props.actionsWidth === 'number' ? `${props.actionsWidth}px` : props.actionsWidth,
       cellProps: { class: 'st-pin-end' },
       headerProps: { class: 'st-pin-end' },
     });
@@ -570,17 +632,19 @@ function pinnedProps(col) {
 const $slots = useSlots();
 
 const RESERVED_SLOTS = new Set([
-  'filters', 'toolbar-actions', 'preview', 'preview-status', 'preview-actions',
-  'empty', 'no-results', 'loading',
+  'filters',
+  'toolbar-actions',
+  'preview',
+  'preview-status',
+  'preview-actions',
+  'empty',
+  'no-results',
+  'loading',
 ]);
-const forwardedSlots = computed(() =>
-  Object.keys($slots).filter((n) => !RESERVED_SLOTS.has(n))
-);
+const forwardedSlots = computed(() => Object.keys($slots).filter((n) => !RESERVED_SLOTS.has(n)));
 
 const autoFormatColumns = computed(() =>
-  visibleColumns.value.filter(
-    (c) => c.format && c.key !== 'actions' && !$slots[`item.${c.key}`]
-  )
+  visibleColumns.value.filter((c) => c.format && c.key !== 'actions' && !$slots[`item.${c.key}`])
 );
 const formatColumnCell = (col, item) => {
   const raw = typeof col.value === 'function' ? col.value(item) : item?.[col.key];
@@ -614,13 +678,18 @@ const canSelectAllResults = computed(
 const allowedBulkActions = computed(() =>
   props.bulkActions
     .filter((a) => !a.permission || can(a.permission))
-    .map((a) => ({ ...a, disabled: typeof a.disabled === 'function' ? a.disabled(selectedRows.value) : a.disabled }))
+    .map((a) => ({
+      ...a,
+      disabled: typeof a.disabled === 'function' ? a.disabled(selectedRows.value) : a.disabled,
+    }))
 );
 const onBulkAction = (key) => {
   const action = props.bulkActions.find((a) => a.key === key);
   if (!action) return;
   const run = () =>
-    (action.handler ? action.handler(selectedRows.value, { allResults: allResultsSelected.value }) : null) ||
+    (action.handler
+      ? action.handler(selectedRows.value, { allResults: allResultsSelected.value })
+      : null) ||
     emit('bulk-action', { key, rows: selectedRows.value, allResults: allResultsSelected.value });
   if (action.confirm) {
     // confirm may be a static object or a (rows, { allResults }) => config fn,
@@ -675,8 +744,13 @@ const runAction = (action, item) => {
 
 /* ─────────────────────────── confirm dialog ──────────────────────────── */
 const confirm = reactive({
-  open: false, title: 'تأكيد', message: '', details: '', type: 'warning',
-  confirmText: 'تأكيد', onConfirm: () => {},
+  open: false,
+  title: 'تأكيد',
+  message: '',
+  details: '',
+  type: 'warning',
+  confirmText: 'تأكيد',
+  onConfirm: () => {},
 });
 function openConfirm(cfg, onConfirm) {
   Object.assign(confirm, {
@@ -685,7 +759,10 @@ function openConfirm(cfg, onConfirm) {
     details: cfg.details || '',
     type: cfg.type || 'warning',
     confirmText: cfg.confirmText || 'تأكيد',
-    onConfirm: () => { confirm.open = false; onConfirm(); },
+    onConfirm: () => {
+      confirm.open = false;
+      onConfirm();
+    },
     open: true,
   });
 }
@@ -693,7 +770,9 @@ function openConfirm(cfg, onConfirm) {
 /* ─────────────────────────── filters & chips ─────────────────────────── */
 const hasAutoFilters = computed(() => props.filters.length > 0);
 const activeFilterValues = computed(() =>
-  Object.entries(filterState).filter(([, v]) => v !== null && v !== undefined && v !== '' && !(Array.isArray(v) && !v.length))
+  Object.entries(filterState).filter(
+    ([, v]) => v !== null && v !== undefined && v !== '' && !(Array.isArray(v) && !v.length)
+  )
 );
 const activeFilterCount = computed(() =>
   props.filterChips ? props.filterChips.length : activeFilterValues.value.length
@@ -709,9 +788,7 @@ const chips = computed(() => {
   return out;
 });
 function findFilterDef(key) {
-  return props.filters.find(
-    (f) => f.key === key || f.fromKey === key || f.toKey === key
-  );
+  return props.filters.find((f) => f.key === key || f.fromKey === key || f.toKey === key);
 }
 function chipLabel(def, key, value) {
   if (!def) return `${key}: ${value}`;
@@ -727,7 +804,7 @@ function chipLabel(def, key, value) {
 }
 function optTitle(opts, value, def) {
   const it = opts.find((o) => (o[def?.itemValue || 'value'] ?? o.value) === value);
-  return it ? it[def?.itemTitle || 'title'] ?? it.title : value;
+  return it ? (it[def?.itemTitle || 'title'] ?? it.title) : value;
 }
 
 const onFiltersApply = (values) => {
@@ -795,11 +872,15 @@ const filteredItems = computed(() => {
   let rows = props.items;
   const q = (searchState.value || '').trim().toLowerCase();
   if (q) {
-    const searchCols = visibleColumns.value.filter((c) => c.searchable !== false && c.key !== 'actions');
+    const searchCols = visibleColumns.value.filter(
+      (c) => c.searchable !== false && c.key !== 'actions'
+    );
     rows = rows.filter((row) =>
       searchCols.some((c) => {
         const v = typeof c.value === 'function' ? c.value(row) : row?.[c.key];
-        return String(v ?? '').toLowerCase().includes(q);
+        return String(v ?? '')
+          .toLowerCase()
+          .includes(q);
       })
     );
   }
@@ -823,7 +904,8 @@ function applyFilterDef(rows, def) {
     if (from == null && to == null) return rows;
     return rows.filter((r) => {
       const v = def.type === 'date-range' ? Date.parse(r[field]) : Number(r[field]);
-      const lo = def.type === 'date-range' ? (from ? Date.parse(from) : -Infinity) : (from ?? -Infinity);
+      const lo =
+        def.type === 'date-range' ? (from ? Date.parse(from) : -Infinity) : (from ?? -Infinity);
       const hi = def.type === 'date-range' ? (to ? Date.parse(to) : Infinity) : (to ?? Infinity);
       return v >= lo && v <= hi;
     });
@@ -831,8 +913,14 @@ function applyFilterDef(rows, def) {
   const val = filterState[def.key];
   if (!isActive(val)) return rows;
   const field = def.field || def.key;
-  if (def.type === 'multiselect' && Array.isArray(val)) return rows.filter((r) => val.includes(r[field]));
-  if (def.type === 'text') return rows.filter((r) => String(r[field] ?? '').toLowerCase().includes(String(val).toLowerCase()));
+  if (def.type === 'multiselect' && Array.isArray(val))
+    return rows.filter((r) => val.includes(r[field]));
+  if (def.type === 'text')
+    return rows.filter((r) =>
+      String(r[field] ?? '')
+        .toLowerCase()
+        .includes(String(val).toLowerCase())
+    );
   return rows.filter((r) => r[field] === val);
 }
 function isActive(v) {
@@ -843,8 +931,12 @@ function isActive(v) {
 }
 
 const displayItems = computed(() => (props.serverSide ? props.items : filteredItems.value));
-const rowCount = computed(() => (props.serverSide ? props.items.length : filteredItems.value.length));
-const totalCount = computed(() => (props.serverSide ? props.totalItems : filteredItems.value.length));
+const rowCount = computed(() =>
+  props.serverSide ? props.items.length : filteredItems.value.length
+);
+const totalCount = computed(() =>
+  props.serverSide ? props.totalItems : filteredItems.value.length
+);
 const totalPages = computed(() => Math.max(1, Math.ceil(totalCount.value / (pageSize.value || 1))));
 
 /* ─────────────────────────── pagination ──────────────────────────────── */
@@ -886,7 +978,10 @@ const onTableOptions = (opts) => {
 let optionsTimer = null;
 let lastOptionsKey = null;
 function emitOptions({ immediate }) {
-  if (optionsTimer) { clearTimeout(optionsTimer); optionsTimer = null; }
+  if (optionsTimer) {
+    clearTimeout(optionsTimer);
+    optionsTimer = null;
+  }
   const fire = () => {
     const payload = {
       page: page.value,
@@ -919,7 +1014,12 @@ const onApplyView = (id) => {
   Object.assign(filterState, live.filters || {});
   searchState.value = live.search || '';
   sortBy.value = live.sort || [];
-  if (live.pageSize) pageSize.value = live.pageSize;
+  // A saved view can only restore an ALLOWED page size — never an arbitrary
+  // (or maliciously large) value that would force the table to render the whole
+  // dataset. Anything out of range is ignored, keeping the current size.
+  if (live.pageSize && props.pageSizeOptions.includes(live.pageSize)) {
+    pageSize.value = live.pageSize;
+  }
   page.value = 1;
   emit('update:search', searchState.value);
   emit('update:filters', { ...filterState });
@@ -948,7 +1048,7 @@ const footerTotals = computed(() => {
     else if (agg === 'avg') val = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
     else val = nums.reduce((a, b) => a + b, 0);
     const col = visibleColumns.value.find((c) => c.key === key);
-    out[key] = col ? formatCell(col, val, {}) ?? val : val;
+    out[key] = col ? (formatCell(col, val, {}) ?? val) : val;
   }
   return out;
 });
@@ -956,14 +1056,16 @@ function formatTotals(summary) {
   const out = {};
   for (const [key, val] of Object.entries(summary)) {
     const col = visibleColumns.value.find((c) => c.key === key);
-    out[key] = col ? formatCell(col, val, {}) ?? val : val;
+    out[key] = col ? (formatCell(col, val, {}) ?? val) : val;
   }
   return out;
 }
 // The column that should carry the "الإجمالي" label: the first visible column
 // that isn't itself a total and isn't the actions column.
 const totalsLabelKey = computed(() => {
-  const h = vuetifyHeaders.value.find((c) => footerTotals.value[c.key] == null && c.key !== 'actions');
+  const h = vuetifyHeaders.value.find(
+    (c) => footerTotals.value[c.key] == null && c.key !== 'actions'
+  );
   return h?.key;
 });
 const totalCellClass = (col) => ({ 'st-cell-num': isNumericColumn(col) });
@@ -1006,11 +1108,14 @@ const panelTitle = computed(() => {
 const panelSubtitle = computed(() => panel.item?.subtitle || '');
 function openPanel(item, index) {
   panel.item = item;
-  panel.index = index ?? displayItems.value.findIndex((r) => r[props.itemValue] === item[props.itemValue]);
+  panel.index =
+    index ?? displayItems.value.findIndex((r) => r[props.itemValue] === item[props.itemValue]);
   panel.open = true;
   emit('panel-open', item);
 }
-function closePanel() { panel.open = false; }
+function closePanel() {
+  panel.open = false;
+}
 function movePanel(delta) {
   const next = panel.index + delta;
   const list = displayItems.value;
@@ -1035,7 +1140,11 @@ function onRowContext(item, e) {
   ctxMenu.open = true;
 }
 async function copyCellValue() {
-  try { await navigator.clipboard.writeText(ctxMenu.cellText); } catch { /* ignore */ }
+  try {
+    await navigator.clipboard.writeText(ctxMenu.cellText);
+  } catch {
+    /* ignore */
+  }
   ctxMenu.open = false;
 }
 
@@ -1044,7 +1153,9 @@ const { run: runExport } = useSmartTableExport();
 const exportBusy = ref(false);
 async function onExport({ format, scope, visibleOnly }) {
   emit('export', { format, scope, visibleOnly });
-  const columns = (visibleOnly ? visibleColumns.value : orderedColumns.value).filter((c) => c.key !== 'actions');
+  const columns = (visibleOnly ? visibleColumns.value : orderedColumns.value).filter(
+    (c) => c.key !== 'actions'
+  );
   let rows;
   if (scope === 'selected') rows = selectedRows.value;
   else if (scope === 'page') rows = displayItems.value;
@@ -1056,7 +1167,12 @@ async function onExport({ format, scope, visibleOnly }) {
       columns,
       rows,
       fileBase: props.exportFileBase || props.tableKey,
-      meta: { branchLabel: '—', userName: currentUserName.value, generatedAt: new Date(), ...exportMeta() },
+      meta: {
+        branchLabel: '—',
+        userName: currentUserName.value,
+        generatedAt: new Date(),
+        ...exportMeta(),
+      },
     });
   } catch (e) {
     console.error('[SmartTable] export failed', e);
@@ -1067,7 +1183,11 @@ async function onExport({ format, scope, visibleOnly }) {
 async function gatherAllRows() {
   if (!props.serverSide) return filteredItems.value;
   if (props.exportFetcher) {
-    try { return (await props.exportFetcher()) || props.items; } catch { return props.items; }
+    try {
+      return (await props.exportFetcher()) || props.items;
+    } catch {
+      return props.items;
+    }
   }
   // No server export route supplied — fall back to the current page and warn.
   console.warn('[SmartTable] server export without exportFetcher exports the current page only.');
@@ -1124,7 +1244,9 @@ const lastUpdatedText = computed(() => {
   try {
     const d = new Date(props.lastUpdated);
     return `آخر تحديث ${new Intl.DateTimeFormat('ar-IQ', { hour: '2-digit', minute: '2-digit', numberingSystem: 'latn' }).format(d)}`;
-  } catch { return ''; }
+  } catch {
+    return '';
+  }
 });
 
 /* ─────────────────────────── keyboard ────────────────────────────────── */

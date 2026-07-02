@@ -29,6 +29,8 @@ export const useProductStore = defineStore('product', {
         });
         this.products = response?.data || [];
 
+        console.log(response.data.length);
+
         // Ensure pagination values are numbers
         if (response?.meta) {
           const newPagination = {

@@ -1,15 +1,11 @@
 <template>
-  <header class="sale-header">
-    <div class="sale-header__main">
-      <div class="sale-header__icon">
-        <v-icon size="22">mdi-cart-plus</v-icon>
-      </div>
-      <div class="sale-header__text">
-        <h1 class="sale-header__title">فاتورة بيع جديدة</h1>
-        <p class="sale-header__subtitle">أنشئ فاتورة نقدية أو بيعاً بالأقساط</p>
-      </div>
-    </div>
-
+  <PageHeader
+    title="فاتورة بيع جديدة"
+    subtitle="أنشئ فاتورة نقدية أو بيعاً بالأقساط"
+    icon="mdi-cart-plus"
+    icon-color="primary"
+    icon-size="22"
+  >
     <div class="sale-header__meta">
       <span class="sale-header__chip">
         <v-icon size="15">mdi-calendar-today</v-icon>
@@ -28,12 +24,13 @@
         {{ itemCount }} منتج
       </span>
     </div>
-  </header>
+  </PageHeader>
 </template>
 
 <script setup>
 import { computed } from 'vue';
 import { formatDate } from '@/utils/formatters';
+import PageHeader from '@/components/PageHeader.vue';
 
 defineProps({
   branchName: { type: String, default: '' },
@@ -45,73 +42,39 @@ const today = computed(() => formatDate(new Date()));
 </script>
 
 <style scoped lang="scss">
-.sale-header {
-  flex: 0 0 auto;
+.sale-header__meta {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  justify-content: flex-end;
+  gap: 7px;
   flex-wrap: wrap;
-  padding: 2px 2px 10px;
-  border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.08);
+}
 
-  &__main {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    min-width: 0;
-  }
+.sale-header__chip {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 750;
+  white-space: nowrap;
+  color: rgba(var(--v-theme-on-surface), 0.72);
+  background: rgba(var(--v-theme-on-surface), 0.055);
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
 
-  &__icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 40px;
-    height: 40px;
-    border-radius: 10px;
-    background-color: rgba(var(--v-theme-primary), 0.1);
+  &--count {
     color: rgb(var(--v-theme-primary));
-    flex-shrink: 0;
+    background: rgba(var(--v-theme-primary), 0.09);
+    border-color: rgba(var(--v-theme-primary), 0.2);
   }
+}
 
-  &__title {
-    font-size: 1.15rem;
-    font-weight: 700;
-    line-height: 1.25;
-    margin: 0;
-    color: rgb(var(--v-theme-on-surface));
-  }
-
-  &__subtitle {
-    margin: 2px 0 0;
-    font-size: 0.8rem;
-    color: rgba(var(--v-theme-on-surface), 0.6);
-  }
-
-  &__meta {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  &__chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 4px 10px;
-    border-radius: 8px;
-    font-size: 0.78rem;
-    font-weight: 500;
-    color: rgba(var(--v-theme-on-surface), 0.75);
-    background-color: rgba(var(--v-theme-on-surface), 0.05);
-    border: 1px solid rgba(var(--v-theme-on-surface), 0.08);
-
-    &--count {
-      color: rgb(var(--v-theme-primary));
-      background-color: rgba(var(--v-theme-primary), 0.08);
-      border-color: rgba(var(--v-theme-primary), 0.2);
-    }
+@media (max-width: 760px) {
+  .sale-header__meta {
+    justify-content: flex-start;
   }
 }
 </style>
+

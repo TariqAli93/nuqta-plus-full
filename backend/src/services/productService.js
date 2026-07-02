@@ -328,12 +328,15 @@ export class ProductService {
       }
     }
 
-    // Get total count for pagination metadata. The category join is required
-    // because the search predicate may reference categories.search_name.
-    let countQuery = db
-      .select({ count: sql`count(*)` })
-      .from(products)
-      .leftJoin(categories, eq(products.categoryId, categories.id));
+    // Get total count for pagination metadata. The categories join is ONLY
+    // needed while searching (the ranked search predicate may reference
+    // categories.search_name). For the common default/filter case we count
+    // straight off `products` so a large catalogue is never joined row-for-row
+    // just to produce a total.
+    let countQuery = db.select({ count: sql`count(*)` }).from(products);
+    if (searchClause.active) {
+      countQuery = countQuery.leftJoin(categories, eq(products.categoryId, categories.id));
+    }
     if (whereConditions.length > 0) {
       if (whereConditions.length === 1) {
         countQuery = countQuery.where(whereConditions[0]);

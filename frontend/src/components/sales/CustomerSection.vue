@@ -141,68 +141,85 @@ defineExpose({
 <style scoped lang="scss">
 .customer-band {
   flex: 0 0 auto;
-  padding: 8px 12px;
+  padding: 10px 12px;
   border-bottom: 1px solid rgba(var(--v-theme-on-surface), 0.07);
-
-  &__row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-height: 44px;
-  }
+  background: rgba(var(--v-theme-surface-variant), 0.12);
 
   &__label {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: rgba(var(--v-theme-on-surface), 0.75);
-    flex: 0 0 auto;
+    font-size: 0.76rem;
+    font-weight: 800;
+    color: rgba(var(--v-theme-on-surface), 0.58);
+  }
+
+  &__row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
   }
 
   &__selector {
-    flex: 1 1 auto;
     min-width: 0;
   }
 }
 
 .customer-chip {
-  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 42px;
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 0;
-  padding: 4px 6px 4px 4px;
-  border-radius: 8px;
-  background-color: rgba(var(--v-theme-on-surface), 0.04);
+  padding: 6px 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(var(--v-theme-primary), 0.18);
+  background: rgba(var(--v-theme-primary), 0.055);
 
   &__name {
-    font-weight: 600;
+    min-width: 0;
     font-size: 0.88rem;
+    font-weight: 800;
   }
-  &__sep {
-    color: rgba(var(--v-theme-on-surface), 0.3);
-  }
+
+  &__sep,
   &__meta {
-    font-size: 0.8rem;
-    color: rgba(var(--v-theme-on-surface), 0.6);
+    flex: 0 0 auto;
+    font-size: 0.76rem;
+    color: rgba(var(--v-theme-on-surface), 0.58);
   }
+
   &__debt {
-    font-size: 0.8rem;
-    font-weight: 600;
+    flex: 0 0 auto;
+    font-size: 0.76rem;
+    font-weight: 800;
     color: rgb(var(--v-theme-error));
   }
 }
 
 .tier-toggle {
   flex: 0 0 auto;
-  gap: 10px;
+  border-radius: 10px;
+
+  :deep(.v-btn) {
+    min-width: 56px;
+    font-weight: 700;
+  }
 }
 
-// CustomerSelector contributes its own margin via global form polish — strip it
-// here so the band stays compact.
-.customer-band__selector :deep(.v-input) {
-  margin-bottom: 0;
+@media (max-width: 760px) {
+  .customer-band__row {
+    grid-template-columns: 1fr;
+  }
+
+  .tier-toggle {
+    width: 100%;
+
+    :deep(.v-btn) {
+      flex: 1;
+    }
+  }
 }
 </style>
+

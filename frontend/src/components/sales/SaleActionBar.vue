@@ -66,28 +66,31 @@ defineEmits(['cancel', 'submit']);
 <style scoped lang="scss">
 .action-bar {
   flex: 0 0 auto;
-  height: 64px;
+  min-height: 68px;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 14px;
-  background-color: rgb(var(--v-theme-surface));
+  padding: 10px 14px;
   border: 1px solid rgba(var(--v-theme-on-surface), 0.1);
-  border-radius: 10px;
+  border-radius: 14px;
+  background: rgb(var(--v-theme-surface));
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.035);
 
   &__spacer {
     flex: 1;
   }
 
   &__reason {
+    max-width: 340px;
     display: flex;
     align-items: center;
     gap: 6px;
     font-size: 0.78rem;
-    color: rgba(var(--v-theme-on-surface), 0.65);
+    color: rgba(var(--v-theme-on-surface), 0.66);
   }
 
   &__total {
+    min-width: 130px;
     display: flex;
     flex-direction: column;
     align-items: flex-end;
@@ -96,19 +99,22 @@ defineEmits(['cancel', 'submit']);
 
   &__total-label {
     font-size: 0.68rem;
-    color: rgba(var(--v-theme-on-surface), 0.55);
+    font-weight: 700;
+    color: rgba(var(--v-theme-on-surface), 0.52);
   }
 
   &__total-value {
-    font-size: 1.15rem;
-    font-weight: 800;
+    font-size: 1.22rem;
+    font-weight: 950;
     color: rgb(var(--v-theme-primary));
     font-variant-numeric: tabular-nums;
   }
 
   &__create {
-    height: 44px !important;
-    min-width: 168px;
+    min-width: 178px;
+    height: 46px !important;
+    border-radius: 12px;
+    font-weight: 900;
   }
 }
 
@@ -120,25 +126,39 @@ defineEmits(['cancel', 'submit']);
 
 .kbd {
   margin-inline-start: 8px;
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-size: 0.65rem;
-  font-weight: 600;
-  background-color: rgba(var(--v-theme-on-surface), 0.1);
-  color: rgba(var(--v-theme-on-surface), 0.6);
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 0.64rem;
+  font-weight: 800;
+  background: rgba(var(--v-theme-on-surface), 0.1);
+  color: rgba(var(--v-theme-on-surface), 0.62);
 
   &--light {
-    background-color: rgba(255, 255, 255, 0.22);
+    background: rgba(255, 255, 255, 0.22);
     color: #fff;
   }
 }
 
-@media (max-width: 700px) {
+@media (max-width: 760px) {
+  .action-bar {
+    flex-wrap: wrap;
+    height: auto;
+  }
+
   .action-bar__reason {
     display: none;
   }
+
+  .action-bar__total {
+    order: -1;
+    width: 100%;
+    align-items: stretch;
+  }
+
   .action-bar__create {
-    min-width: 130px;
+    flex: 1;
+    min-width: 150px;
   }
 }
 </style>
+
